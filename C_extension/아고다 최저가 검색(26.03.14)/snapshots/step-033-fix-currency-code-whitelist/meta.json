@@ -1,0 +1,8 @@
+﻿{
+    "name":  "step-033-fix-currency-code-whitelist",
+    "note":  "Stop treating airport or route codes like ICN as currency codes; only recognize known currency codes and keep Agoda result currency aligned with KRW defaults.",
+    "createdAt":  "2026-03-15T10:09:28+09:00",
+    "files":  [
+
+              ]
+}

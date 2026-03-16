@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-021-version-1-3-mark",
+    "note":  "Version 1.3 baseline: stable parallel scanner with concurrency 3, verified numeric cids, hybrid page readiness, and strict Korean price anchors.",
+    "createdAt":  "2026-03-15T00:05:02+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

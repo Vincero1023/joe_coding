@@ -1,0 +1,8 @@
+﻿{
+    "name":  "step-034-ignore-flight-widget-baseline-price",
+    "note":  "Exclude flight and transport widgets like ICN-PEK passenger fare blocks from Agoda baseline price extraction, and prefer lower amounts on tied 시작가 candidates.",
+    "createdAt":  "2026-03-15T10:19:12+09:00",
+    "files":  [
+
+              ]
+}

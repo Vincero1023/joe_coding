@@ -1,0 +1,49 @@
+20251127-212423 - backup before replacing with content(date-only-success).js
+20251127-212713 - backup before date-flow update (yeyak tab)
+20251127-213429 - backup after yeyak tab date flow + reset/tab logic
+20251127-213612 - backup after publish anchor log fix
+20251127-214418 - backup before restoring publish btn block
+20251127-214958 - backup after fixing pressKey comment/runSequence syntax
+20251127-215157 - backup before fixing alert messages
+20251127-215312 - backup after fixing alert messages (publish/category)
+20251127-215859 - backup after publish btn retry logic
+20251127-220054 - backup before publish button priority tweak
+20251127-220201 - backup after publish button priority + fix extra brace
+20251127-220628 - backup before baseline reset
+20251127-221120 - backup after baseline restore + new date/time flow
+20251127-221349 - backup after fixing alert messages
+20251127-222616 - backup after publish button retry + selector scorer
+20251127-222916 - backup before category selection rework
+20251127-223737 - backup after category focus/enter selection rewrite
+20251127-224247 - backup publish-btn dropdown success (before category fix)
+20251127-224613 - backup after category select scroll/focus enter
+20251127-224848 - backup after category click select
+20251127-225101 - backup after category enter selection (no esc)
+20251127-225425 - backup after removing duplicate publish Enter
+20251127-225854 - backup after revert + cat enter fix + remove double enter
+20251127-230051 - backup after cat click-only selection
+20251127-230417 - backup before cat dropdown li target
+20251127-230549 - backup after cat menu class targeting
+20251127-230933 - backup after cat menu direct label click+enter
+20251127-231050 - backup after category selection success
+20251127-231614 - backup after date picker direct click enter
+20251127-233654 - backup after date class targeting
+20251127-234924 - backup after ui-datepicker click enter selection
+20251127-235355 - backup after date month move wait tweak
+20251127-235651 - backup after date day fallback
+20251127-235926 - backup after date retry wait and fallback
+20251128-000438 - backup after date button re-query loop
+20251128-000631 - backup after date input setNativeValue + click
+20251128-002541 - backup after keyboard date flow reset
+20251128-004114 - pre-clean snapshot from 20251127-231050 restore
+20251128-005621 - backup after full refactor (robust selectors + keyboard flow)
+20251128-011053 - backup before publish keyword/date fix
+20251128-011223 - backup after publish keyword/date rewrite
+20251128-012110 - backup after fixing korean strings, category selector, date button
+20251128-013728 - backup before category exact match + date selector broadening
+20251128-014136 - backup after category input click + date find broad
+20251128-014758 - backup after full rewrite fix strings + time select fallback
+20251128-015618 - backup after date quick buttons + direct set
+20251128-015837 - backup after time select via tab pick
+20251128-020828 - backup after manual prompt + clean korean
+20251128-021101 - backup after time select numeric filter

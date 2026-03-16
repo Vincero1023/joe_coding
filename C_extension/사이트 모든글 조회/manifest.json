@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "WP Benchmark Analyzer",
+  "version": "0.2.0",
+  "description": "Analyze publicly exposed WordPress URLs, titles, keyword patterns, and monetization signals.",
+  "action": {
+    "default_title": "WP Benchmark Analyzer",
+    "default_popup": "popup.html"
+  },
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ]
+}

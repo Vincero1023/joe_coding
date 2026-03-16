@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-008-version-1-0-catalog-rules",
+    "note":  "Save version 1.0 rollback point and replace catalog rules with the new campaign sets",
+    "createdAt":  "2026-03-14T22:06:07+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

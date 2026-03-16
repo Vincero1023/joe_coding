@@ -1,0 +1,8 @@
+﻿{
+    "name":  "step-031-guided-scope-price-fallback",
+    "note":  "When Agoda price attributes appear as 0 first, fall back to scoped/page snippets around 시작가 or 1박 and continue as soon as a real amount is visible.",
+    "createdAt":  "2026-03-15T09:59:45+09:00",
+    "files":  [
+
+              ]
+}

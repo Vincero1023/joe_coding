@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WP Benchmark Analyzer</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app">
+    <header class="hero">
+      <p class="eyebrow">WordPress Benchmark Analyzer</p>
+      <h1>수익화 벤치마킹</h1>
+      <p class="subcopy">공개 워드프레스 데이터를 기반으로 돈 되는 키워드, 머니페이지, 제목 공식, 기회 점수를 압축해 보여줍니다.</p>
+    </header>
+
+    <section class="panel">
+      <label class="label" for="siteUrl">사이트 주소</label>
+      <div class="input-row">
+        <input id="siteUrl" name="siteUrl" type="url" inputmode="url" placeholder="https://example.com" autocomplete="off">
+        <button id="useCurrentTab" type="button" class="ghost">현재 탭</button>
+      </div>
+
+      <div class="input-row secondary-row">
+        <label class="label compact" for="analysisLimit">본문 분석 수</label>
+        <select id="analysisLimit" name="analysisLimit">
+          <option value="40">40개</option>
+          <option value="80" selected>80개</option>
+          <option value="120">120개</option>
+          <option value="250">250개</option>
+        </select>
+      </div>
+
+      <div class="action-row">
+        <button id="collectButton" type="button" class="primary">분석 실행</button>
+        <button id="copyButton" type="button" class="ghost" disabled>표 복사</button>
+        <button id="downloadButton" type="button" class="ghost" disabled>TSV 저장</button>
+        <button id="jsonButton" type="button" class="ghost" disabled>JSON 저장</button>
+      </div>
+      <p id="status" class="status">대기 중</p>
+    </section>
+
+    <section class="metrics-grid">
+      <article class="metric-card">
+        <span class="metric-label">수집 / 분석</span>
+        <strong id="metricCoverage" class="metric-value metric-text">0 / 0</strong>
+      </article>
+      <article class="metric-card">
+        <span class="metric-label">상위 수익 키워드</span>
+        <strong id="metricCommercial" class="metric-value metric-text">-</strong>
+      </article>
+      <article class="metric-card">
+        <span class="metric-label">머니페이지 수</span>
+        <strong id="metricMoneyPages" class="metric-value">0</strong>
+      </article>
+      <article class="metric-card">
+        <span class="metric-label">추천 제목 공식</span>
+        <strong id="metricFormula" class="metric-value metric-text">-</strong>
+      </article>
+    </section>
+
+    <section class="panel summary-panel">
+      <div class="summary-header">
+        <h2>수집 상태</h2>
+        <span id="countBadge" class="badge">0 / 0</span>
+      </div>
+      <ul id="sourceList" class="source-list"></ul>
+      <ul id="noteList" class="note-list"></ul>
+    </section>
+
+    <section class="panel">
+      <div class="tab-row" role="tablist" aria-label="분석 결과">
+        <button class="tab-button active" id="tabKeywords" data-tab="keywords" type="button" role="tab" aria-selected="true">키워드</button>
+        <button class="tab-button" id="tabMoney" data-tab="money" type="button" role="tab" aria-selected="false">머니페이지</button>
+        <button class="tab-button" id="tabFormula" data-tab="formula" type="button" role="tab" aria-selected="false">제목 공식</button>
+        <button class="tab-button" id="tabOpportunity" data-tab="opportunity" type="button" role="tab" aria-selected="false">기회 점수</button>
+      </div>
+
+      <section id="panelKeywords" class="tab-panel active" data-panel="keywords">
+        <div class="summary-header">
+          <h2>수익형 키워드</h2>
+          <span class="hint">상업성 점수 기준</span>
+        </div>
+        <ol id="commercialKeywordList" class="ranked-list"></ol>
+        <div class="summary-header section-divider">
+          <h2>카테고리 축</h2>
+          <span class="hint">반복되는 주제군</span>
+        </div>
+        <ul id="categoryList" class="ranked-list compact-list"></ul>
+      </section>
+
+      <section id="panelMoney" class="tab-panel" data-panel="money" hidden>
+        <div class="summary-header">
+          <h2>머니페이지 후보</h2>
+          <span class="hint">전환 신호 종합 점수</span>
+        </div>
+        <ol id="moneyPageList" class="ranked-list"></ol>
+      </section>
+
+      <section id="panelFormula" class="tab-panel" data-panel="formula" hidden>
+        <div class="summary-header">
+          <h2>제목 공식</h2>
+          <span class="hint">따라 쓰기 쉬운 구조</span>
+        </div>
+        <ol id="formulaList" class="ranked-list"></ol>
+        <div class="summary-header section-divider">
+          <h2>제목 패턴 빈도</h2>
+          <span class="hint">사이트의 기본 말투</span>
+        </div>
+        <ul id="patternList" class="ranked-list compact-list"></ul>
+      </section>
+
+      <section id="panelOpportunity" class="tab-panel" data-panel="opportunity" hidden>
+        <div class="summary-header">
+          <h2>기회 점수</h2>
+          <span class="hint">수익성 + 희소성</span>
+        </div>
+        <ol id="opportunityScoreList" class="ranked-list"></ol>
+        <div class="summary-header section-divider">
+          <h2>핵심 인사이트</h2>
+          <span class="hint">바로 볼 포인트</span>
+        </div>
+        <ul id="opportunityList" class="ranked-list compact-list"></ul>
+      </section>
+    </section>
+
+    <section class="panel">
+      <div class="summary-header">
+        <h2>내보내기 미리보기</h2>
+        <span class="hint">머니페이지 점수 포함 TSV</span>
+      </div>
+      <textarea id="resultBox" spellcheck="false" readonly placeholder="분석 결과가 여기에 표시됩니다."></textarea>
+    </section>
+  </main>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

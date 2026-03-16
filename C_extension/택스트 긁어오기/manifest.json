@@ -1,0 +1,24 @@
+﻿{
+  "manifest_version": 3,
+  "name": "텍스트 긁어오기",
+  "version": "1.0.0",
+  "description": "클릭한 영역을 캡처해 HTML/TXT 형태로 저장할 수 있습니다.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "downloads",
+    "storage",
+    "tabs",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "텍스트 긁어오기"
+  }
+}

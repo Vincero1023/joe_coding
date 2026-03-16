@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-020-reduce-concurrency-to-3",
+    "note":  "Reduce parallel scan worker/tab count from 6 to 3 to lower simultaneous Agoda page load pressure.",
+    "createdAt":  "2026-03-14T23:58:05+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

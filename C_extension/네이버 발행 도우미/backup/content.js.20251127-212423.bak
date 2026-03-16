@@ -1,0 +1,362 @@
+﻿// === ?ㅼ씠踰?釉붾줈洹??ㅻ쭏??諛쒗뻾湲?(Final Chaining Fix) ===
+
+// ----------------------------------------------------
+// [0] ?좏떥由ы떚
+// ----------------------------------------------------
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ?띿뒪?몃줈 ?붿냼 李얘린 (Top Frame)
+function findElementByText(text) {
+    const doc = window.top.document; 
+    const cleanTarget = text.replace(/\s/g, '');
+    const all = doc.querySelectorAll('label, span, strong, b, div, p, h3, h4, li, a, button');
+    
+    for (let el of all) {
+        if (el.innerText.replace(/\s/g, '').includes(cleanTarget) && el.offsetParent !== null) {
+            if (el.childElementCount === 0) return el;
+        }
+    }
+    return null;
+}
+
+// ??Tab) ?대룞: 湲곗? ?붿냼 諛붾줈 ?ㅼ쓬??'?낅젰 媛???붿냼' 諛섑솚
+function getNextTabbable(anchor) {
+    if (!anchor) return null;
+    const doc = window.top.document;
+    
+    // ??媛?ν븳 紐⑤뱺 ?붿냼 (?붾㈃??蹂댁씠??寃껊쭔)
+    const all = Array.from(doc.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+        .filter(el => el.offsetWidth > 0 && el.offsetHeight > 0 && !el.disabled);
+
+    for (let el of all) {
+        if (anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
+            return el;
+        }
+    }
+    return null;
+}
+
+// ?ㅻ낫???꾨Ⅴ湲?function pressKey(element, key = 'Enter') {
+    if (!element) return;
+    element.focus();
+
+    let code = 13;
+    if (key === 'Space') code = 32;
+    if (key === 'ArrowLeft') code = 37;
+    if (key === 'ArrowRight') code = 39;
+
+    const opts = { key: key, code: key, keyCode: code, which: code, bubbles: true, cancelable: true, view: window };
+    
+    element.dispatchEvent(new KeyboardEvent('keydown', opts));
+    element.dispatchEvent(new KeyboardEvent('keypress', opts));
+    element.dispatchEvent(new KeyboardEvent('keyup', opts));
+    
+    if(key === 'Enter' || key === 'Space') element.click();
+}
+
+function setNativeValue(element, value) {
+  if (!element || !(element instanceof window.HTMLInputElement)) {
+      console.error("???낅젰 媛?ν븳 ?붿냼媛 ?꾨떃?덈떎:", element);
+      return;
+  }
+  
+  const proto = window.HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+  if (setter) setter.call(element, value);
+  else element.value = value;
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function setFieldValue(element, value) {
+  if (!element) return false;
+  const strVal = String(value);
+
+  if (element.tagName === 'SELECT') {
+      const option = Array.from(element.options || []).find(opt => opt.value === strVal || opt.text.trim() === strVal);
+      if (option) {
+          element.value = option.value;
+          element.dispatchEvent(new Event('input', { bubbles: true }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+      }
+      return false;
+  }
+
+  if (element instanceof window.HTMLInputElement || element instanceof window.HTMLTextAreaElement) {
+      setNativeValue(element, strVal);
+      return true;
+  }
+
+  return false;
+}
+
+// ----------------------------------------------------
+// [1] ?ㅽ뻾 由ъ뒪??// ----------------------------------------------------
+document.addEventListener('keydown', (e) => {
+  if (e.altKey && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+    e.preventDefault();
+    window.top.postMessage({ type: "REQ_PUBLISH_EXTENSION" }, "*");
+  }
+});
+
+window.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "REQ_PUBLISH_EXTENSION" && window === window.top) {
+      runSequence();
+  }
+});
+
+chrome.runtime.onMessage.addListener((request) => {
+  if (request.action === "TRIGGER_PUBLISH_BY_POPUP" && window === window.top) {
+      runSequence();
+  }
+});
+
+// ----------------------------------------------------
+// [2] 硫붿씤 濡쒖쭅
+// ----------------------------------------------------
+async function runSequence() {
+  const topDoc = window.top.document;
+
+  // [1] 諛쒗뻾 踰꾪듉
+  const publishSelectors = [
+      '.btn_publish',
+      'button.btn_publish',
+      'a.btn_publish',
+      'button[class*="publish"]',
+      'a[class*="publish"]',
+      'button[id*="publish"]',
+      'a[id*="publish"]',
+      '[aria-label*="諛쒗뻾"]',
+      '[data-click-code*="publish"]',
+      'input[type="submit"][value*="諛쒗뻾"]',
+      'button[class*="ogreen"]',
+      'button[class*="write"]',
+      'button[class*="submit"]',
+      'button[class*="complete"]'
+  ];
+
+  const isVisible = (el) => {
+      if (!el) return false;
+      const rects = el.getClientRects();
+      if (!rects || rects.length === 0) return false;
+      const style = window.top.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetWidth > 0 && el.offsetHeight > 0;
+  };
+
+  const tryFindPublish = () => {
+      // selectors first
+      for (const sel of publishSelectors) {
+          const nodes = topDoc.querySelectorAll(sel);
+          for (const n of nodes) {
+              if (isVisible(n)) return n;
+          }
+      }
+
+      // button-like elements with text
+      const keywords = ['諛쒗뻾', '?깅줉', '?꾨즺'];
+      const btnLike = topDoc.querySelectorAll('button, a, div[role="button"], input[type="button"], input[type="submit"]');
+      for (const b of btnLike) {
+          const text = (b.innerText || b.value || '').replace(/\\s/g, '');
+          if (!text) continue;
+          if (keywords.some(k => text.includes(k)) && isVisible(b)) return b;
+      }
+
+      // last resort: any visible element with text
+      const allNodes = topDoc.querySelectorAll('*');
+      for (const el of allNodes) {
+          const text = (el.innerText || '').replace(/\\s/g, '');
+          if (!text) continue;
+          if (keywords.some(k => text.includes(k)) && isVisible(el)) return el;
+      }
+      return null;
+  };
+
+  let publishBtn = null;
+  for (let i = 0; i < 6 && !publishBtn; i++) {
+      publishBtn = tryFindPublish();
+      if (!publishBtn) await sleep(800);
+  }
+
+  if (!publishBtn) return alert("??諛쒗뻾 踰꾪듉??紐?李얠븯?듬땲??");
+
+  console.log("?⑨툘 [1] 諛쒗뻾 踰꾪듉 ?뷀꽣");
+  pressKey(publishBtn, 'Enter');
+
+  // ?ㅼ젙 濡쒕뱶
+  const data = await chrome.storage.local.get(['settings', 'currentProfile']);
+  const settings = (data.settings && data.settings[data.currentProfile || 'default']) || {};
+  if (!settings.category) return alert("???ㅼ젙 ?놁쓬");
+
+  // ?좎쭨 怨꾩궛
+  const [sh, sm] = (settings.startTime || '09:00').split(':').map(Number);
+  let targetDate = new Date();
+  if(settings.lastScheduled) {
+      const last = new Date(settings.lastScheduled);
+      const interval = parseInt(settings.interval || 60);
+      const variance = interval * 0.2; 
+      const randomMin = (Math.random() * (variance * 2)) - variance;
+      last.setMinutes(last.getMinutes() + interval + randomMin);
+      targetDate = last;
+  } else {
+      targetDate.setHours(sh, sm);
+      if(targetDate < new Date()) targetDate.setDate(targetDate.getDate() + 1);
+  }
+  
+  // ???  const currentProfile = data.currentProfile || 'default';
+  if(!data.settings[currentProfile]) data.settings[currentProfile] = {};
+  data.settings[currentProfile].lastScheduled = targetDate.toISOString();
+  await chrome.storage.local.set({ settings: data.settings });
+
+
+  // [2] ?앹뾽 ?湲?  console.log("???앹뾽 ?湲?(2珥?...");
+  await sleep(2000);
+
+  // [3] 移댄뀒怨좊━ ?ㅼ젙
+  const catLabel = findElementByText('移댄뀒怨좊━');
+  if (catLabel) {
+      const dropdown = getNextTabbable(catLabel); // Tab 1
+      if (dropdown) {
+          console.log("?⑨툘 [2] ?쒕∼?ㅼ슫 ?뷀꽣");
+          pressKey(dropdown, 'Enter');
+          await sleep(1000);
+          
+          const catItem = findElementByText(settings.category);
+          if (catItem) {
+              console.log(`?⑨툘 [3] ??ぉ ?좏깮: ${settings.category}`);
+              pressKey(catItem, 'Enter');
+              console.log("??由щ젋?붾쭅 ?湲?(2.5珥?...");
+              await sleep(2500);
+          }
+      }
+  }
+
+  // [4] ?덉빟 ?ㅼ젙 (?ъ슜???? "?덉빟" ?⑥뼱?먯꽌 Tab 1??-> ?좎쭨 踰꾪듉)
+  console.log("?뵇 '?덉빟' ?쇰꺼 寃??);
+  let anchor = findElementByText('?덉빟') || findElementByText('?덉빟?쒓컙') || findElementByText('諛쒗뻾?쒓컙');
+
+  if (anchor) {
+      // Tab 1: ?덉빟 ?쇰뵒?ㅼ뿉??諛붾줈 ?ㅼ쓬 ?ъ빱?ㅺ? ?좎쭨 踰꾪듉
+      const dateBtn = getNextTabbable(anchor);
+
+      if (dateBtn) {
+          console.log("?⑨툘 [4] ?좎쭨 踰꾪듉 諛쒓껄 (?덉빟 ?쇰꺼?먯꽌 Tab 1?? -> ?ㅼ젙 ?쒖옉");
+          
+          // ?좎쭨 ?ㅼ젙 濡쒖쭅 ?ㅽ뻾
+          await setDateManual(dateBtn, targetDate);
+          
+          // 4. ?쒓컙 ?낅젰 (?좎쭨 ?ㅼ젙 ???ъ빱?ㅺ? ?щ젰 ?댁뿉 ?⑥븘 ?덉쓣 ???덉쓬)
+          const hourInput = getNextTabbable(window.top.document.activeElement || dateBtn); // Tab ?ㅼ쓬
+          const minInput = getNextTabbable(hourInput); // ?ㅼ쓬
+
+          if (hourInput && minInput) {
+              const HH = targetDate.getHours();
+              const mm = Math.round(targetDate.getMinutes() / 10) * 10;
+              console.log(`?⑨툘 [5] ?쒓컙 ?낅젰: ${HH}:${mm}`);
+              
+              const okH = setFieldValue(hourInput, String(HH).padStart(2,'0'));
+              const okM = setFieldValue(minInput, String(mm).padStart(2,'0'));
+              if (!okH || !okM) {
+                  console.log("?좑툘 ?쒓컙/遺??낅젰 ?ㅽ뙣 (?붿냼 ????뺤씤 ?꾩슂)");
+              }
+          } else {
+              console.log("?좑툘 ?쒓컙 ?낅젰移??먯깋 ?ㅽ뙣");
+          }
+      } else {
+          console.log("?좑툘 Tab 2踰??꾩튂媛 ?좎쭨 踰꾪듉???꾨떃?덈떎.");
+      }
+  } else {
+      console.log("?좑툘 '諛쒗뻾 ?쒓컙' 湲??紐?李얠쓬");
+  }
+
+  // [5] 理쒖쥌 ?뺤씤
+  await sleep(1000);
+  const confirmMsg = `
+  [?ㅼ젙 ?뺤씤]
+  移댄뀒怨좊━: ${settings.category}
+  ?덉빟?쒓컙: ${targetDate.getMonth()+1}/${targetDate.getDate()} ${targetDate.getHours()}:${Math.round(targetDate.getMinutes()/10)*10}
+  
+  諛쒗뻾?좉퉴??`;
+
+  if(confirm(confirmMsg)) {
+      const allBtns = topDoc.querySelectorAll('button');
+      let finalBtn = null;
+      let maxTop = 0;
+      for(let b of allBtns) {
+          if(b.innerText.trim() === '諛쒗뻾' && !b.className.includes('btn_publish') && b.offsetParent !== null) {
+              const rect = b.getBoundingClientRect();
+              if(rect.top > maxTop) { maxTop = rect.top; finalBtn = b; }
+          }
+      }
+      if(finalBtn) {
+          console.log("?? 理쒖쥌 諛쒗뻾 ?뷀꽣!");
+          pressKey(finalBtn, 'Enter');
+      }
+  }
+}
+
+// ?좎쭨 ?ㅼ젙 (?ъ슜??留ㅻ돱??
+async function setDateManual(dateBtn, targetDate) {
+    console.log("?⑨툘 ?좎쭨 踰꾪듉 ?뷀꽣 (?щ젰 ?닿린)");
+    pressKey(dateBtn, 'Enter');
+    await sleep(500);
+
+    const topDoc = window.top.document;
+
+    // 1) ?좎쭨 珥덇린?? [?? + [Space] x4 (?ㅻ뒛???ы븿???щ줈 ?대룞)
+    const resetTarget = topDoc.activeElement;
+    if (resetTarget) {
+        console.log("?⑨툘 珥덇린?? [?? + [Space] x4");
+        for(let i=0; i<4; i++) {
+            pressKey(resetTarget, 'ArrowLeft');
+            await sleep(80);
+            pressKey(resetTarget, 'Space');
+            await sleep(120);
+        }
+    }
+
+    // 2) 珥덇린??吏곹썑 Enter濡??ъ빱???뺤젙
+    console.log("?⑨툘 珥덇린?????뷀꽣");
+    if(topDoc.activeElement) pressKey(topDoc.activeElement, 'Enter');
+    await sleep(150);
+
+    // 3) 紐⑺몴 ?щ줈 ?대룞 (誘몃옒 ?? Tab -> Space 濡???+1)
+    const today = new Date();
+    const monthDiff = (targetDate.getFullYear() - today.getFullYear()) * 12 + (targetDate.getMonth() - today.getMonth());
+    if (monthDiff > 0) {
+        console.log(`?⑨툘 ???욎쑝濡??대룞 x ${monthDiff}`);
+        for(let m=0; m<monthDiff; m++) {
+            const nextEl = getNextTabbable(topDoc.activeElement);
+            if (nextEl) {
+                nextEl.focus();
+                pressKey(nextEl, 'Space');
+                await sleep(200);
+            }
+        }
+    }
+
+    // 4) ?좎쭨 ?좏깮 (???대룞 ??Space)
+    const todayDay = today.getDate();
+    const targetDay = targetDate.getDate();
+    let tabCount;
+    if (monthDiff === 0) {
+        tabCount = (targetDay - todayDay) + 2; // 媛숈? ?? ?ㅻ뒛=2, ?댁씪=3 ...
+    } else {
+        tabCount = targetDay + 1; // ?ㅻⅨ ?? ?먰븯???좎쭨+1
+    }
+    tabCount = Math.max(1, tabCount);
+
+    console.log(`?⑨툘 ?좎쭨 ???대룞 x ${tabCount}`);
+
+    let currentEl = topDoc.activeElement;
+    for(let i=0; i<tabCount; i++) {
+        currentEl = getNextTabbable(currentEl);
+        if(currentEl) currentEl.focus();
+    }
+
+    if(topDoc.activeElement) {
+        pressKey(topDoc.activeElement, 'Space');
+    }
+    
+    await sleep(300);
+}
+

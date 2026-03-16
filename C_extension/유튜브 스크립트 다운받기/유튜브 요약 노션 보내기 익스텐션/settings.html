@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>설정 - YouTube Notion 수집기</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f8f9fa;
+      padding: 40px;
+    }
+    
+    .container {
+      max-width: 700px;
+      margin: 0 auto;
+      background: white;
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    h1 {
+      color: #202124;
+      margin-bottom: 10px;
+    }
+    
+    .subtitle {
+      color: #5f6368;
+      margin-bottom: 30px;
+    }
+    
+    .section {
+      margin-bottom: 30px;
+    }
+    
+    .section h2 {
+      font-size: 16px;
+      color: #202124;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #e8eaed;
+    }
+    
+    .setting-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px 0;
+      border-bottom: 1px solid #f1f3f4;
+    }
+    
+    .setting-label {
+      flex: 1;
+    }
+    
+    .setting-label strong {
+      display: block;
+      color: #202124;
+      margin-bottom: 5px;
+    }
+    
+    .setting-label span {
+      font-size: 12px;
+      color: #5f6368;
+    }
+    
+    .setting-input {
+      flex: 0 0 200px;
+    }
+    
+    input[type="text"] {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: monospace;
+    }
+    
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #1a73e8;
+    }
+    
+    .btn {
+      padding: 10px 24px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: #1a73e8;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #1557b0;
+    }
+    
+    .btn-secondary {
+      background: #f1f3f4;
+      color: #202124;
+      margin-right: 10px;
+    }
+    
+    .btn-secondary:hover {
+      background: #e8eaed;
+    }
+    
+    .button-group {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 30px;
+    }
+    
+    .status {
+      padding: 12px;
+      border-radius: 6px;
+      margin-top: 20px;
+      text-align: center;
+      display: none;
+    }
+    
+    .status.show {
+      display: block;
+    }
+    
+    .status.success {
+      background: #e6f4ea;
+      color: #137333;
+    }
+    
+    .help-text {
+      font-size: 12px;
+      color: #5f6368;
+      margin-top: 10px;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚙️ 설정</h1>
+    <p class="subtitle">단축키와 Webhook URL을 설정하세요</p>
+    
+    <!-- Webhook URL 설정 -->
+    <div class="section">
+      <h2>🔗 n8n Webhook URL</h2>
+      <div class="setting-item">
+        <div class="setting-label">
+          <strong>Webhook URL</strong>
+          <span>n8n 워크플로우의 Webhook URL을 입력하세요</span>
+        </div>
+        <div class="setting-input">
+          <input type="text" id="webhook-url" placeholder="https://...">
+        </div>
+      </div>
+      <div class="help-text">
+        💡 n8n에서 Webhook 노드를 생성하고 URL을 복사하여 붙여넣으세요
+      </div>
+    </div>
+    
+    <!-- 단축키 설정 -->
+    <div class="section">
+      <h2>⌨️ 단축키 설정</h2>
+      
+      <div class="setting-item">
+        <div class="setting-label">
+          <strong>현재 영상 저장</strong>
+          <span>지금 보고 있는 YouTube 영상을 저장합니다</span>
+        </div>
+        <div class="setting-input">
+          <input type="text" id="shortcut-1" placeholder="Ctrl+Shift+Y">
+        </div>
+      </div>
+      
+      <div class="setting-item">
+        <div class="setting-label">
+          <strong>재생목록 저장</strong>
+          <span>재생목록의 모든 영상을 저장합니다</span>
+        </div>
+        <div class="setting-input">
+          <input type="text" id="shortcut-2" placeholder="Ctrl+Shift+P">
+        </div>
+      </div>
+      
+      <div class="setting-item">
+        <div class="setting-label">
+          <strong>채널 구독 (신규만)</strong>
+          <span>채널의 신규 영상만 자동 수집합니다</span>
+        </div>
+        <div class="setting-input">
+          <input type="text" id="shortcut-3" placeholder="Ctrl+Shift+N">
+        </div>
+      </div>
+      
+      <div class="setting-item">
+        <div class="setting-label">
+          <strong>채널 구독 (전체)</strong>
+          <span>채널의 모든 영상을 수집합니다</span>
+        </div>
+        <div class="setting-input">
+          <input type="text" id="shortcut-4" placeholder="Ctrl+Shift+A">
+        </div>
+      </div>
+      
+      <div class="help-text">
+        💡 단축키 형식: Ctrl+Shift+[키] 또는 Alt+Shift+[키]<br>
+        Mac에서는 Ctrl 대신 Command를 사용합니다
+      </div>
+    </div>
+    
+    <!-- 버튼 -->
+    <div class="button-group">
+      <button id="reset" class="btn btn-secondary">초기화</button>
+      <button id="save" class="btn btn-primary">저장</button>
+    </div>
+    
+    <!-- 상태 메시지 -->
+    <div id="status" class="status"></div>
+  </div>
+  
+  <script src="settings.js"></script>
+</body>
+</html>

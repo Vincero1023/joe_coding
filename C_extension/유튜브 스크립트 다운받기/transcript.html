@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YouTube Transcript Tools</title>
+    <link rel="stylesheet" href="transcript.css">
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <h1 id="title">YouTube Transcript</h1>
+        <p id="meta"></p>
+        <p><a id="videoLink" href="#" target="_blank" rel="noreferrer noopener">Open Video</a></p>
+      </header>
+
+      <section id="promptSection" class="panel hidden">
+        <div class="panel-head">
+          <h2 id="promptHeading">AI Prompt</h2>
+          <div class="btn-group">
+            <button id="copyPrompt">Copy Prompt</button>
+            <button id="openGptSite">Open AI Site</button>
+          </div>
+        </div>
+        <pre id="promptText" class="content"></pre>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Transcript</h2>
+          <div class="btn-group">
+            <button id="copyTranscript">Copy All</button>
+            <button id="downloadTranscript">Download TXT</button>
+            <button id="downloadMarkdown">Download MD</button>
+          </div>
+        </div>
+        <pre id="transcriptText" class="content"></pre>
+      </section>
+
+      <section id="debugSection" class="panel hidden">
+        <div class="panel-head">
+          <h2>Debug</h2>
+        </div>
+        <pre id="debugText" class="content debug"></pre>
+      </section>
+
+      <p id="status" class="status"></p>
+    </main>
+    <script src="transcript.js" type="module"></script>
+  </body>
+</html>

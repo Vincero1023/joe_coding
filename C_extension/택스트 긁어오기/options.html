@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Text Copy Helper Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>Text Copy Helper Settings</h1>
+      <p class="lead">
+        Set your shortcut below. On any page, press that shortcut and click the target area once to
+        capture and download an HTML file immediately.
+      </p>
+
+      <section class="panel" aria-labelledby="shortcut-heading">
+        <h2 id="shortcut-heading">Capture Shortcut</h2>
+        <div class="shortcut-line">
+          <code id="shortcut-preview">Loading...</code>
+          <div class="buttons">
+            <button id="record-btn" type="button">Record Shortcut</button>
+            <button id="reset-btn" type="button">Reset Default</button>
+          </div>
+        </div>
+        <p id="status" class="status">Ready</p>
+        <ul>
+          <li>Click <strong>Record Shortcut</strong>, then press the key combination you want.</li>
+          <li>Press <code>Esc</code> to cancel recording mode.</li>
+          <li>Default shortcut: <code>Ctrl + Shift + H</code>.</li>
+          <li>Use at least one modifier key, or use a function key (F1-F12).</li>
+          <li>The shortcut is ignored while typing in inputs or editors.</li>
+        </ul>
+      </section>
+
+      <section class="panel mode-panel" aria-labelledby="mode-heading">
+        <h2 id="mode-heading">Capture Safety Mode</h2>
+        <div class="mode-options">
+          <label class="mode-option">
+            <input
+              type="radio"
+              name="capture-security-mode"
+              value="standard"
+            />
+            <span>
+              <strong>Standard mode</strong>
+              <span class="mode-desc">Apply unlock patch for higher capture success.</span>
+            </span>
+          </label>
+
+          <label class="mode-option">
+            <input type="radio" name="capture-security-mode" value="safe" checked />
+            <span>
+              <strong>Safe mode (test)</strong>
+              <span class="mode-desc">Skip unlock patch. Lower intrusion, but capture can be incomplete.</span>
+            </span>
+          </label>
+        </div>
+        <p id="mode-status" class="status">Current mode: Safe</p>
+      </section>
+    </main>
+
+    <script src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-019-strict-korean-anchors",
+    "note":  "Restrict guided price anchors to the user\u0027s exact rules: 시작가 then next amount, otherwise 1박 then previous amount. Avoid broad English from/per-night false positives.",
+    "createdAt":  "2026-03-14T23:37:50+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

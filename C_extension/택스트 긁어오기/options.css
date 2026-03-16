@@ -1,0 +1,155 @@
+:root {
+  color-scheme: light;
+  --bg: #f3f6fb;
+  --panel: #ffffff;
+  --line: #d6dce8;
+  --ink: #131720;
+  --subtle: #5f6a79;
+  --brand: #1358d8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+  color: var(--ink);
+  background: linear-gradient(135deg, #f8fbff 0%, #e9effa 100%);
+}
+
+.wrap {
+  width: min(920px, 100%);
+  margin: 0 auto;
+  padding: 30px 18px 44px;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 28px;
+}
+
+.lead {
+  margin: 0 0 24px;
+  color: var(--subtle);
+  line-height: 1.6;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 10px 26px rgba(14, 26, 49, 0.08);
+}
+
+.panel + .panel {
+  margin-top: 14px;
+}
+
+h2 {
+  margin: 0 0 14px;
+  font-size: 20px;
+}
+
+.shortcut-line {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+#shortcut-preview {
+  display: inline-block;
+  min-width: 220px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #f7f9fd;
+  font-size: 15px;
+}
+
+.buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+button {
+  border: 1px solid #bfcae0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #8fa5ca;
+}
+
+#record-btn {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+}
+
+.status {
+  margin: 0 0 8px;
+  color: #2f4668;
+  font-size: 13px;
+}
+
+ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--subtle);
+  line-height: 1.55;
+}
+
+.mode-options {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.mode-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #f8fafd;
+}
+
+.mode-option input[type="radio"] {
+  margin-top: 3px;
+}
+
+.mode-option strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.mode-desc {
+  display: block;
+  color: var(--subtle);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  h1 {
+    font-size: 24px;
+  }
+
+  #shortcut-preview {
+    min-width: 100%;
+  }
+}

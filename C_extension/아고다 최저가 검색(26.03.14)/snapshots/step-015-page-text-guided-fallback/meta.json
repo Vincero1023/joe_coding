@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-015-page-text-guided-fallback",
+    "note":  "Add whole-page visible-text fallback for exact 시작가/1박 guided price detection and relax price wait.",
+    "createdAt":  "2026-03-14T23:00:34+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

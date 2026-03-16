@@ -1,0 +1,261 @@
+// ==========================================================
+// Naver Blog Auto Publisher (robust selectors, keyboard-first)
+// Flow: publish button -> load settings -> category -> reservation -> date/time
+// ==========================================================
+
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+// Safely set value for React-controlled inputs
+function setNativeValue(el, value) {
+    if (!el || el.tagName !== "INPUT") return;
+    const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    const proto = Object.getPrototypeOf(el);
+    const protoSetter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+    (protoSetter || valueSetter)?.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+// Visible check
+const isVisible = (el) => el && el.offsetParent !== null && el.offsetWidth > 0 && el.offsetHeight > 0 && !el.disabled;
+
+// Find element by text within selector list
+function findElByText(selectors, text) {
+    const list = Array.isArray(selectors) ? selectors : [selectors];
+    for (const sel of list) {
+        const els = document.querySelectorAll(sel);
+        for (const el of els) {
+            if (!isVisible(el)) continue;
+            if ((el.innerText || "").replace(/\s/g, "").includes(text.replace(/\s/g, ""))) return el;
+        }
+    }
+    return null;
+}
+
+// Next tabbable after anchor
+function getNextTabbable(anchor) {
+    if (!anchor) return null;
+    const doc = window.top.document;
+    const all = Array.from(doc.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter(isVisible);
+    for (const el of all) {
+        if (anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) return el;
+    }
+    return null;
+}
+
+// Simulate keypress (keydown/keypress/keyup) with optional click on Enter/Space
+function pressKey(el, key = "Enter") {
+    if (!el) return;
+    el.focus();
+    const codes = { Enter: 13, Space: 32, ArrowLeft: 37, ArrowRight: 39 };
+    const code = codes[key] || key.charCodeAt?.(0) || 13;
+    const opts = { key, code: key, keyCode: code, which: code, bubbles: true, cancelable: true, view: window };
+    el.dispatchEvent(new KeyboardEvent("keydown", opts));
+    el.dispatchEvent(new KeyboardEvent("keypress", opts));
+    el.dispatchEvent(new KeyboardEvent("keyup", opts));
+    if (key === "Enter" || key === "Space") el.click();
+}
+
+// ----------------------------------------------------------
+// Triggers
+// ----------------------------------------------------------
+chrome.runtime.onMessage.addListener((req) => {
+    if (req.action === "TRIGGER_PUBLISH_BY_POPUP") runSequence();
+});
+
+document.addEventListener("keydown", (e) => {
+    if (e.altKey && e.shiftKey && (e.key === "p" || e.key === "P")) {
+        e.preventDefault();
+        runSequence();
+    }
+});
+
+// ----------------------------------------------------------
+// Main
+// ----------------------------------------------------------
+async function runSequence() {
+    const topDoc = window.top.document;
+    console.log("[run] runSequence start");
+
+    // Load settings
+    const data = await chrome.storage.local.get(["settings", "currentProfile"]);
+    const profile = data.currentProfile || "default";
+    const settings = (data.settings && data.settings[profile]) || {};
+    if (!settings.category) return alert("카테고리를 설정해주세요.");
+
+    // Target datetime
+    let targetDate = new Date();
+    if (settings.lastScheduled) {
+        const last = new Date(settings.lastScheduled);
+        const interval = parseInt(settings.interval || 60, 10);
+        const variance = interval * 0.1;
+        const randomMin = (Math.random() * variance * 2) - variance;
+        last.setMinutes(last.getMinutes() + interval + randomMin);
+        targetDate = last;
+    } else {
+        const [sh, sm] = (settings.startTime || "09:00").split(":").map(Number);
+        targetDate.setHours(sh, sm, 0, 0);
+        if (targetDate < new Date()) targetDate.setDate(targetDate.getDate() + 1);
+    }
+    data.settings = data.settings || {};
+    data.settings[profile] = settings;
+    settings.lastScheduled = targetDate.toISOString();
+    await chrome.storage.local.set({ settings: data.settings });
+
+    // Step 1: publish button
+    const publishBtn = findPublishButton(topDoc);
+    if (!publishBtn) return alert("발행 버튼을 찾지 못했습니다. 페이지 로드 상태를 확인해주세요.");
+    publishBtn.click();
+    await sleep(1500);
+
+    // Step 2: category
+    await selectCategory(topDoc, settings.category);
+
+    // Step 3: reservation toggle
+    const reserveLabel = findElByText(["label", "span", "div"], "예약");
+    if (reserveLabel) {
+        const ctl = reserveLabel.closest("label")?.querySelector("input") || reserveLabel.querySelector("input") || reserveLabel;
+        ctl.click();
+        await sleep(400);
+    }
+
+    // Step 4: date/time
+    await setDateTime(topDoc, targetDate);
+}
+
+// ----------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------
+function findPublishButton(doc) {
+    const selectors = [".publish_btn__m9KHH", ".btn_publish", "button", "[role='button']", "input[type='button']", "input[type='submit']"];
+    const keywords = ["발행", "발행하기", "예약발행", "예약", "등록", "출간", "publish"];
+    let best = null;
+    for (const sel of selectors) {
+        for (const el of doc.querySelectorAll(sel)) {
+            if (!isVisible(el)) continue;
+            const text = (el.innerText || el.value || el.getAttribute("aria-label") || "").trim();
+            if (keywords.some((k) => text.includes(k))) { best = el; break; }
+        }
+        if (best) break;
+    }
+    return best;
+}
+
+async function selectCategory(doc, category) {
+    console.log("[cat] select:", category);
+    const dropdown = doc.querySelector('[class*="selectbox_button"], .input_select__') || findElByText("button", "카테고리");
+    if (!dropdown) return console.warn("category dropdown not found");
+    dropdown.click();
+    await sleep(500);
+
+    const norm = (s) => (s || "").replace(/\s/g, "");
+    let option = null;
+    const layer = doc.querySelector(".option_list_layer__YX1Tq");
+    if (layer) {
+        const textEl = Array.from(layer.querySelectorAll(".item__sAGX9 .text__sraQE")).find((el) => norm(el.innerText).includes(norm(category)));
+        if (textEl) option = textEl.closest(".item__sAGX9") || textEl.closest("label") || textEl;
+    }
+    if (!option) {
+        option = Array.from(doc.querySelectorAll("li, button, a, div")).find(
+            (el) => isVisible(el) && norm(el.innerText).includes(norm(category))
+        );
+    }
+    if (option) {
+        option.scrollIntoView({ block: "nearest" });
+        option.click();
+        await sleep(600);
+    } else {
+        console.warn("category option not found:", category);
+    }
+}
+
+async function setDateTime(doc, targetDate) {
+    console.log("[date] set start", targetDate.toString());
+    let dateBtn = doc.querySelector(".input_date__QmA0s");
+    if (!dateBtn) {
+        const reserve = findElByText(["label", "span", "div"], "예약");
+        dateBtn = getNextTabbable(reserve);
+    }
+    if (!dateBtn) { console.warn("date input not found"); return; }
+
+    // Open calendar
+    dateBtn.focus();
+    dateBtn.click();
+    pressKey(dateBtn, "Enter");
+    await sleep(350);
+
+    const getCalendar = () =>
+        doc.querySelector(".ui-datepicker:not([style*='display: none'])") ||
+        doc.querySelector(".ui-datepicker") ||
+        doc.querySelector(".layer_calendar") ||
+        doc.querySelector(".calendar");
+
+    const getHeaderText = () => {
+        const cal = getCalendar();
+        if (!cal) return "";
+        const title = cal.querySelector(".ui-datepicker-title") || cal.querySelector(".ui-datepicker-header");
+        return (title?.innerText || "").trim();
+    };
+
+    const parseHeader = (txt) => {
+        const m = txt.match(/(\d{4}).*?(\d{1,2})/);
+        if (!m) return null;
+        return { year: parseInt(m[1], 10), month: parseInt(m[2], 10) }; // month 1-based
+    };
+
+    const moveMonth = async (diff) => {
+        if (diff === 0) return;
+        const forward = diff > 0;
+        const btnSel = forward ? ".ui-datepicker-next, .btn_next" : ".ui-datepicker-prev, .btn_prev";
+        const count = Math.abs(diff);
+        for (let i = 0; i < count; i++) {
+            const btn = doc.querySelector(btnSel);
+            if (!btn) { console.warn("[date] nav button missing"); break; }
+            btn.click();
+            await sleep(220);
+        }
+    };
+
+    const headerInfo = parseHeader(getHeaderText());
+    if (headerInfo) {
+        const diffMonths = (targetDate.getFullYear() - headerInfo.year) * 12 + ((targetDate.getMonth() + 1) - headerInfo.month);
+        await moveMonth(diffMonths);
+    } else {
+        console.warn("[date] calendar header parse failed");
+    }
+
+    // Select day via direct click
+    const cal = getCalendar();
+    if (cal) {
+        const dayBtn = Array.from(cal.querySelectorAll("td button, td a")).find(
+            (b) => (b.textContent || "").trim() === String(targetDate.getDate())
+        );
+        if (dayBtn) {
+            dayBtn.focus();
+            dayBtn.click();
+            await sleep(200);
+        } else {
+            console.warn("[date] day button not found");
+        }
+    } else {
+        console.warn("[date] calendar not found after open");
+    }
+
+    // Time inputs (best-effort)
+    const hourInput =
+        doc.querySelector("input[aria-label*='시'], input[title*='시'], input[name*='hour'], input[type='number']") ||
+        getNextTabbable(dateBtn);
+    const minInput =
+        doc.querySelector("input[aria-label*='분'], input[title*='분'], input[name*='min']") ||
+        (hourInput ? getNextTabbable(hourInput) : null);
+
+    if (hourInput && hourInput.tagName === "INPUT") {
+        setNativeValue(hourInput, String(targetDate.getHours()).padStart(2, "0"));
+    } else {
+        console.warn("[time] hour input not found");
+    }
+    if (minInput && minInput.tagName === "INPUT") {
+        setNativeValue(minInput, String(targetDate.getMinutes()).padStart(2, "0"));
+    } else {
+        console.warn("[time] minute input not found");
+    }
+}

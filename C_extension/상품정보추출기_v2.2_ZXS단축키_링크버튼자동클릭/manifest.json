@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "상품 정보 추출기",
+  "version": "2.0",
+  "description": "상품명, 링크, 이미지 URL을 한번에 추출합니다 (단축키 지원)",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "notifications",
+    "clipboardRead"
+  ],
+  "commands": {
+    "copy-name": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Z",
+        "mac": "Command+Shift+Z"
+      },
+      "description": "상품명 복사"
+    },
+    "copy-link": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+X",
+        "mac": "Command+Shift+X"
+      },
+      "description": "링크 복사"
+    },
+    "copy-images": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "이미지 URL 복사"
+    }
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

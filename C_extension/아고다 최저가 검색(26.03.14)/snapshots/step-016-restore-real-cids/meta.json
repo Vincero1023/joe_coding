@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-016-restore-real-cids",
+    "note":  "Replace symbolic placeholder campaign ids with previously verified numeric Agoda cids so scan pages render real prices again.",
+    "createdAt":  "2026-03-14T23:09:11+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

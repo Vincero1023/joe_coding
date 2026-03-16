@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-006-dom-price-attributes",
+    "note":  "Prefer Agoda DOM price attributes before text anchors and improve failure diagnostics",
+    "createdAt":  "2026-03-14T16:28:00+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

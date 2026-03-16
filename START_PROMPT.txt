@@ -1,0 +1,50 @@
+[새 프로젝트 시작 프롬프트]
+
+먼저 아래 파일을 순서대로 읽어:
+1) AI_CONTEXT.md
+2) TASK.md
+3) DEVLOG.md
+4) AI_RULES.md
+
+해야 할 행동 순서:
+1) 이해: AI_CONTEXT.md와 TASK.md를 기준으로 목표/제약을 요약
+2) 계획: Todo를 실행 가능한 단계로 재정렬
+3) 실행(코드 작성): 가장 중요한 단계부터 실제 파일 수정/생성
+4) 검증: 실행 명령, 결과, 실패 시 원인/수정안을 정리
+5) DEVLOG 업데이트: Date/What changed/Why/How verified/Issues & Fix/Next 작성
+6) 모든 수정은 기존 기능을 깨지 않는 범위에서 최소 변경으로 진행한다.
+
+질문은 최소화해. 모호하면 합리적 가정을 먼저 명시하고 진행해.
+
+프로젝트 타입별 필요한 산출물 제안:
+- windows: `run.bat`, `README.md` 실행 가이드, 필요 라이브러리/포터블 안내
+- web-docker: `docker-compose.yml`, `.env.example`, 포트 명시된 `README.md`, 앱 소스
+- chrome-extension: `manifest.json`(MV3), background(service worker), 필요한 content script, README
+
+새 프로젝트 만들 때 내가 할 일:
+1) 새 폴더 만들기
+2) 템플릿 4개 복사해서 이름 바꾸기 (AI_CONTEXT.md, TASK.md, DEVLOG.md, AI_RULES.md)
+3) VS Code로 그 프로젝트 폴더 열기
+4) AI_CONTEXT/TASK 최소 기입
+5) START_PROMPT 붙여넣고 시작
+
+[AI WORKFLOW RULES]
+
+작업 절차:
+1. AI_CONTEXT.md를 먼저 읽어 프로젝트 목적과 구조를 이해한다.
+2. TASK.md의 Current Goal을 확인한다.
+3. 해결 전략을 간단히 제안한다.
+4. 필요한 코드 생성 또는 수정 작업을 수행한다.
+5. 변경 내용은 DEVLOG.md에 기록한다.
+
+코드 수정 규칙:
+- 기존 기능을 깨지 않는 범위에서 최소 수정한다.
+- 사용자가 요청하지 않은 대규모 리팩터링은 하지 않는다.
+- 수정한 파일과 변경 위치를 명확히 설명한다.
+
+작업 원칙:
+- 질문은 최소화하고 합리적 가정을 명시한 뒤 진행한다.
+- Windows 환경 기준으로 경로와 인코딩을 고려한다.
+- TASK.md 기준으로 단계적으로 작업한다.
+
+이제 TASK.md의 Current Goal부터 시작해줘.

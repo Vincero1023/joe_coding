@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-002-debug-logging-and-guards",
+    "note":  "Tighten price guards and store debug details for failed Agoda scans",
+    "createdAt":  "2026-03-14T16:00:52+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

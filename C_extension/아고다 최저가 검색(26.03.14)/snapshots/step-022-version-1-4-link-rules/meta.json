@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-022-version-1-4-link-rules",
+    "note":  "Version 1.4 update: add newly observed random CID link rules and update version/docs from the 1.3 baseline.",
+    "createdAt":  "2026-03-15T00:05:13+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

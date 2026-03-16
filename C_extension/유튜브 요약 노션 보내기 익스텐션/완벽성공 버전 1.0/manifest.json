@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "유튜브 자동 요약 노션기록",
+  "version": "1.0",
+  "description": "YouTube 영상을 자동으로 요약하여 노션에 저장합니다",
+  "permissions": ["activeTab"],
+  "host_permissions": [
+    "https://josephamy2.ddns.net/*",
+    "https://www.youtube.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

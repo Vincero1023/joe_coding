@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Agoda Campaign Scanner",
+  "version": "1.5.0",
+  "description": "Scan Agoda campaign links, keep results in a dedicated tab, and open the best option.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.agoda.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Agoda Campaign Scanner",
+    "default_popup": "popup.html"
+  }
+}

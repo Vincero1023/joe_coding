@@ -1,0 +1,8 @@
+﻿{
+    "name":  "step-032-fix-guided-matchall-fallback",
+    "note":  "Fix guided fallback regex matching so 시작가 and 1박 fallback works on machines where Agoda price attributes stay at 0 first.",
+    "createdAt":  "2026-03-15T10:05:56+09:00",
+    "files":  [
+
+              ]
+}

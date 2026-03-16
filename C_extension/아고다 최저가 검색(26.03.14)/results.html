@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Agoda Best - 스캔 결과</title>
+    <link rel="icon" href="agoda-best-favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="results.css">
+  </head>
+  <body>
+    <main class="page">
+      <section class="panel hero">
+        <div class="brand-row">
+          <span class="brand-badge">AB</span>
+          <div>
+            <p class="eyebrow">Agoda Best</p>
+            <h1>실시간 스캔 결과</h1>
+          </div>
+        </div>
+        <p class="hero-copy">
+          결과는 이 탭에 고정되어 남습니다. 스캔이 진행되는 동안에도 최저가 링크를 열거나 현재 숙소를 예약 추적 목록에 저장할 수 있습니다.
+        </p>
+        <div class="toolbar">
+          <button id="openSourceButton" type="button" class="secondary">기준 페이지 열기</button>
+          <button id="saveReservationButton" type="button" class="secondary">예약 저장</button>
+          <button id="openReservationsButton" type="button" class="secondary">예약 추적기</button>
+          <button id="refreshButton" type="button" class="secondary">새로고침</button>
+          <button id="stopButton" type="button" class="ghost" disabled>중지</button>
+        </div>
+        <p id="reservationStatus" class="panel-note"></p>
+        <div class="status-row">
+          <span id="statusPill" class="pill">대기</span>
+          <p id="statusText" class="status-text"></p>
+          <p id="progressText" class="status-meta"></p>
+        </div>
+      </section>
+
+      <section class="panel source-panel">
+        <div class="panel-head">
+          <h2>기준 페이지</h2>
+          <p id="updatedText" class="panel-note"></p>
+        </div>
+        <p id="sourceTitle" class="source-title">아직 Agoda Best 스캔이 시작되지 않았습니다.</p>
+        <p id="sourceUrl" class="mono subtle break"></p>
+        <p id="diagnosticsText" class="panel-note"></p>
+      </section>
+
+      <section id="currentSection" class="panel hidden">
+        <div class="panel-head">
+          <h2>현재 페이지 기준가</h2>
+          <p class="panel-note">예약 저장 시 이 값을 기준으로 사용합니다.</p>
+        </div>
+        <article class="metric-card">
+          <p id="currentPrice" class="metric-value">-</p>
+          <p id="currentDetail" class="metric-detail"></p>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>상위 3개 결과</h2>
+          <p id="resultsHint" class="panel-note"></p>
+        </div>
+        <div id="topEmpty" class="empty-state">아직 비교 가능한 결과가 없습니다.</div>
+        <div id="topResults" class="top-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>전체 결과</h2>
+          <p class="panel-note">설정 변경은 팝업에서 하고, 이 페이지에서는 진행 상태와 링크를 확인합니다.</p>
+        </div>
+        <div id="resultsEmpty" class="empty-state">팝업에서 스캔을 시작하면 결과가 여기에 누적됩니다.</div>
+        <div id="resultsTableWrap" class="results-table-wrap hidden">
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th>순위</th>
+                <th>옵션</th>
+                <th>분류</th>
+                <th>타입</th>
+                <th>가격</th>
+                <th>현재 대비</th>
+                <th>CID / TAG</th>
+                <th>상태</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="results.js"></script>
+  </body>
+</html>

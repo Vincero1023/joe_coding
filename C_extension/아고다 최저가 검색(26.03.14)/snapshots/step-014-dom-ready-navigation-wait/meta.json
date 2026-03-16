@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-014-dom-ready-navigation-wait",
+    "note":  "Replace strict tab complete wait with post-navigation DOM-ready wait for reused parallel scan tabs, and relax aggressive time budgets.",
+    "createdAt":  "2026-03-14T22:48:49+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

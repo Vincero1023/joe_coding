@@ -1,0 +1,46 @@
+[v6.5] - 2025.11.27
+- 단축키를 Alt+Shift+A로 고정.
+- 팝업 탐색 실패 시 전체 문서 fallback, 시간 입력/확인 버튼 탐색 보강.
+- 발행 시작 후 확장 팝업 자동 닫기.
+
+[v6.4] - 2025.11.27
+- Hotkey 변경: Alt+Shift+A로 통일.
+- 불필요한 임시 파일 제거해 확장 로드 오류 해소.
+
+[v6.3] - 2025.11.27
+- Hotkey broadened: Alt+P (default) plus Alt+Shift+P/Ctrl+Alt+P; still blocks iframe duplicates.
+- Popup wait now scans iframes and extra selectors (.se-popup/.se_modal/.se_dialog) with longer timeout.
+- Time inputs detection widened to include number fields/maxlength=2,3 for schedule entry.
+
+[v6.2] - 2025.11.27
+- Hotkey now supports Ctrl+Alt+P alongside Alt+Shift+P.
+- Publish button search scans iframes and matches 발행/등록/확인 text/aria for new editor UI.
+
+[v6.1] - 2025.11.27
+- ??? ????? iframe?? ?? ???? ??? ??(??? ???? ??, ?? ?? ?? ??).
+- ?? ?? ?? ??? ??? ? ??? UI??? ??? ??? selector/??? ?? ??.
+
+[v6.0] - 2025.11.27
+- popup.js 문법 오류(따옴표 누락)로 팝업이 깨지던 문제를 수정해 실행 가능하도록 함.
+- 상태 표시 이모지 제거 및 ASCII 메시지로 변경해 인코딩/파싱 오류 방지.
+
+[v5.0] - 2024.05.XX
+- 기능 추가: 단축키 (Alt + P) 지원. 팝업을 열지 않고 바로 실행 가능.
+- UX 개선: 브라우저 기본 Alert 창 대신 예쁜 토스트(Toast) 메시지 알림 적용.
+- 버그 수정: popup.js 문법 오류 및 HTML/JS 연동 문제 해결.
+
+[v4.0]
+- 기능 개선: 발행 버튼 탐색 로직 강화 (iframe 문제 해결, 시각적 테두리 표시).
+- 버그 수정: 안전장치 추가 (설정값이 비어있어도 멈추지 않음).
+
+[v3.0]
+- 기능 추가: 금지 시간(Blockout Time) 설정을 분 단위까지 정밀하게 변경.
+- 기능 추가: 시간 입력칸 마우스 휠 스크롤 기능 추가 (시/분 분리).
+- 기능 개선: 로딩 지연 시 재시도(Retry) 로직 추가.
+
+[v2.0]
+- 기능 추가: 다중 프로필(ID별 설정) 저장 기능.
+- 기능 추가: 랜덤 시간 간격(Variance) 알고리즘 적용.
+
+[v1.0]
+- 초기 버전: 기본 발행 및 카테고리 선택 기능.

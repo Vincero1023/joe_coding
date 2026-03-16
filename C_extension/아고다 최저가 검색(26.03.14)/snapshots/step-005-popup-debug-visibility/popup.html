@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Agoda Scanner</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="app">
+      <section class="hero panel">
+        <p class="eyebrow">Agoda Campaign Scanner</p>
+        <h1>선택한 캠페인 링크를 자동으로 검사해서 Top 3를 보여줍니다.</h1>
+        <p class="hero-copy">
+          현재 숙소 페이지 기준으로 `cid`와 일부 `tag`를 바꿔 테스트합니다. 카드 할인은 보유 카드만
+          선택하면 해당 링크만 포함해서 검색합니다.
+        </p>
+        <div class="action-row">
+          <button id="scanButton" type="button" class="primary">Top 3 검색</button>
+          <button id="scanAndOpenButton" type="button" class="secondary">검색 후 1위 열기</button>
+          <button id="stopButton" type="button" class="ghost" disabled>Stop</button>
+        </div>
+        <p id="statusText" class="status"></p>
+      </section>
+
+      <section class="panel summary-panel">
+        <div class="panel-head">
+          <h2>현재 페이지</h2>
+          <p id="diagnosticsText" class="panel-note"></p>
+        </div>
+        <article id="currentCard" class="metric-card hidden">
+          <p id="currentPrice" class="metric-value">-</p>
+          <p id="currentDetail" class="metric-detail"></p>
+        </article>
+
+        <div class="panel-head top-head">
+          <h2>Top 3</h2>
+          <p id="resultsHint" class="panel-note"></p>
+        </div>
+        <div id="topEmpty" class="empty-state">아직 검색 결과가 없습니다.</div>
+        <div id="topResults" class="top-grid"></div>
+      </section>
+
+      <section class="panel settings">
+        <div class="panel-head">
+          <h2>검색 옵션</h2>
+          <button id="resetButton" type="button" class="ghost">기본값 복원</button>
+        </div>
+
+        <label class="toggle">
+          <input id="autoRunInput" type="checkbox">
+          <span>팝업을 열면 자동으로 Top 3 검색</span>
+        </label>
+
+        <div class="group-block">
+          <div class="group-head">
+            <div>
+              <h3>기본/유입</h3>
+              <p id="trafficCount" class="group-note"></p>
+            </div>
+            <div class="mini-actions">
+              <button type="button" class="mini secondary" data-group="traffic" data-action="all">전체</button>
+              <button type="button" class="mini ghost" data-group="traffic" data-action="clear">해제</button>
+            </div>
+          </div>
+          <div id="trafficList" class="option-grid"></div>
+        </div>
+
+        <div class="group-block">
+          <div class="group-head">
+            <div>
+              <h3>카드/결제</h3>
+              <p id="cardCount" class="group-note">보유 카드만 선택하세요.</p>
+            </div>
+            <div class="mini-actions">
+              <button type="button" class="mini secondary" data-group="cards" data-action="all">전체</button>
+              <button type="button" class="mini ghost" data-group="cards" data-action="clear">해제</button>
+            </div>
+          </div>
+          <div id="cardList" class="option-grid"></div>
+        </div>
+
+        <div class="group-block">
+          <div class="group-head">
+            <div>
+              <h3>항공사</h3>
+              <p id="airlineCount" class="group-note"></p>
+            </div>
+            <div class="mini-actions">
+              <button type="button" class="mini secondary" data-group="airlines" data-action="all">전체</button>
+              <button type="button" class="mini ghost" data-group="airlines" data-action="clear">해제</button>
+            </div>
+          </div>
+          <div id="airlineList" class="option-grid"></div>
+        </div>
+      </section>
+
+      <section class="panel results">
+        <div class="panel-head">
+          <h2>전체 결과</h2>
+          <p class="panel-note">실패한 링크도 함께 보여줍니다.</p>
+        </div>
+        <div id="resultsEmpty" class="empty-state">검색 전입니다.</div>
+        <div id="resultsTableWrap" class="results-table-wrap hidden">
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th>순위</th>
+                <th>옵션</th>
+                <th>분류</th>
+                <th>가격</th>
+                <th>현재 대비</th>
+                <th>CID/TAG</th>
+                <th>상태</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="catalog.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

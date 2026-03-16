@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      width: 380px;
+      padding: 20px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    
+    .container {
+      background: white;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    }
+    
+    h2 {
+      font-size: 20px;
+      color: #333;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .section {
+      margin-bottom: 20px;
+      padding-bottom: 20px;
+      border-bottom: 2px solid #f0f0f0;
+    }
+    
+    .section:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+    
+    /* API 설정 */
+    .api-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      padding: 10px;
+      background: #f5f5f5;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+    
+    .api-status.connected {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    
+    .api-status.disconnected {
+      background: #ffebee;
+      color: #c62828;
+    }
+    
+    .api-inputs {
+      display: none;
+    }
+    
+    .api-inputs.show {
+      display: block;
+    }
+    
+    .input-group {
+      margin-bottom: 12px;
+    }
+    
+    .input-label {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 4px;
+      display: block;
+    }
+    
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      padding: 10px;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: monospace;
+    }
+    
+    input:focus {
+      border-color: #667eea;
+      outline: none;
+    }
+    
+    /* 프리셋 */
+    .preset-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    
+    .preset-btn {
+      padding: 10px;
+      border: 2px solid #e0e0e0;
+      background: white;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: bold;
+      transition: all 0.2s;
+    }
+    
+    .preset-btn:hover {
+      border-color: #667eea;
+      background: #f5f7ff;
+    }
+    
+    .preset-btn.active {
+      border-color: #667eea;
+      background: #667eea;
+      color: white;
+    }
+    
+    /* 필터 그룹 */
+    .filter-group {
+      background: #f8f9fa;
+      padding: 12px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+    }
+    
+    .filter-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      font-size: 13px;
+      color: #555;
+    }
+    
+    .filter-value {
+      font-weight: bold;
+      color: #667eea;
+      font-size: 14px;
+    }
+    
+    input[type="range"] {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: #ddd;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #667eea;
+      cursor: pointer;
+    }
+    
+    input[type="number"] {
+      width: 100%;
+      padding: 8px;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    
+    input[type="number"]:focus {
+      border-color: #667eea;
+      outline: none;
+    }
+    
+    /* 복합 조건 */
+    .condition-mode {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    
+    .mode-btn {
+      flex: 1;
+      padding: 8px;
+      border: 2px solid #e0e0e0;
+      background: white;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    
+    .mode-btn.active {
+      border-color: #667eea;
+      background: #667eea;
+      color: white;
+    }
+    
+    /* 버튼 */
+    .btn-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    
+    button {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+    
+    .btn-success {
+      background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+      color: white;
+    }
+    
+    .btn-success:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(56, 239, 125, 0.4);
+    }
+    
+    .btn-warning {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: white;
+    }
+    
+    .btn-warning:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4);
+    }
+    
+    .btn-secondary {
+      background: #f0f0f0;
+      color: #666;
+    }
+    
+    .btn-secondary:hover {
+      background: #e0e0e0;
+    }
+    
+    .btn-export {
+      background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+      color: white;
+    }
+    
+    .btn-export:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(250, 112, 154, 0.4);
+    }
+    
+    .btn-small {
+      padding: 6px 12px;
+      font-size: 11px;
+    }
+    
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+    
+    /* 상태 표시 */
+    .status {
+      margin-top: 12px;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      text-align: center;
+      display: none;
+    }
+    
+    .status.show {
+      display: block;
+    }
+    
+    .status.info {
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+    
+    .status.success {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    
+    .status.warning {
+      background: #fff3e0;
+      color: #e65100;
+    }
+    
+    /* 팁 */
+    .tip {
+      margin-top: 12px;
+      padding: 10px;
+      background: #fff8e1;
+      border-left: 4px solid #ffd54f;
+      border-radius: 4px;
+      font-size: 11px;
+      color: #f57f17;
+      line-height: 1.5;
+    }
+    
+    .link {
+      color: #667eea;
+      text-decoration: none;
+      font-size: 11px;
+    }
+    
+    .link:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🎯 프로 필터 v3.1</h2>
+    
+    <!-- API 설정 -->
+    <div class="section">
+      <div class="filter-label">
+        <span><strong>🔑 네이버 API 설정</strong></span>
+        <button class="btn-secondary btn-small" id="toggleApi">설정</button>
+      </div>
+      
+      <div class="api-status disconnected" id="apiStatus">
+        ⚠️ API 미설정 (시뮬레이션 모드)
+      </div>
+      
+      <div class="api-inputs" id="apiInputs">
+        <div class="input-group">
+          <label class="input-label">Client ID</label>
+          <input type="text" id="clientId" placeholder="AbCd1234EfGh">
+        </div>
+        
+        <div class="input-group">
+          <label class="input-label">Client Secret</label>
+          <input type="password" id="clientSecret" placeholder="XyZ9876WvU">
+        </div>
+        
+        <div class="btn-group">
+          <button class="btn-success btn-small" id="saveApi">저장</button>
+          <button class="btn-secondary btn-small" id="testApi">테스트</button>
+        </div>
+        
+        <div class="tip" style="margin-top: 8px;">
+          💡 API 발급: <a href="https://developers.naver.com/" target="_blank" class="link">developers.naver.com</a>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 프리셋 -->
+    <div class="section">
+      <div class="filter-label">
+        <span><strong>⚡ 빠른 프리셋</strong></span>
+      </div>
+      <div class="preset-buttons">
+        <button class="preset-btn" data-preset="golden">🏆 황금키워드</button>
+        <button class="preset-btn" data-preset="jackpot">💰 한방딜</button>
+        <button class="preset-btn" data-preset="steady">📈 스테디</button>
+        <button class="preset-btn" data-preset="custom">⚙️ 커스텀</button>
+      </div>
+    </div>
+    
+    <!-- 복합 조건 모드 -->
+    <div class="section">
+      <div class="filter-label">
+        <span><strong>🔀 조건 모드</strong></span>
+      </div>
+      <div class="condition-mode">
+        <button class="mode-btn active" data-mode="and">AND (모두 만족)</button>
+        <button class="mode-btn" data-mode="or">OR (하나만)</button>
+      </div>
+    </div>
+    
+    <!-- 필터 조건 -->
+    <div class="section">
+      <div class="filter-group">
+        <div class="filter-label">
+          <span>수수료</span>
+          <span class="filter-value"><span id="feeValue">10</span>% 이상</span>
+        </div>
+        <input type="range" id="feeSlider" min="0" max="50" value="10" step="1">
+      </div>
+      
+      <div class="filter-group">
+        <div class="filter-label">
+          <span>할인율</span>
+          <span class="filter-value"><span id="discountValue">25</span>% 이상</span>
+        </div>
+        <input type="range" id="discountSlider" min="0" max="90" value="25" step="5">
+      </div>
+      
+      <div class="filter-group">
+        <div class="filter-label">
+          <span>가격 (원)</span>
+          <span class="filter-value"><span id="priceValue">50,000</span>원 이상</span>
+        </div>
+        <input type="number" id="priceInput" value="50000" step="10000" min="0">
+      </div>
+    </div>
+    
+    <!-- 필터 실행 -->
+    <div class="section">
+      <div class="btn-group">
+        <button class="btn-primary" id="startFilter">🚀 1차 필터링</button>
+      </div>
+      
+      <div class="btn-group">
+        <button class="btn-success" id="deepAnalysis" disabled>🔍 TOP 20 정밀 분석</button>
+      </div>
+      
+      <div class="btn-group">
+        <button class="btn-export" id="exportExcel" disabled>📊 엑셀 내보내기</button>
+      </div>
+      
+      <div class="btn-group">
+        <button class="btn-warning" id="stopFilter">⏸️ 중지</button>
+        <button class="btn-secondary" id="resetFilter">🔄 초기화</button>
+      </div>
+    </div>
+    
+    <!-- 상태 -->
+    <div class="status" id="status"></div>
+    
+    <!-- 팁 -->
+    <div class="tip">
+      <strong>💡 사용 팁</strong><br>
+      1단계: API 설정 (실제 블로그 검색)<br>
+      2단계: 1차 필터링으로 조건 맞는 상품 발견<br>
+      3단계: TOP 20 정밀 분석으로 블로그 검색<br>
+      4단계: TOP 10 하이라이트 + 엑셀 내보내기
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

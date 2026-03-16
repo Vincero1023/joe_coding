@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h2>YouTube → Notion</h2>
+    
+    <div class="content">
+      <!-- 1. 현재 영상 저장 -->
+      <div class="section">
+        <button id="save-current" class="btn btn-primary">
+          <span class="btn-icon">▶️</span>
+          <span class="btn-text">지금 영상 저장</span>
+        </button>
+        <p class="shortcut"><kbd id="shortcut-1">Ctrl+Shift+Y</kbd></p>
+      </div>
+      
+      <hr>
+      
+      <!-- 2. 재생목록 저장 -->
+      <div class="section">
+        <button id="save-playlist" class="btn btn-secondary">
+          <span class="btn-icon">📋</span>
+          <span class="btn-text">재생목록 저장</span>
+        </button>
+        <p class="description">재생목록의 모든 영상을 한 번에 수집</p>
+        <p class="shortcut"><kbd id="shortcut-2">Ctrl+Shift+P</kbd></p>
+      </div>
+      
+      <hr>
+      
+      <!-- 3. 채널 구독 (신규만) -->
+      <div class="section">
+        <button id="subscribe-new" class="btn btn-secondary">
+          <span class="btn-icon">🔔</span>
+          <span class="btn-text">채널 구독 (신규만)</span>
+        </button>
+        <p class="description">6시간마다 신규 영상 자동 수집</p>
+        <p class="shortcut"><kbd id="shortcut-3">Ctrl+Shift+N</kbd></p>
+      </div>
+      
+      <hr>
+      
+      <!-- 4. 채널 구독 (전체) -->
+      <div class="section">
+        <button id="subscribe-all" class="btn btn-secondary">
+          <span class="btn-icon">📚</span>
+          <span class="btn-text">채널 구독 (모든 영상)</span>
+        </button>
+        <p class="description">채널의 과거 영상까지 모두 수집</p>
+        <p class="shortcut"><kbd id="shortcut-4">Ctrl+Shift+A</kbd></p>
+      </div>
+      
+      <hr>
+      
+      <!-- 설정 버튼 -->
+      <div class="section">
+        <button id="open-settings" class="btn btn-link">
+          ⚙️ 설정
+        </button>
+      </div>
+      
+      <!-- 상태 표시 -->
+      <div id="status" class="status"></div>
+    </div>
+    
+    <div class="footer">
+      Made with 💜 for 목회자
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

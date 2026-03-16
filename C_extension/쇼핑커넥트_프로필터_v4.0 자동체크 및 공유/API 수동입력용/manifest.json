@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "쇼핑커넥트 프로 필터",
+  "version": "3.4",
+  "description": "AI 스코어링, 블로그 경쟁 분석, TOP 20 추천, 엑셀 내보내기, 블랙리스트 관리",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.naver.com/*",
+    "*://search.naver.com/*"
+  ],
+  "web_accessible_resources": [{
+    "resources": ["blacklist.json"],
+    "matches": ["<all_urls>"]
+  }],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.naver.com/*", "*://*.brandconnect.naver.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"]
+    }
+  ],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

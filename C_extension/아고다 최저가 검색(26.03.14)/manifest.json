@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Agoda Best",
+  "version": "2.0.0",
+  "description": "Agoda 호텔 최저가 비교와 예약 가격 추적을 지원하는 Chrome 확장 프로그램입니다.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://*.agoda.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Agoda Best",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

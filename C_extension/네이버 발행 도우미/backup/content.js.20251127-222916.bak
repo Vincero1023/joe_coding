@@ -1,0 +1,343 @@
+﻿// === ?ㅼ씠踰?釉붾줈洹??ㅻ쭏??諛쒗뻾湲?(Final Chaining Fix) ===
+
+// ----------------------------------------------------
+// [0] ?좏떥由ы떚
+// ----------------------------------------------------
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ?띿뒪?몃줈 ?붿냼 李얘린 (Top Frame)
+function findElementByText(text) {
+    const doc = window.top.document; 
+    const cleanTarget = text.replace(/\s/g, '');
+    const all = doc.querySelectorAll('label, span, strong, b, div, p, h3, h4, li, a, button');
+    
+    for (let el of all) {
+        if (el.innerText.replace(/\s/g, '').includes(cleanTarget) && el.offsetParent !== null) {
+            if (el.childElementCount === 0) return el;
+        }
+    }
+    return null;
+}
+
+// ??Tab) ?대룞: 湲곗? ?붿냼 諛붾줈 ?ㅼ쓬??'?낅젰 媛???붿냼' 諛섑솚
+function getNextTabbable(anchor) {
+    if (!anchor) return null;
+    const doc = window.top.document;
+    
+    // ??媛?ν븳 紐⑤뱺 ?붿냼 (?붾㈃??蹂댁씠??寃껊쭔)
+    const all = Array.from(doc.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+        .filter(el => el.offsetWidth > 0 && el.offsetHeight > 0 && !el.disabled);
+
+    for (let el of all) {
+        if (anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
+            return el;
+        }
+    }
+    return null;
+}
+
+// key press helper
+function pressKey(element, key = 'Enter') {
+    if (!element) return;
+    element.focus();
+
+    let code = 13;
+    if (key === 'Space') code = 32;
+    if (key === 'ArrowLeft') code = 37;
+    if (key === 'ArrowRight') code = 39;
+
+    const opts = { key: key, code: key, keyCode: code, which: code, bubbles: true, cancelable: true, view: window };
+    
+    element.dispatchEvent(new KeyboardEvent('keydown', opts));
+    element.dispatchEvent(new KeyboardEvent('keypress', opts));
+    element.dispatchEvent(new KeyboardEvent('keyup', opts));
+    
+    if(key === 'Enter' || key === 'Space') element.click();
+}
+
+function setNativeValue(element, value) {
+  if (!element || !(element instanceof window.HTMLInputElement)) {
+      console.error("입력 가능한 요소가 아닙니다:", element);
+      return;
+  }
+  const proto = window.HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+  if (setter) setter.call(element, value);
+  else element.value = value;
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// 발행 버튼 탐색 (여러 셀렉터/텍스트, 예약발행은 후순위)
+function findPublishButton(doc) {
+    const selectors = ['.btn_publish','button','[role="button"]','a[role="button"]','div[role="button"]','input[type="button"]','input[type="submit"]'];
+    const isVisible = (el) => el && el.offsetParent !== null && el.offsetWidth > 0 && el.offsetHeight > 0 && !el.disabled;
+
+    let best = null;
+    let bestScore = -1;
+
+    for (const sel of selectors) {
+        const list = doc.querySelectorAll(sel);
+        for (const el of list) {
+            if (!isVisible(el)) continue;
+            const rawText = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
+            if (!rawText) continue;
+
+            const text = rawText.replace(/\s/g, '');
+            const hasReserve = text.includes('예약');
+            let score = -1;
+
+            if (text.includes('발행하기') && !hasReserve) score = 5;
+            else if ((text === '발행' || text.includes('발행')) && !hasReserve) score = 4;
+            else if (['게시','등록','출간'].some(k => text.includes(k))) score = 3;
+            else if (hasReserve && text.includes('발행')) score = 1; // 예약발행은 최후 fallback
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = el;
+            }
+        }
+    }
+
+    return best;
+}
+
+// ----------------------------------------------------
+// [1] 발행 리스너
+document.addEventListener('keydown', (e) => {
+  if (e.altKey && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+    e.preventDefault();
+    window.top.postMessage({ type: "REQ_PUBLISH_EXTENSION" }, "*");
+  }
+});
+
+window.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "REQ_PUBLISH_EXTENSION" && window === window.top) {
+      runSequence();
+  }
+});
+
+chrome.runtime.onMessage.addListener((request) => {
+  if (request.action === "TRIGGER_PUBLISH_BY_POPUP" && window === window.top) {
+      runSequence();
+  }
+});
+
+// ----------------------------------------------------
+// [2] 硫붿씤 濡쒖쭅
+// ----------------------------------------------------
+async function runSequence() {
+  const topDoc = window.top.document;
+
+  // [1] 발행 버튼 (재시도)
+  let publishBtn = null;
+  for (let attempt = 0; attempt < 8 && !publishBtn; attempt++) {
+      publishBtn = findPublishButton(topDoc);
+      if (!publishBtn) await sleep(300);
+  }
+  if (!publishBtn) return alert("발행 버튼을 찾지 못했습니다. 페이지 로드 상태를 확인해주세요.");
+
+  console.log("[1] 발행 버튼 찾음");
+  pressKey(publishBtn, 'Enter');
+
+  pressKey(publishBtn, 'Enter');
+
+  // ?ㅼ젙 濡쒕뱶
+  const data = await chrome.storage.local.get(['settings', 'currentProfile']);
+  const settings = (data.settings && data.settings[data.currentProfile || 'default']) || {};
+  if (!settings.category) return alert("카테고리 설정이 없습니다. 확장 설정에서 카테고리를 지정해주세요.");
+
+  // ?좎쭨 怨꾩궛
+  const [sh, sm] = (settings.startTime || '09:00').split(':').map(Number);
+  let targetDate = new Date();
+  if(settings.lastScheduled) {
+      const last = new Date(settings.lastScheduled);
+      const interval = parseInt(settings.interval || 60);
+      const variance = interval * 0.2; 
+      const randomMin = (Math.random() * (variance * 2)) - variance;
+      last.setMinutes(last.getMinutes() + interval + randomMin);
+      targetDate = last;
+  } else {
+      targetDate.setHours(sh, sm);
+      if(targetDate < new Date()) targetDate.setDate(targetDate.getDate() + 1);
+  }
+  const currentProfile = data.currentProfile || "default";
+  if(!data.settings[currentProfile]) data.settings[currentProfile] = {};
+  data.settings[currentProfile].lastScheduled = targetDate.toISOString();
+  await chrome.storage.local.set({ settings: data.settings });
+
+
+  // [2] ?앹뾽 ?湲?  console.log("???앹뾽 ?湲?(2珥?...");
+  await sleep(2000);
+
+  // [3] 移댄뀒怨좊━ ?ㅼ젙
+  const catLabel = findElementByText('移댄뀒怨좊━');
+  if (catLabel) {
+      const dropdown = getNextTabbable(catLabel); // Tab 1
+      if (dropdown) {
+          console.log("?⑨툘 [2] ?쒕∼?ㅼ슫 ?뷀꽣");
+          pressKey(dropdown, 'Enter');
+          await sleep(1000);
+          
+          const catItem = findElementByText(settings.category);
+          if (catItem) {
+              console.log(`?⑨툘 [3] ??ぉ ?좏깮: ${settings.category}`);
+              pressKey(catItem, 'Enter');
+              console.log("??由щ젋?붾쭅 ?湲?(2.5珥?...");
+              await sleep(2500);
+          }
+      }
+  }
+
+  // [4] ?덉빟 ?ㅼ젙 (?ъ슜??留ㅻ돱?? 諛쒗뻾?쒓컙 -> ??1 -> ??2 -> ?좎쭨)
+  console.log("[4] 발행 시간 확인");
+  let anchor = findElementByText('諛쒗뻾?쒓컙') || findElementByText('?덉빟?쒓컙');
+
+  if (anchor) {
+      // Tab 1 (건너?)
+      const tab1 = getNextTabbable(anchor);
+      // Tab 2 (날짜 버튼) - '예약' 텍스트 기준 우선 시도
+      const reservationLabel = findElementByText('예약');
+      let dateBtn = reservationLabel ? getNextTabbable(reservationLabel) : null;
+      if (!dateBtn) dateBtn = getNextTabbable(tab1);
+
+      if (dateBtn) {
+          console.log("?⑨툘 [4] ?좎쭨 踰꾪듉 諛쒓껄 (Tab x2) -> ?ㅼ젙 ?쒖옉");
+          
+          // ?좎쭨 ?ㅼ젙 濡쒖쭅 ?ㅽ뻾
+          await setDateManual(dateBtn, targetDate);
+          
+          // 4. ?쒓컙 ?낅젰 (?좎쭨 ?ㅼ젙 ???ъ빱?ㅺ? DateBtn???덉쓣 ?뺣쪧 ?믪쓬)
+          const hourInput = getNextTabbable(dateBtn); // Tab 3
+          const minInput = getNextTabbable(hourInput); // Tab 4
+
+          if (hourInput && minInput) {
+              const HH = targetDate.getHours();
+              const mm = Math.round(targetDate.getMinutes() / 10) * 10;
+              console.log(`?⑨툘 [5] ?쒓컙 ?낅젰: ${HH}:${mm}`);
+              
+              setNativeValue(hourInput, String(HH).padStart(2,'0'));
+              setNativeValue(minInput, String(mm).padStart(2,'0'));
+          } else {
+              console.log("?좑툘 ?쒓컙 ?낅젰移?Tab 3, 4) ?먯깋 ?ㅽ뙣");
+          }
+      } else {
+          console.log("?좑툘 Tab 2踰??꾩튂媛 ?좎쭨 踰꾪듉???꾨떃?덈떎.");
+      }
+  } else {
+      console.log("?좑툘 '諛쒗뻾 ?쒓컙' 湲??紐?李얠쓬");
+  }
+
+  // [5] 理쒖쥌 ?뺤씤
+  await sleep(1000);
+  const confirmMsg = `
+  [?ㅼ젙 ?뺤씤]
+  移댄뀒怨좊━: ${settings.category}
+  ?덉빟?쒓컙: ${targetDate.getMonth()+1}/${targetDate.getDate()} ${targetDate.getHours()}:${Math.round(targetDate.getMinutes()/10)*10}
+  
+  諛쒗뻾?좉퉴??`;
+
+  if(confirm(confirmMsg)) {
+      const allBtns = topDoc.querySelectorAll('button');
+      let finalBtn = null;
+      let maxTop = 0;
+      for(let b of allBtns) {
+          if(b.innerText.trim() === '諛쒗뻾' && !b.className.includes('btn_publish') && b.offsetParent !== null) {
+              const rect = b.getBoundingClientRect();
+              if(rect.top > maxTop) { maxTop = rect.top; finalBtn = b; }
+          }
+      }
+      if(finalBtn) {
+          console.log("?? 理쒖쥌 諛쒗뻾 ?뷀꽣!");
+          pressKey(finalBtn, 'Enter');
+      }
+  }
+}
+
+// ?좎쭨 ?ㅼ젙 (?ъ슜??留ㅻ돱??
+// 날짜/시간 세팅 (예약 탭 힌트 기반)
+async function setDateManual(dateBtn, targetDate) {
+    const topDoc = window.top.document;
+    console.log("[date] open calendar via yeyak/tab hint");
+
+    pressKey(dateBtn, 'Enter');
+    await sleep(400);
+
+    const calendar = topDoc.querySelector('.layer_calendar, .calendar');
+    if (!calendar) {
+        console.log("[date] calendar layer not found");
+        return;
+    }
+
+    let focusEl = topDoc.activeElement || dateBtn;
+
+    const prevBtn = calendar.querySelector('.btn_prev');
+    if (prevBtn) {
+        focusEl = prevBtn;
+        focusEl.focus();
+        console.log("[date] reset calendar (ArrowLeft+Space x4)");
+        for (let i = 0; i < 4; i++) {
+            pressKey(focusEl, 'ArrowLeft');
+            await sleep(80);
+            pressKey(focusEl, 'Space');
+            await sleep(160);
+        }
+    } else if (focusEl) {
+        console.log("[date] reset fallback (ArrowLeft+Space x4)");
+        for (let i = 0; i < 4; i++) {
+            pressKey(focusEl, 'ArrowLeft');
+            await sleep(80);
+            pressKey(focusEl, 'Space');
+            await sleep(160);
+        }
+    }
+
+    if (focusEl) {
+        pressKey(focusEl, 'Enter');
+        await sleep(180);
+    }
+
+    const today = new Date();
+    const monthsAhead = Math.max(0, (targetDate.getFullYear() - today.getFullYear()) * 12 + (targetDate.getMonth() - today.getMonth()));
+    const nextBtn = calendar.querySelector('.btn_next');
+    focusEl = topDoc.activeElement || focusEl || dateBtn;
+
+    if (monthsAhead > 0 && nextBtn) {
+        focusEl = nextBtn;
+        focusEl.focus();
+        console.log(`[date] move month forward x${monthsAhead} (Space)`);
+        for (let m = 0; m < monthsAhead; m++) {
+            pressKey(focusEl, 'Space');
+            await sleep(220);
+        }
+    }
+
+    const tabForward = async (count) => {
+        for (let i = 0; i < count; i++) {
+            focusEl = getNextTabbable(focusEl);
+            if (!focusEl) break;
+            focusEl.focus();
+            await sleep(60);
+        }
+    };
+
+    let tabCount;
+    if (monthsAhead === 0) {
+        const diff = Math.max(0, targetDate.getDate() - today.getDate());
+        tabCount = diff + 2; // 같은 달: Tab2=오늘, Tab3=내일
+    } else {
+        tabCount = targetDate.getDate() + 1; // 미래 달: 날짜+1 만큼 탭 후 스페이스
+    }
+
+    console.log("[date] tab to day x" + tabCount);
+    await tabForward(tabCount);
+
+    if (focusEl) {
+        pressKey(focusEl, 'Space');
+        await sleep(200);
+    }
+}
+
+
+
+
+

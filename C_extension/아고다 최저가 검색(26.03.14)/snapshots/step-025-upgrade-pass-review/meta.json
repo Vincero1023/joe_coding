@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-025-upgrade-pass-review",
+    "note":  "Validate current implementation against requested scan-tab-pool, priority, mobile/desktop variants, and result streaming; patch only gaps while keeping concurrency fixed at 3.",
+    "createdAt":  "2026-03-15T00:24:07+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

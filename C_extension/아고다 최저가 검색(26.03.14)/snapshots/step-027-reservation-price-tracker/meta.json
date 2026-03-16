@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-027-reservation-price-tracker",
+    "note":  "Add reservation tracking, saved reservation storage, reservation list page, manual/automatic rescans, and price-drop notifications using the existing Agoda scan engine.",
+    "createdAt":  "2026-03-15T00:34:15+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

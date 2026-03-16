@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-024-version-1-5-mark",
+    "note":  "Mark current working scanner state as version 1.5.0 after priority ordering, mobile variants, and stable 3-tab reuse.",
+    "createdAt":  "2026-03-15T00:21:37+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

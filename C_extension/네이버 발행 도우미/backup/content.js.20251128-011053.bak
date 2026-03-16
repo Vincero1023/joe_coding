@@ -1,0 +1,236 @@
+﻿// ==========================================================
+// Naver Blog Auto Publisher (robust selectors, keyboard-first)
+// Flow: publish button -> load settings -> category -> reservation -> date/time -> confirm publish
+// ==========================================================
+
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+// Safely set value for React-controlled inputs
+function setNativeValue(el, value) {
+    if (!el) return;
+    const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    const proto = Object.getPrototypeOf(el);
+    const protoSetter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+    (protoSetter || valueSetter)?.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+// Visible check
+const isVisible = (el) => el && el.offsetParent !== null && el.offsetWidth > 0 && el.offsetHeight > 0 && !el.disabled;
+
+// Find element by text within selector list
+function findElByText(selectors, text) {
+    const list = Array.isArray(selectors) ? selectors : [selectors];
+    for (const sel of list) {
+        const els = document.querySelectorAll(sel);
+        for (const el of els) {
+            if (!isVisible(el)) continue;
+            if ((el.innerText || "").replace(/\s/g, "").includes(text.replace(/\s/g, ""))) return el;
+        }
+    }
+    return null;
+}
+
+// Next tabbable after anchor
+function getNextTabbable(anchor) {
+    if (!anchor) return null;
+    const doc = window.top.document;
+    const all = Array.from(doc.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+        .filter(isVisible);
+    for (const el of all) {
+        if (anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) return el;
+    }
+    return null;
+}
+
+// Simulate keypress (keydown/keypress/keyup) with optional click on Enter/Space
+function pressKey(el, key = "Enter") {
+    if (!el) return;
+    el.focus();
+    const codes = { Enter: 13, Space: 32, ArrowLeft: 37, ArrowRight: 39 };
+    const code = codes[key] || key.charCodeAt?.(0) || 13;
+    const opts = { key, code: key, keyCode: code, which: code, bubbles: true, cancelable: true, view: window };
+    el.dispatchEvent(new KeyboardEvent("keydown", opts));
+    el.dispatchEvent(new KeyboardEvent("keypress", opts));
+    el.dispatchEvent(new KeyboardEvent("keyup", opts));
+    if (key === "Enter" || key === "Space") el.click();
+}
+
+// ----------------------------------------------------------
+// Triggers
+// ----------------------------------------------------------
+chrome.runtime.onMessage.addListener((req) => {
+    if (req.action === "TRIGGER_PUBLISH_BY_POPUP") runSequence();
+});
+
+document.addEventListener("keydown", (e) => {
+    if (e.altKey && e.shiftKey && (e.key === "p" || e.key === "P")) {
+        e.preventDefault();
+        runSequence();
+    }
+});
+
+// ----------------------------------------------------------
+// Main
+// ----------------------------------------------------------
+async function runSequence() {
+    const topDoc = window.top.document;
+    console.log("??runSequence start");
+
+    // Load settings
+    const data = await chrome.storage.local.get(["settings", "currentProfile"]);
+    const profile = data.currentProfile || "default";
+    const settings = (data.settings && data.settings[profile]) || {};
+    if (!settings.category) return alert("移댄뀒怨좊━瑜??ㅼ젙??二쇱꽭??");
+
+    // Target datetime
+    let targetDate = new Date();
+    if (settings.lastScheduled) {
+        const last = new Date(settings.lastScheduled);
+        const interval = parseInt(settings.interval || 60, 10);
+        const variance = interval * 0.1;
+        const randomMin = (Math.random() * variance * 2) - variance;
+        last.setMinutes(last.getMinutes() + interval + randomMin);
+        targetDate = last;
+    } else {
+        const [sh, sm] = (settings.startTime || "09:00").split(":").map(Number);
+        targetDate.setHours(sh, sm, 0, 0);
+        if (targetDate < new Date()) targetDate.setDate(targetDate.getDate() + 1);
+    }
+    data.settings = data.settings || {};
+    data.settings[profile] = settings;
+    settings.lastScheduled = targetDate.toISOString();
+    await chrome.storage.local.set({ settings: data.settings });
+
+    // Step 1: publish button
+    const publishBtn = findPublishButton(topDoc);
+    if (!publishBtn) return alert("諛쒗뻾 踰꾪듉??李얠? 紐삵뻽?듬땲??");
+    publishBtn.click();
+    await sleep(1500);
+
+    // Step 2: category
+    await selectCategory(topDoc, settings.category);
+
+    // Step 3: reservation toggle
+    const reserveLabel = findElByText(["label", "span", "div"], "?덉빟");
+    if (reserveLabel) {
+        const ctl = reserveLabel.closest("label")?.querySelector("input") || reserveLabel.querySelector("input") || reserveLabel;
+        ctl.click();
+        await sleep(400);
+    }
+
+    // Step 4: date/time (keyboard flow)
+    await setDateTime(topDoc, targetDate);
+}
+
+// ----------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------
+function findPublishButton(doc) {
+    const selectors = [".btn_publish", ".publish_btn__m9KHH", "button", "[role='button']", "input[type='button']", "input[type='submit']"];
+    const keywords = ["발행", "발행하기", "예약발행", "등록", "출간"];
+    let best = null;
+    for (const sel of selectors) {
+        for (const el of doc.querySelectorAll(sel)) {
+            if (!isVisible(el)) continue;
+            const text = (el.innerText || el.value || el.getAttribute("aria-label") || "").trim();
+            if (keywords.some((k) => text.includes(k))) { best = el; break; }
+        }
+        if (best) break;
+    }
+    return best;
+}
+async function selectCategory(doc, category) {
+    console.log("??category select:", category);
+    const dropdown = doc.querySelector('[class*="selectbox_button"], .input_select__') || findElByText("button", "移댄뀒怨좊━");
+    if (!dropdown) return console.warn("category dropdown not found");
+    dropdown.click();
+    await sleep(500);
+
+    const norm = (s) => (s || "").replace(/\s/g, "");
+    let option = null;
+    const layer = doc.querySelector(".option_list_layer__YX1Tq");
+    if (layer) {
+        const textEl = Array.from(layer.querySelectorAll(".item__sAGX9 .text__sraQE"))
+            .find((el) => norm(el.innerText).includes(norm(category)));
+        if (textEl) option = textEl.closest(".item__sAGX9") || textEl.closest("label") || textEl;
+    }
+    if (!option) {
+        option = Array.from(doc.querySelectorAll("li, button, a, div")).find(
+            (el) => isVisible(el) && norm(el.innerText).includes(norm(category))
+        );
+    }
+    if (option) {
+        option.scrollIntoView({ block: "nearest" });
+        option.click();
+        await sleep(600);
+    } else {
+        console.warn("category option not found:", category);
+    }
+}
+
+async function setDateTime(doc, targetDate) {
+    console.log("??date/time set start");
+    // date button
+    let dateBtn = doc.querySelector(".input_date__QmA0s");
+    if (!dateBtn) {
+        const reserve = findElByText(["label", "span", "div"], "?덉빟");
+        dateBtn = getNextTabbable(reserve);
+    }
+    if (!dateBtn) { console.warn("date input not found"); return; }
+
+    // Open calendar
+    pressKey(dateBtn, "Enter");
+    await sleep(300);
+
+    const calendar = doc.querySelector(".ui-datepicker, .layer_calendar, .calendar");
+    const prevBtn = doc.querySelector(".ui-datepicker-prev, .btn_prev");
+    const nextBtn = doc.querySelector(".ui-datepicker-next, .btn_next");
+    if (!calendar && !prevBtn && !nextBtn) { console.warn("calendar not found"); return; }
+
+    // Reset three months back (keyboard)
+    if (prevBtn) {
+        prevBtn.focus();
+        for (let i = 0; i < 4; i++) { pressKey(prevBtn, "ArrowLeft"); await sleep(80); pressKey(prevBtn, "Space"); await sleep(160); }
+    }
+
+    // Month move forward
+    const today = new Date();
+    const monthsDiff = (targetDate.getFullYear() - today.getFullYear()) * 12 + (targetDate.getMonth() - today.getMonth());
+    if (monthsDiff > 0 && nextBtn) {
+        nextBtn.focus();
+        for (let i = 0; i < monthsDiff; i++) { pressKey(nextBtn, "Space"); await sleep(220); }
+    }
+
+    // Date select via Tab count then Space
+    const isSameMonth = monthsDiff === 0;
+    const tabCount = isSameMonth ? Math.max(0, targetDate.getDate() - today.getDate()) + 2 : targetDate.getDate() + 1;
+    let current = doc.activeElement || dateBtn;
+    for (let i = 0; i < tabCount; i++) {
+        current = getNextTabbable(current);
+        if (!current) break;
+        current.focus();
+        await sleep(60);
+    }
+    if (current) {
+        pressKey(current, "Space");
+        await sleep(200);
+    } else {
+        console.warn("date focus lost before day select");
+    }
+
+    // Time inputs: use tab order after dateBtn
+    let hourInput = getNextTabbable(dateBtn);
+    let minInput = getNextTabbable(hourInput);
+    if (hourInput && minInput) {
+        const HH = targetDate.getHours();
+        const mm = Math.round(targetDate.getMinutes() / 10) * 10;
+        setNativeValue(hourInput, String(HH).padStart(2, "0"));
+        setNativeValue(minInput, String(mm).padStart(2, "0"));
+    } else {
+        console.warn("time inputs not found via tab order");
+    }
+}
+
+
+

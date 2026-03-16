@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-011-version-1-2-mark",
+    "note":  "Mark the current state as version 1.2 and update version references in docs",
+    "createdAt":  "2026-03-14T22:28:03+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

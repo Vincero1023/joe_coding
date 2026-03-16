@@ -1,0 +1,22 @@
+﻿{
+  "manifest_version": 3,
+  "name": "Naver Blog Auto Publisher",
+  "version": "6.0",
+  "description": "네이버 블로그 발행 자동화 도우미",
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://blog.naver.com/*",
+        "https://smarteditorone.naver.com/*",
+        "https://admin.blog.naver.com/*",
+        "https://editorial.naver.com/*"
+      ],
+      "js": ["content.js"],
+      "all_frames": true
+    }
+  ]
+}

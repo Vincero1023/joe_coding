@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-010-new-site-update-saved",
+    "note":  "Save the current state including the latest site updates, version 1.0 catalog rules, results tab workflow, and system documentation",
+    "createdAt":  "2026-03-14T22:25:35+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

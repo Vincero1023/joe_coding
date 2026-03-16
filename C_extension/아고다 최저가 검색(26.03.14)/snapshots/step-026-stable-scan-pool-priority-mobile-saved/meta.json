@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-026-stable-scan-pool-priority-mobile-saved",
+    "note":  "Save current stable state with fixed 3-tab scan pool, priority ordering, and desktop/mobile variant scanning.",
+    "createdAt":  "2026-03-15T00:32:17+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

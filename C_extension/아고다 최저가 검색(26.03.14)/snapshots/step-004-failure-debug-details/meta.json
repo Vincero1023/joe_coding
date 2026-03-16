@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-004-failure-debug-details",
+    "note":  "Store scan failure diagnostics and show them in popup for discussion",
+    "createdAt":  "2026-03-14T16:07:54+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

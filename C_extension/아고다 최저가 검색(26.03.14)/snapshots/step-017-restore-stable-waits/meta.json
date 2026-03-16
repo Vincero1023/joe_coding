@@ -1,0 +1,14 @@
+﻿{
+    "name":  "step-017-restore-stable-waits",
+    "note":  "Keep parallel worker tabs, but restore the previously stable Agoda wait timing: full load, settle delay, and longer price wait.",
+    "createdAt":  "2026-03-14T23:15:57+09:00",
+    "files":  [
+                  "background.js",
+                  "popup.js",
+                  "popup.html",
+                  "popup.css",
+                  "catalog.js",
+                  "manifest.json",
+                  "README.md"
+              ]
+}

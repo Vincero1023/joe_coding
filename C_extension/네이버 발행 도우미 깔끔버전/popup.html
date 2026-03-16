@@ -1,0 +1,87 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 340px; padding: 15px; font-family: 'Malgun Gothic', sans-serif; font-size: 13px; color: #333; }
+    h3 { margin-top: 0; color: #03C75A; border-bottom: 2px solid #03C75A; padding-bottom: 8px;}
+    .group { margin-bottom: 15px; border: 1px solid #eee; padding: 12px; border-radius: 8px; background: #f9f9f9; }
+    label { display: block; margin-bottom: 6px; font-weight: bold; color: #555; }
+    input[type="text"], select { width: 100%; padding: 8px; margin-bottom: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;}
+    .time-wrapper { display: flex; align-items: center; gap: 5px; margin-bottom: 8px; }
+    .time-input { width: 50px !important; text-align: center; font-size: 14px; font-weight: bold; padding: 5px !important;}
+    .colon { font-weight: bold; color:#777; }
+    .row { display: flex; gap: 5px; margin-bottom: 5px;}
+    button { width: 100%; padding: 12px; border: none; cursor: pointer; font-weight: bold; color: white; border-radius: 5px; margin-top: 5px; transition: 0.2s; }
+    #saveBtn { background: #555; }
+    #saveBtn.saved { background: #2196F3; }
+    #runBtn { background: #03C75A; font-size: 1.1em; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    #runBtn:hover { background: #029f48; }
+    .date-btn-group { display: flex; gap: 5px; margin-bottom: 10px; }
+    .date-btn { flex: 1; padding: 8px; font-size: 12px; background: #fff; color: #333; border: 1px solid #ccc; border-radius: 4px; margin-top:0; cursor: pointer; }
+    .date-btn:hover { background: #eee; }
+    .info { font-size: 11px; color: #888; margin-top: 3px; }
+    .btn-mini { width: 40px; background: #ddd; color: #333; padding: 8px; margin-top: 0; }
+  </style>
+</head>
+<body>
+  <h3>네이버 블로그 발행 비서</h3>
+
+  <div class="group">
+    <label>설정 프로필</label>
+    <div class="row">
+      <select id="profileSelect" style="margin-bottom:0;"><option value="default">기본 설정</option></select>
+      <button id="addProfileBtn" class="btn-mini">+</button>
+      <button id="delProfileBtn" class="btn-mini">-</button>
+    </div>
+  </div>
+
+  <div class="group">
+    <label>카테고리 (정확한 이름)</label>
+    <input type="text" id="categoryName" placeholder="예: 맛집 리뷰">
+
+    <label>예약 기준일 설정</label>
+    <div class="date-btn-group">
+      <button id="setTodayBtn" class="date-btn">오늘</button>
+      <button id="setTomorrowBtn" class="date-btn">내일</button>
+    </div>
+
+    <label>시작 시간</label>
+    <div class="time-wrapper">
+      <input type="number" id="startHour" class="time-input" min="0" max="23" placeholder="09">
+      <span class="colon">:</span>
+      <input type="number" id="startMin" class="time-input" min="0" max="59" placeholder="00">
+      <span class="info" style="margin-left:5px;">(휠 가능)</span>
+    </div>
+
+    <label>발행 간격 (분)</label>
+    <input type="number" id="intervalMin" value="60" style="width:100%">
+
+    <hr style="border:0; border-top:1px dashed #ccc; margin:10px 0;">
+
+    <label>금지 시간 (시:분)</label>
+    <div class="time-wrapper">
+      <input type="number" id="blockStartH" class="time-input" placeholder="23">
+      <span class="colon">:</span>
+      <input type="number" id="blockStartM" class="time-input" placeholder="00">
+      <span class="colon">~</span>
+      <input type="number" id="blockEndH" class="time-input" placeholder="07">
+      <span class="colon">:</span>
+      <input type="number" id="blockEndM" class="time-input" placeholder="00">
+    </div>
+  </div>
+
+  <div class="group">
+    <label>마지막 예약 이력</label>
+    <input type="text" id="lastScheduledInfo" disabled style="background:#eee; color:#666;">
+    <button id="resetTimeBtn" style="background: #ff9800; padding: 6px; font-size:12px;">기록 초기화</button>
+  </div>
+
+  <div class="row">
+    <button id="saveBtn">설정 저장</button>
+    <button id="runBtn">자동 발행 실행</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

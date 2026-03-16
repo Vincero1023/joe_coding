@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Agoda Scanner</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="app">
+      <section class="panel hero">
+        <p class="eyebrow">Agoda Campaign Scanner</p>
+        <h1>설정 후 결과 탭에서 실시간으로 비교합니다.</h1>
+        <p class="hero-copy">검색을 시작하면 결과 전용 탭이 열리고, 그 탭에서 진행 상태와 링크를 계속 확인할 수 있습니다.</p>
+        <div class="action-row">
+          <button id="scanButton" type="button" class="primary">Top 3 검색</button>
+          <button id="scanAndOpenButton" type="button" class="secondary">검색 후 1위 열기</button>
+          <button id="openResultsButton" type="button" class="secondary">결과 탭 열기</button>
+          <button id="stopButton" type="button" class="ghost" disabled>중지</button>
+        </div>
+        <p id="statusText" class="status"></p>
+        <p id="scanSummary" class="summary"></p>
+      </section>
+
+      <section class="panel settings">
+        <div class="panel-head">
+          <h2>검색 옵션</h2>
+          <button id="resetButton" type="button" class="ghost mini">기본값 복원</button>
+        </div>
+
+        <label class="toggle">
+          <input id="autoRunInput" type="checkbox">
+          <span>팝업을 열면 자동으로 결과 탭과 검색을 시작</span>
+        </label>
+
+        <div class="group-block">
+          <div class="group-head">
+            <div>
+              <h3>기본/유입</h3>
+              <p id="trafficCount" class="group-note"></p>
+            </div>
+            <div class="mini-actions">
+              <button type="button" class="mini secondary" data-group="traffic" data-action="all">전체</button>
+              <button type="button" class="mini ghost" data-group="traffic" data-action="clear">해제</button>
+            </div>
+          </div>
+          <div id="trafficList" class="option-grid"></div>
+        </div>
+
+        <div class="group-block">
+          <div class="group-head">
+            <div>
+              <h3>카드/결제</h3>
+              <p id="cardCount" class="group-note"></p>
+            </div>
+            <div class="mini-actions">
+              <button type="button" class="mini secondary" data-group="cards" data-action="all">전체</button>
+              <button type="button" class="mini ghost" data-group="cards" data-action="clear">해제</button>
+            </div>
+          </div>
+          <div id="cardList" class="option-grid"></div>
+        </div>
+
+        <div class="group-block">
+          <div class="group-head">
+            <div>
+              <h3>항공사/적립</h3>
+              <p id="airlineCount" class="group-note"></p>
+            </div>
+            <div class="mini-actions">
+              <button type="button" class="mini secondary" data-group="airlines" data-action="all">전체</button>
+              <button type="button" class="mini ghost" data-group="airlines" data-action="clear">해제</button>
+            </div>
+          </div>
+          <div id="airlineList" class="option-grid"></div>
+        </div>
+
+        <div class="group-block">
+          <div class="group-head">
+            <div>
+              <h3>제휴 프로모션</h3>
+              <p id="promoCount" class="group-note"></p>
+            </div>
+            <div class="mini-actions">
+              <button type="button" class="mini secondary" data-group="promos" data-action="all">전체</button>
+              <button type="button" class="mini ghost" data-group="promos" data-action="clear">해제</button>
+            </div>
+          </div>
+          <div id="promoList" class="option-grid"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="catalog.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube → Notion 설교 자료 수집기",
+  "version": "2.0.0",
+  "description": "YouTube 영상/채널/재생목록을 Notion 데이터베이스에 자동 저장",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "options_page": "settings.html",
+  "commands": {
+    "save-current-video": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "현재 영상 저장"
+    },
+    "save-playlist": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+P",
+        "mac": "Command+Shift+P"
+      },
+      "description": "재생목록 저장"
+    },
+    "subscribe-channel-new": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+N",
+        "mac": "Command+Shift+N"
+      },
+      "description": "채널 구독 (신규만)"
+    },
+    "subscribe-channel-all": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+A",
+        "mac": "Command+Shift+A"
+      },
+      "description": "채널 구독 (전체)"
+    }
+  }
+}

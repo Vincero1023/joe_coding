@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Text Copy Helper</title>
+    <link rel="stylesheet" href="viewer.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="meta">
+        <h1 id="doc-title">Loading...</h1>
+        <a id="doc-url" href="#" target="_blank" rel="noreferrer noopener"></a>
+      </div>
+      <div class="actions">
+        <button id="download-html-btn" type="button">Download HTML</button>
+        <button id="download-txt-btn" type="button">Download TXT</button>
+        <button id="copy-html-btn" type="button">Copy HTML</button>
+        <button id="copy-md-btn" type="button">Copy Markdown</button>
+      </div>
+    </header>
+
+    <main>
+      <article id="content" aria-live="polite"></article>
+    </main>
+
+    <footer class="status-wrap">
+      <p id="status">Ready</p>
+    </footer>
+
+    <script src="viewer.js"></script>
+  </body>
+</html>

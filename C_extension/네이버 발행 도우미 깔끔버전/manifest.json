@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Naver Blog Auto Publisher (Helper)",
+  "version": "6.0",
+  "description": "Naver blog auto publisher helper",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://blog.naver.com/*",
+        "https://smarteditorone.naver.com/*",
+        "https://admin.blog.naver.com/*",
+        "https://editorial.naver.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "all_frames": true
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YouTube Transcript Tools</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="container">
+      <h1>YouTube Transcript Tools</h1>
+
+      <section class="actions">
+        <button data-action="open">1) Open Transcript In New Tab</button>
+        <button data-action="copy">2) Copy Transcript</button>
+        <button data-action="download">3) Download TXT</button>
+        <button data-action="summarize">4) Send Summary Prompt</button>
+        <button data-action="manualize">5) Build Manual Prompt</button>
+      </section>
+
+      <section class="settings">
+        <h2>AI Models</h2>
+        <div id="modelButtons" class="model-grid">
+          <button type="button" class="model-btn" data-model="chatgpt">ChatGPT</button>
+          <button type="button" class="model-btn" data-model="gpt5_2">GPT-5.2</button>
+          <button type="button" class="model-btn" data-model="gpt5_2_instant">GPT-5.2 Instant</button>
+          <button type="button" class="model-btn" data-model="gpt5_2_thinking">GPT-5.2 Thinking</button>
+          <button type="button" class="model-btn" data-model="gpt5_1_instant">GPT-5.1 Instant</button>
+          <button type="button" class="model-btn" data-model="gpt5_1_thinking">GPT-5.1 Thinking</button>
+          <button type="button" class="model-btn" data-model="gpt4o">GPT-4o</button>
+          <button type="button" class="model-btn" data-model="custom_gpts">Custom GPTs</button>
+          <button type="button" class="model-btn" data-model="claude">Claude</button>
+          <button type="button" class="model-btn" data-model="opus_4_5">Opus 4.5</button>
+          <button type="button" class="model-btn" data-model="haiku_4_5">Haiku 4.5</button>
+          <button type="button" class="model-btn" data-model="mistral">Mistral</button>
+          <button type="button" class="model-btn" data-model="gemini">Gemini</button>
+          <button type="button" class="model-btn" data-model="ai_studio">AI Studio</button>
+          <button type="button" class="model-btn" data-model="grok">Grok</button>
+          <button type="button" class="model-btn" data-model="custom">Custom URL</button>
+        </div>
+
+        <label for="customAiUrl">Custom AI URL (used when Custom URL is selected)</label>
+        <input id="customAiUrl" type="text" placeholder="https://chatgpt.com/">
+
+        <label class="checkbox">
+          <input id="autoSubmit" type="checkbox">
+          Try auto-send after prompt insertion (Enter/Send)
+        </label>
+
+        <label class="checkbox">
+          <input id="chatgptTemporaryChat" type="checkbox">
+          Use ChatGPT Temporary Chat (no history)
+        </label>
+
+        <label for="language">Preferred Caption Language (optional)</label>
+        <input id="language" type="text" placeholder="ko or en">
+
+        <label for="summaryTemplate">Prompt for Summary</label>
+        <div class="row">
+          <select id="summaryPreset">
+            <option value="default">Default</option>
+            <option value="sermon">Sermon</option>
+            <option value="lecture">Lecture</option>
+            <option value="blog">Blog</option>
+            <option value="study">Study Notes</option>
+          </select>
+          <button type="button" id="applyPreset">Apply Preset</button>
+        </div>
+        <textarea id="summaryTemplate" rows="9"></textarea>
+
+        <label for="manualTemplate">Prompt for Manual</label>
+        <div class="row">
+          <select id="manualPreset">
+            <option value="default">Detailed Manual</option>
+            <option value="tutorial">Tutorial</option>
+            <option value="reference">Reference Guide</option>
+          </select>
+          <button type="button" id="applyManualPreset">Apply Preset</button>
+        </div>
+        <textarea id="manualTemplate" rows="11"></textarea>
+
+        <button id="saveSettings">Save Settings</button>
+      </section>
+
+      <details class="debug-panel">
+        <summary>Debug Panel</summary>
+        <pre id="debugInfo" class="debug-info">No debug data yet.</pre>
+      </details>
+
+      <p class="shortcuts">Shortcuts: <code>Ctrl+Shift+1/2/3/4</code></p>
+      <p class="shortcuts">1: Open transcript / 2: Copy transcript / 3: Download TXT / 4: Summary prompt / 5: Manual prompt via button</p>
+      <p class="shortcuts">If a shortcut does not work, check chrome://extensions/shortcuts for conflicts.</p>
+      <p id="status" class="status"></p>
+      <p id="buildInfo" class="shortcuts"></p>
+    </main>
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>
