@@ -1,0 +1,203 @@
+{
+  "pages_analyzed": 1,
+  "source_files": [
+    "키워드 – PRIME-2026-03-17T13-47-56.html"
+  ],
+  "site_type": [
+    "keyword_tool",
+    "content_site"
+  ],
+  "important_keywords": [
+    "검색량",
+    "키워드"
+  ],
+  "core_functions": [
+    "keyword_analysis",
+    "scoring_system",
+    "data_filtering",
+    "content_guidance"
+  ],
+  "monetization_model": "CPC 기반 키워드 분석 SaaS",
+  "data_source": "네이버 광고 API 추정",
+  "business_logic": [
+    "CPC 기반 키워드 점수화"
+  ],
+  "ui_components": [
+    {
+      "type": "filter",
+      "role": "data filtering"
+    },
+    {
+      "type": "table",
+      "role": "data results"
+    },
+    {
+      "type": "article",
+      "role": "guide content"
+    }
+  ],
+  "user_flow": [
+    {
+      "name": "keyword_analysis_flow",
+      "process": "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회",
+      "output": "data results"
+    },
+    {
+      "name": "content_to_tool_flow",
+      "process": "가이드 콘텐츠에서 전략을 설명하고 도구 사용으로 연결",
+      "output": "guide content"
+    }
+  ],
+  "data_inputs": [
+    {
+      "type": "filter",
+      "role": "metric conditions"
+    }
+  ],
+  "data_outputs": [
+    {
+      "type": "table",
+      "role": "keyword metrics"
+    },
+    {
+      "type": "article",
+      "role": "guide articles"
+    }
+  ],
+  "api_patterns": [],
+  "feature_logic": [
+    {
+      "feature": "keyword_analysis",
+      "logic": "입력 키워드의 검색량, CPC, 경쟁도 데이터를 조회"
+    },
+    {
+      "feature": "keyword_scoring",
+      "logic": "키워드 지표를 조합해 우선순위 점수 계산"
+    },
+    {
+      "feature": "data_filtering",
+      "logic": "검색량, CPC, 경쟁도 조건으로 결과를 필터링"
+    },
+    {
+      "feature": "content_guidance",
+      "logic": "블로그/가이드 콘텐츠로 키워드 전략과 도구 사용법을 제공"
+    }
+  ],
+  "features": [
+    {
+      "goal": "키워드 검색",
+      "description": "사용자가 키워드의 검색량, CPC, 경쟁도를 확인하려고 할 때 선택하는 기능",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "table",
+          "role": "keyword metrics"
+        }
+      ],
+      "logic": [
+        "입력 키워드의 검색량, CPC, 경쟁도 데이터를 조회",
+        "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회"
+      ],
+      "ui": [
+        {
+          "type": "table",
+          "role": "data results"
+        }
+      ]
+    },
+    {
+      "goal": "점수 계산",
+      "description": "검색량, CPC, 경쟁도를 조합해 키워드 우선순위를 계산해야 할 때 선택하는 기능",
+      "inputs": [
+        {
+          "type": "filter",
+          "role": "metric conditions"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "table",
+          "role": "keyword metrics"
+        }
+      ],
+      "logic": [
+        "키워드 지표를 조합해 우선순위 점수 계산",
+        "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회",
+        "CPC 기반 키워드 점수화"
+      ],
+      "ui": [
+        {
+          "type": "filter",
+          "role": "data filtering"
+        },
+        {
+          "type": "table",
+          "role": "data results"
+        }
+      ]
+    },
+    {
+      "goal": "필터링",
+      "description": "결과를 검색량, CPC, 경쟁도 조건으로 좁혀야 할 때 선택하는 기능",
+      "inputs": [
+        {
+          "type": "filter",
+          "role": "metric conditions"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "table",
+          "role": "keyword metrics"
+        }
+      ],
+      "logic": [
+        "검색량, CPC, 경쟁도 조건으로 결과를 필터링",
+        "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회"
+      ],
+      "ui": [
+        {
+          "type": "filter",
+          "role": "data filtering"
+        },
+        {
+          "type": "table",
+          "role": "data results"
+        }
+      ]
+    },
+    {
+      "goal": "콘텐츠 제공",
+      "description": "가이드나 블로그 문서로 전략과 사용법을 설명해야 할 때 선택하는 기능",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "article",
+          "role": "guide articles"
+        }
+      ],
+      "logic": [
+        "블로그/가이드 콘텐츠로 키워드 전략과 도구 사용법을 제공",
+        "가이드 콘텐츠에서 전략을 설명하고 도구 사용으로 연결"
+      ],
+      "ui": [
+        {
+          "type": "article",
+          "role": "guide content"
+        }
+      ]
+    }
+  ],
+  "content_exports": [
+    {
+      "index": 1,
+      "title": "\" \" 검색 결과",
+      "source_file": "키워드 – PRIME-2026-03-17T13-47-56.html",
+      "html_file": "guide_1.html",
+      "markdown_file": "guide_1.md"
+    }
+  ],
+  "keyword_selector": ".keyword-golden-table tbody tr td:nth-child(2), .keyword-golden-table tr td:nth-child(2)",
+  "category_selector": null,
+  "source": "keyword_prime"
+}

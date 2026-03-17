@@ -1,0 +1,313 @@
+{
+  "pages_analyzed": 2,
+  "source_files": [
+    "키워드마스터-2026-03-17T13-58-25.html",
+    "키워드마스터-2026-03-17T13-58-31.html"
+  ],
+  "site_type": [
+    "keyword_tool",
+    "content_site"
+  ],
+  "important_keywords": [
+    "CPC",
+    "검색량",
+    "키워드",
+    "확장",
+    "추천"
+  ],
+  "core_functions": [
+    "keyword_analysis",
+    "keyword_expansion",
+    "scoring_system",
+    "data_filtering",
+    "content_guidance"
+  ],
+  "monetization_model": "CPC 기반 키워드 분석 SaaS",
+  "data_source": "네이버 검색 데이터 추정",
+  "business_logic": [
+    "고CPC 키워드 우선 노출",
+    "검색량 + 경쟁도 조합 분석",
+    "CPC 기반 키워드 점수화",
+    "고가 키워드 필터링",
+    "연관 키워드 추천 및 확장"
+  ],
+  "ui_components": [
+    {
+      "type": "input",
+      "role": "keyword search"
+    },
+    {
+      "type": "textarea",
+      "role": "bulk keyword input"
+    },
+    {
+      "type": "filter",
+      "role": "data filtering"
+    },
+    {
+      "type": "table",
+      "role": "data results"
+    },
+    {
+      "type": "list",
+      "role": "keyword suggestions"
+    },
+    {
+      "type": "article",
+      "role": "guide content"
+    }
+  ],
+  "user_flow": [
+    {
+      "name": "keyword_analysis_flow",
+      "process": "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회",
+      "output": "data results"
+    },
+    {
+      "name": "keyword_expansion_flow",
+      "process": "기본 키워드에서 연관어와 추천 키워드를 확장",
+      "output": "keyword suggestions"
+    },
+    {
+      "name": "content_to_tool_flow",
+      "process": "가이드 콘텐츠에서 전략을 설명하고 도구 사용으로 연결",
+      "output": "guide content"
+    }
+  ],
+  "data_inputs": [
+    {
+      "type": "input",
+      "role": "keyword seed"
+    },
+    {
+      "type": "textarea",
+      "role": "bulk keyword seed"
+    },
+    {
+      "type": "filter",
+      "role": "metric conditions"
+    }
+  ],
+  "data_outputs": [
+    {
+      "type": "table",
+      "role": "keyword metrics"
+    },
+    {
+      "type": "list",
+      "role": "related keyword suggestions"
+    },
+    {
+      "type": "article",
+      "role": "guide articles"
+    }
+  ],
+  "api_patterns": [],
+  "feature_logic": [
+    {
+      "feature": "keyword_analysis",
+      "logic": "입력 키워드의 검색량, CPC, 경쟁도 데이터를 조회"
+    },
+    {
+      "feature": "keyword_expansion",
+      "logic": "기본 키워드에서 연관어, 추천어, 조합 키워드를 생성"
+    },
+    {
+      "feature": "keyword_scoring",
+      "logic": "CPC + 검색량 + 경쟁도 기반 점수 계산"
+    },
+    {
+      "feature": "data_filtering",
+      "logic": "검색량, CPC, 경쟁도 조건으로 결과를 필터링"
+    },
+    {
+      "feature": "content_guidance",
+      "logic": "블로그/가이드 콘텐츠로 키워드 전략과 도구 사용법을 제공"
+    }
+  ],
+  "features": [
+    {
+      "goal": "키워드 검색",
+      "description": "사용자가 키워드의 검색량, CPC, 경쟁도를 확인하려고 할 때 선택하는 기능",
+      "inputs": [
+        {
+          "type": "input",
+          "role": "keyword seed"
+        },
+        {
+          "type": "textarea",
+          "role": "bulk keyword seed"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "table",
+          "role": "keyword metrics"
+        }
+      ],
+      "logic": [
+        "입력 키워드의 검색량, CPC, 경쟁도 데이터를 조회",
+        "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회",
+        "고CPC 키워드 우선 노출",
+        "검색량 + 경쟁도 조합 분석"
+      ],
+      "ui": [
+        {
+          "type": "input",
+          "role": "keyword search"
+        },
+        {
+          "type": "textarea",
+          "role": "bulk keyword input"
+        },
+        {
+          "type": "table",
+          "role": "data results"
+        }
+      ]
+    },
+    {
+      "goal": "키워드 확장",
+      "description": "기본 키워드에서 연관어와 추천 키워드를 넓혀서 후보군을 만들 때 선택하는 기능",
+      "inputs": [
+        {
+          "type": "input",
+          "role": "keyword seed"
+        },
+        {
+          "type": "textarea",
+          "role": "bulk keyword seed"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "list",
+          "role": "related keyword suggestions"
+        }
+      ],
+      "logic": [
+        "기본 키워드에서 연관어, 추천어, 조합 키워드를 생성",
+        "기본 키워드에서 연관어와 추천 키워드를 확장",
+        "연관 키워드 추천 및 확장"
+      ],
+      "ui": [
+        {
+          "type": "input",
+          "role": "keyword search"
+        },
+        {
+          "type": "textarea",
+          "role": "bulk keyword input"
+        },
+        {
+          "type": "list",
+          "role": "keyword suggestions"
+        }
+      ]
+    },
+    {
+      "goal": "점수 계산",
+      "description": "검색량, CPC, 경쟁도를 조합해 키워드 우선순위를 계산해야 할 때 선택하는 기능",
+      "inputs": [
+        {
+          "type": "input",
+          "role": "keyword seed"
+        },
+        {
+          "type": "filter",
+          "role": "metric conditions"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "table",
+          "role": "keyword metrics"
+        }
+      ],
+      "logic": [
+        "CPC + 검색량 + 경쟁도 기반 점수 계산",
+        "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회",
+        "검색량 + 경쟁도 조합 분석",
+        "CPC 기반 키워드 점수화"
+      ],
+      "ui": [
+        {
+          "type": "filter",
+          "role": "data filtering"
+        },
+        {
+          "type": "table",
+          "role": "data results"
+        }
+      ]
+    },
+    {
+      "goal": "필터링",
+      "description": "결과를 검색량, CPC, 경쟁도 조건으로 좁혀야 할 때 선택하는 기능",
+      "inputs": [
+        {
+          "type": "filter",
+          "role": "metric conditions"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "table",
+          "role": "keyword metrics"
+        }
+      ],
+      "logic": [
+        "검색량, CPC, 경쟁도 조건으로 결과를 필터링",
+        "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회",
+        "고가 키워드 필터링"
+      ],
+      "ui": [
+        {
+          "type": "filter",
+          "role": "data filtering"
+        },
+        {
+          "type": "table",
+          "role": "data results"
+        }
+      ]
+    },
+    {
+      "goal": "콘텐츠 제공",
+      "description": "가이드나 블로그 문서로 전략과 사용법을 설명해야 할 때 선택하는 기능",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "article",
+          "role": "guide articles"
+        }
+      ],
+      "logic": [
+        "블로그/가이드 콘텐츠로 키워드 전략과 도구 사용법을 제공",
+        "가이드 콘텐츠에서 전략을 설명하고 도구 사용으로 연결"
+      ],
+      "ui": [
+        {
+          "type": "article",
+          "role": "guide content"
+        }
+      ]
+    }
+  ],
+  "content_exports": [
+    {
+      "index": 1,
+      "title": "키워드마스터",
+      "source_file": "키워드마스터-2026-03-17T13-58-25.html",
+      "html_file": "guide_1.html",
+      "markdown_file": "guide_1.md"
+    },
+    {
+      "index": 2,
+      "title": "키워드마스터",
+      "source_file": "키워드마스터-2026-03-17T13-58-31.html",
+      "html_file": "guide_2.html",
+      "markdown_file": "guide_2.md"
+    }
+  ]
+}

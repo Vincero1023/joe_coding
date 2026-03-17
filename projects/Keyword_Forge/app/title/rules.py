@@ -1,0 +1,6 @@
+﻿from __future__ import annotations
+
+NAVER_HOME_MAX_LENGTH = 40
+NAVER_HOME_VARIATIONS = 2
+BLOG_VARIATIONS = 2
+YEAR_TEXT = "2026 최신"

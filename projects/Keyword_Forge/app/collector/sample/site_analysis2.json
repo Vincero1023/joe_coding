@@ -1,0 +1,230 @@
+{
+  "pages_analyzed": 2,
+  "source_files": [
+    "Naver Creator Advisor-2026-03-17T13-50-47.html",
+    "Naver Creator Advisor-2026-03-17T13-50-53.html"
+  ],
+  "site_type": [
+    "keyword_tool",
+    "content_site"
+  ],
+  "important_keywords": [
+    "추천"
+  ],
+  "core_functions": [
+    "keyword_analysis",
+    "keyword_expansion",
+    "data_filtering",
+    "content_guidance"
+  ],
+  "monetization_model": "광고 기반 콘텐츠 수익",
+  "data_source": "데이터 출처 불명",
+  "business_logic": [
+    "연관 키워드 추천 및 확장"
+  ],
+  "ui_components": [
+    {
+      "type": "input",
+      "role": "keyword search"
+    },
+    {
+      "type": "filter",
+      "role": "data filtering"
+    },
+    {
+      "type": "list",
+      "role": "keyword suggestions"
+    },
+    {
+      "type": "list",
+      "role": "data results"
+    },
+    {
+      "type": "article",
+      "role": "guide content"
+    }
+  ],
+  "user_flow": [
+    {
+      "name": "keyword_analysis_flow",
+      "process": "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회",
+      "output": "data results"
+    },
+    {
+      "name": "keyword_expansion_flow",
+      "process": "기본 키워드에서 연관어와 추천 키워드를 확장",
+      "output": "keyword suggestions"
+    },
+    {
+      "name": "content_to_tool_flow",
+      "process": "가이드 콘텐츠에서 전략을 설명하고 도구 사용으로 연결",
+      "output": "guide content"
+    }
+  ],
+  "data_inputs": [
+    {
+      "type": "input",
+      "role": "keyword seed"
+    },
+    {
+      "type": "filter",
+      "role": "metric conditions"
+    }
+  ],
+  "data_outputs": [
+    {
+      "type": "list",
+      "role": "keyword results"
+    },
+    {
+      "type": "list",
+      "role": "related keyword suggestions"
+    },
+    {
+      "type": "article",
+      "role": "guide articles"
+    }
+  ],
+  "api_patterns": [],
+  "feature_logic": [
+    {
+      "feature": "keyword_analysis",
+      "logic": "입력 키워드의 검색량, CPC, 경쟁도 데이터를 조회"
+    },
+    {
+      "feature": "keyword_expansion",
+      "logic": "기본 키워드에서 연관어, 추천어, 조합 키워드를 생성"
+    },
+    {
+      "feature": "data_filtering",
+      "logic": "검색량, CPC, 경쟁도 조건으로 결과를 필터링"
+    },
+    {
+      "feature": "content_guidance",
+      "logic": "블로그/가이드 콘텐츠로 키워드 전략과 도구 사용법을 제공"
+    }
+  ],
+  "features": [
+    {
+      "goal": "키워드 검색",
+      "description": "사용자가 키워드의 검색량, CPC, 경쟁도를 확인하려고 할 때 선택하는 기능",
+      "inputs": [
+        {
+          "type": "input",
+          "role": "keyword seed"
+        }
+      ],
+      "outputs": [],
+      "logic": [
+        "입력 키워드의 검색량, CPC, 경쟁도 데이터를 조회",
+        "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회"
+      ],
+      "ui": [
+        {
+          "type": "input",
+          "role": "keyword search"
+        },
+        {
+          "type": "list",
+          "role": "data results"
+        }
+      ]
+    },
+    {
+      "goal": "키워드 확장",
+      "description": "기본 키워드에서 연관어와 추천 키워드를 넓혀서 후보군을 만들 때 선택하는 기능",
+      "inputs": [
+        {
+          "type": "input",
+          "role": "keyword seed"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "list",
+          "role": "related keyword suggestions"
+        }
+      ],
+      "logic": [
+        "기본 키워드에서 연관어, 추천어, 조합 키워드를 생성",
+        "기본 키워드에서 연관어와 추천 키워드를 확장",
+        "연관 키워드 추천 및 확장"
+      ],
+      "ui": [
+        {
+          "type": "input",
+          "role": "keyword search"
+        },
+        {
+          "type": "list",
+          "role": "keyword suggestions"
+        }
+      ]
+    },
+    {
+      "goal": "필터링",
+      "description": "결과를 검색량, CPC, 경쟁도 조건으로 좁혀야 할 때 선택하는 기능",
+      "inputs": [
+        {
+          "type": "filter",
+          "role": "metric conditions"
+        }
+      ],
+      "outputs": [],
+      "logic": [
+        "검색량, CPC, 경쟁도 조건으로 결과를 필터링",
+        "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회"
+      ],
+      "ui": [
+        {
+          "type": "filter",
+          "role": "data filtering"
+        },
+        {
+          "type": "list",
+          "role": "data results"
+        }
+      ]
+    },
+    {
+      "goal": "콘텐츠 제공",
+      "description": "가이드나 블로그 문서로 전략과 사용법을 설명해야 할 때 선택하는 기능",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "article",
+          "role": "guide articles"
+        }
+      ],
+      "logic": [
+        "블로그/가이드 콘텐츠로 키워드 전략과 도구 사용법을 제공",
+        "가이드 콘텐츠에서 전략을 설명하고 도구 사용으로 연결"
+      ],
+      "ui": [
+        {
+          "type": "article",
+          "role": "guide content"
+        }
+      ]
+    }
+  ],
+  "content_exports": [
+    {
+      "index": 1,
+      "title": "Creator Advisor",
+      "source_file": "Naver Creator Advisor-2026-03-17T13-50-47.html",
+      "html_file": "guide_1.html",
+      "markdown_file": "guide_1.md"
+    },
+    {
+      "index": 2,
+      "title": "Creator Advisor",
+      "source_file": "Naver Creator Advisor-2026-03-17T13-50-53.html",
+      "html_file": "guide_2.html",
+      "markdown_file": "guide_2.md"
+    }
+  ],
+  "keyword_selector": ".u_ni_trend_item .u_ni_trend_text",
+  "category_selector": ".u_ni_trend_title",
+  "source": "naver_trend"
+}
