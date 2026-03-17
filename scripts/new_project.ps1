@@ -1,29 +1,55 @@
-$root = "F:\Joe_Coding"
+$root = "F:\joe_coding"
 
 $name = Read-Host "Project name"
-$idea = Read-Host "Project idea"
+$desc = Read-Host "Project description"
 
 $projectPath = Join-Path $root "projects\$name"
 
 if (Test-Path $projectPath) {
-    Write-Host "Project already exists!"
+    Write-Host "Project already exists"
     exit
 }
 
+# 프로젝트 폴더 생성
 New-Item -ItemType Directory -Path $projectPath | Out-Null
+New-Item -ItemType Directory -Path "$projectPath\src" | Out-Null
+New-Item -ItemType Directory -Path "$projectPath\tests" | Out-Null
 
-Copy-Item (Join-Path $root "templates\PROJECT_TEMPLATE.md") (Join-Path $projectPath "PROJECT.md")
-Copy-Item (Join-Path $root "templates\DEVLOG_TEMPLATE.md") (Join-Path $projectPath "DEVLOG.md")
+# README 생성
+$readme = @"
+# $name
 
-Add-Content (Join-Path $projectPath "PROJECT.md") "`n## Idea`n$idea"
+$desc
 
+## Development
+src : main code  
+tests : test code
+"@
+
+$readme | Out-File "$projectPath\README.md"
+
+# PROJECT 템플릿 복사
+Copy-Item "$root\templates\PROJECT_TEMPLATE.md" "$projectPath\PROJECT.md"
+
+# DEVLOG 템플릿 복사
+Copy-Item "$root\templates\DEVLOG_TEMPLATE.md" "$projectPath\DEVLOG.md"
+
+# requirements 생성
+New-Item "$projectPath\requirements.txt" -ItemType File | Out-Null
+
+# git commit
+Set-Location $root
+
+git add .
+git commit -m "create project $name"
+
+# 프로젝트 폴더 이동
 Set-Location $projectPath
 
-Write-Host "Project created at $projectPath"
-Write-Host "Starting Codex..."
+Write-Host ""
+Write-Host "Project created:"
+Write-Host $projectPath
+Write-Host ""
 
-git init
-
+# codex 실행
 codex --full-auto
-
-Read-Host "Press Enter to exit"
