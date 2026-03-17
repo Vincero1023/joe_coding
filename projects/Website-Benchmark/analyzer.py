@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from codecs import lookup
 from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,6 +29,16 @@ VOID_TAGS = {
 }
 
 INLINE_SKIP_TAGS = {"script", "style", "noscript"}
+HTML_SUFFIXES = {".html", ".htm"}
+ALLOWED_WEB_SUFFIXES = {"", ".html", ".htm", ".php", ".asp", ".aspx"}
+FALLBACK_ENCODINGS = ("utf-8", "utf-8-sig", "cp949", "euc-kr", "iso-8859-1", "latin-1")
+BOM_ENCODINGS = (
+    (b"\xef\xbb\xbf", "utf-8-sig"),
+    (b"\xff\xfe", "utf-16"),
+    (b"\xfe\xff", "utf-16"),
+)
+META_CHARSET_RE = re.compile(br"<meta[^>]+charset=['\"]?\s*([A-Za-z0-9._-]+)", re.IGNORECASE)
+META_CONTENT_RE = re.compile(br"<meta[^>]+content=['\"][^>]*charset=([A-Za-z0-9._-]+)", re.IGNORECASE)
 SECTION_KEYWORDS = {
     "hero": ["hero", "banner", "masthead", "intro"],
     "pricing": ["pricing", "plan", "plans", "subscription"],
@@ -88,6 +99,7 @@ class PageAnalysis:
     source_type: str
     title: str
     meta_description: str
+    encoding: str = ""
     headings: list[HeadingSummary] = field(default_factory=list)
     sections: list[SectionSummary] = field(default_factory=list)
     links: list[LinkSummary] = field(default_factory=list)
@@ -108,6 +120,7 @@ class SiteAnalysis:
     feature_summary: list[Finding] = field(default_factory=list)
     flows: list[Finding] = field(default_factory=list)
     navigation: list[str] = field(default_factory=list)
+    load_issues: list["LoadIssue"] = field(default_factory=list)
     generated_at: str = ""
 
 
@@ -117,6 +130,27 @@ class LoadedDocument:
     source_type: str
     html: str
     base_url: str | None = None
+    encoding: str = ""
+
+
+@dataclass(slots=True)
+class LoadIssue:
+    source: str
+    message: str
+
+
+@dataclass(slots=True)
+class LoadResult:
+    documents: list[LoadedDocument] = field(default_factory=list)
+    issues: list[LoadIssue] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class DecodedContent:
+    source: str
+    text: str
+    encoding: str
+    used_replacement: bool = False
 
 
 class HTMLTreeBuilder(HTMLParser):
@@ -147,10 +181,10 @@ class HTMLTreeBuilder(HTMLParser):
 
 
 def analyze_source(source: str, max_pages: int = 5, crawl_depth: int = 1, timeout: int = 10) -> SiteAnalysis:
-    documents = load_documents(source, max_pages=max_pages, crawl_depth=crawl_depth, timeout=timeout)
-    pages = [analyze_document(document) for document in documents]
+    load_result = load_documents(source, max_pages=max_pages, crawl_depth=crawl_depth, timeout=timeout)
+    pages = [analyze_document(document) for document in load_result.documents]
     normalized_source = canonicalize_url(source) if is_url(source) else str(Path(source).resolve())
-    return aggregate_site(normalized_source, pages)
+    return aggregate_site(normalized_source, pages, load_result.issues)
 
 
 def is_url(value: str) -> bool:
@@ -158,41 +192,61 @@ def is_url(value: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def load_documents(source: str, max_pages: int, crawl_depth: int, timeout: int) -> list[LoadedDocument]:
+def load_documents(source: str, max_pages: int, crawl_depth: int, timeout: int) -> LoadResult:
     if is_url(source):
         return crawl_url(source, max_pages=max_pages, crawl_depth=crawl_depth, timeout=timeout)
 
     path = Path(source)
+    if not path.exists():
+        raise FileNotFoundError(f"Source not found: {source}")
+
     if path.is_dir():
         html_files = sorted(
             item
             for item in path.rglob("*")
-            if item.is_file() and item.suffix.lower() in {".html", ".htm"}
+            if item.is_file() and item.suffix.lower() in HTML_SUFFIXES
         )[:max_pages]
-        return [
-            LoadedDocument(
-                source=str(item.resolve()),
-                source_type="directory-file",
-                html=item.read_text(encoding="utf-8"),
-                base_url=item.resolve().as_uri(),
-            )
-            for item in html_files
-        ]
+        if not html_files:
+            raise ValueError(f"No HTML files found under directory: {source}")
+        documents: list[LoadedDocument] = []
+        issues: list[LoadIssue] = []
+        for item in html_files:
+            document, document_issues = load_file_document(item, "directory-file")
+            documents.append(document)
+            issues.extend(document_issues)
+        return LoadResult(documents=documents, issues=issues)
 
-    return [
+    document, issues = load_file_document(path, "file")
+    return LoadResult(documents=[document], issues=issues)
+
+
+def load_file_document(path: Path, source_type: str) -> tuple[LoadedDocument, list[LoadIssue]]:
+    decoded = decode_html_bytes(path.read_bytes())
+    issues: list[LoadIssue] = []
+    if decoded.used_replacement:
+        issues.append(
+            LoadIssue(
+                source=str(path.resolve()),
+                message=f"Decoded with {decoded.encoding} using replacement characters; some text may be degraded.",
+            )
+        )
+    return (
         LoadedDocument(
             source=str(path.resolve()),
-            source_type="file",
-            html=path.read_text(encoding="utf-8"),
+            source_type=source_type,
+            html=decoded.text,
             base_url=path.resolve().as_uri(),
-        )
-    ]
+            encoding=decoded.encoding,
+        ),
+        issues,
+    )
 
 
-def crawl_url(source: str, max_pages: int, crawl_depth: int, timeout: int) -> list[LoadedDocument]:
+def crawl_url(source: str, max_pages: int, crawl_depth: int, timeout: int) -> LoadResult:
     queue: deque[tuple[str, int]] = deque([(canonicalize_url(source), 0)])
     visited: set[str] = set()
     documents: list[LoadedDocument] = []
+    issues: list[LoadIssue] = []
     root = urlparse(source)
 
     while queue and len(documents) < max_pages:
@@ -202,16 +256,33 @@ def crawl_url(source: str, max_pages: int, crawl_depth: int, timeout: int) -> li
         visited.add(current)
 
         try:
-            html = fetch_html(current, timeout=timeout)
-        except (HTTPError, URLError, TimeoutError):
+            fetched = fetch_html(current, timeout=timeout)
+        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+            issues.append(LoadIssue(source=current, message=describe_load_error(exc)))
             continue
 
-        documents.append(LoadedDocument(source=current, source_type="url", html=html, base_url=current))
+        if fetched.used_replacement:
+            issues.append(
+                LoadIssue(
+                    source=fetched.source,
+                    message=f"Decoded with {fetched.encoding} using replacement characters; some text may be degraded.",
+                )
+            )
+
+        documents.append(
+            LoadedDocument(
+                source=fetched.source,
+                source_type="url",
+                html=fetched.text,
+                base_url=fetched.source,
+                encoding=fetched.encoding,
+            )
+        )
         if depth >= crawl_depth:
             continue
 
-        root_node = parse_html(html)
-        for link in extract_links(root_node, current):
+        root_node = parse_html(fetched.text)
+        for link in extract_links(root_node, fetched.source):
             if not link.internal:
                 continue
             next_url = canonicalize_url(link.target)
@@ -220,21 +291,26 @@ def crawl_url(source: str, max_pages: int, crawl_depth: int, timeout: int) -> li
                 continue
             if parsed.scheme not in {"http", "https"}:
                 continue
-            if parsed.path and Path(parsed.path).suffix.lower() not in {"", ".html", ".htm", ".php", ".asp", ".aspx"}:
+            if parsed.path and Path(parsed.path).suffix.lower() not in ALLOWED_WEB_SUFFIXES:
                 continue
             queue.append((next_url, depth + 1))
 
-    return documents
+    return LoadResult(documents=documents, issues=issues)
 
 
-def fetch_html(source: str, timeout: int) -> str:
+def fetch_html(source: str, timeout: int) -> DecodedContent:
     request = Request(source, headers={"User-Agent": "website-benchmark/0.1"})
     with urlopen(request, timeout=timeout) as response:
         content_type = response.headers.get("Content-Type", "")
         if "html" not in content_type and content_type:
             raise HTTPError(source, response.status, f"Non-HTML content: {content_type}", response.headers, None)
-        charset = response.headers.get_content_charset() or "utf-8"
-        return response.read().decode(charset, errors="replace")
+        decoded = decode_html_bytes(response.read(), declared_encoding=response.headers.get_content_charset())
+        return DecodedContent(
+            source=canonicalize_url(response.geturl()),
+            text=decoded.text,
+            encoding=decoded.encoding,
+            used_replacement=decoded.used_replacement,
+        )
 
 
 def analyze_document(document: LoadedDocument) -> PageAnalysis:
@@ -264,6 +340,7 @@ def analyze_document(document: LoadedDocument) -> PageAnalysis:
     return PageAnalysis(
         source=document.source,
         source_type=document.source_type,
+        encoding=document.encoding,
         title=title,
         meta_description=meta_description,
         headings=headings,
@@ -669,7 +746,7 @@ def summarize_page(title: str, page_role: str, features: list[Finding], stats: d
     )
 
 
-def aggregate_site(source: str, pages: list[PageAnalysis]) -> SiteAnalysis:
+def aggregate_site(source: str, pages: list[PageAnalysis], load_issues: list[LoadIssue]) -> SiteAnalysis:
     component_counter = Counter(component.name for page in pages for component in page.components)
     feature_counter = Counter(feature.name for page in pages for feature in page.features)
     navigation = dedupe_strings([link.text for page in pages[:1] for link in page.links if link.internal and link.text])[:8]
@@ -696,6 +773,7 @@ def aggregate_site(source: str, pages: list[PageAnalysis]) -> SiteAnalysis:
         feature_summary=feature_summary,
         flows=infer_site_flows(pages),
         navigation=navigation,
+        load_issues=load_issues,
         generated_at=generated_at,
     )
 
@@ -776,3 +854,71 @@ def guess_label_from_href(href: str) -> str:
     parsed = urlparse(href)
     candidate = Path(parsed.path).stem or parsed.netloc
     return humanize_identifier(candidate) or href
+
+
+def decode_html_bytes(data: bytes, declared_encoding: str | None = None) -> DecodedContent:
+    candidate_encodings = build_encoding_candidates(data, declared_encoding)
+    last_error: UnicodeDecodeError | None = None
+    for encoding in candidate_encodings:
+        try:
+            return DecodedContent(source="", text=data.decode(encoding), encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+            continue
+    fallback_text = data.decode(candidate_encodings[0] if candidate_encodings else "utf-8", errors="replace")
+    fallback_encoding = candidate_encodings[0] if candidate_encodings else "utf-8"
+    if last_error is None and not fallback_text:
+        fallback_encoding = "utf-8"
+    return DecodedContent(source="", text=fallback_text, encoding=fallback_encoding, used_replacement=True)
+
+
+def build_encoding_candidates(data: bytes, declared_encoding: str | None = None) -> list[str]:
+    candidates: list[str] = []
+    for encoding in (
+        normalize_encoding_name(declared_encoding),
+        detect_bom_encoding(data),
+        sniff_meta_charset(data),
+        *FALLBACK_ENCODINGS,
+    ):
+        if not encoding or encoding in candidates:
+            continue
+        candidates.append(encoding)
+    return candidates or ["utf-8"]
+
+
+def normalize_encoding_name(encoding: str | None) -> str | None:
+    if not encoding:
+        return None
+    cleaned = encoding.strip().strip("\"'").lower()
+    try:
+        return lookup(cleaned).name
+    except LookupError:
+        return None
+
+
+def detect_bom_encoding(data: bytes) -> str | None:
+    for marker, encoding in BOM_ENCODINGS:
+        if data.startswith(marker):
+            return encoding
+    return None
+
+
+def sniff_meta_charset(data: bytes) -> str | None:
+    head = data[:4096]
+    for pattern in (META_CHARSET_RE, META_CONTENT_RE):
+        match = pattern.search(head)
+        if not match:
+            continue
+        return normalize_encoding_name(match.group(1).decode("ascii", errors="ignore"))
+    return None
+
+
+def describe_load_error(exc: Exception) -> str:
+    if isinstance(exc, HTTPError):
+        return f"HTTP {exc.code}: {exc.reason}"
+    if isinstance(exc, URLError):
+        reason = getattr(exc, "reason", exc)
+        return f"URL error: {reason}"
+    if isinstance(exc, TimeoutError):
+        return "Timed out while loading page"
+    return str(exc)

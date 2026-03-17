@@ -23,7 +23,16 @@ def render_markdown(site: SiteAnalysis) -> str:
     lines.append(f"- Common components: {format_findings(site.common_components) or 'No strong common component pattern detected'}")
     lines.append(f"- Key features: {format_findings(site.feature_summary[:6]) or 'No high-confidence feature signal detected'}")
     lines.append(f"- Candidate user flows: {format_findings(site.flows[:5]) or 'No high-confidence user flow detected'}")
+    if site.load_issues:
+        lines.append(f"- Load issues: {len(site.load_issues)}")
     lines.append("")
+
+    if site.load_issues:
+        lines.append("## Load Notes")
+        lines.append("")
+        for issue in site.load_issues:
+            lines.append(f"- `{issue.source}`: {issue.message}")
+        lines.append("")
 
     lines.append("## Page Inventory")
     lines.append("")
@@ -68,6 +77,8 @@ def render_page(page: PageAnalysis) -> list[str]:
     lines.append(f"### {title}")
     lines.append("")
     lines.append(f"- Source: `{page.source}`")
+    if page.encoding:
+        lines.append(f"- Encoding: `{page.encoding}`")
     lines.append(f"- Role: `{page.page_role}`")
     lines.append(f"- Summary: {page.summary}")
     if page.meta_description:

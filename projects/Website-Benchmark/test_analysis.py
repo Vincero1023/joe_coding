@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+from urllib.error import URLError
 
 from analyzer import analyze_source
 from report import render_markdown
@@ -42,6 +44,47 @@ class WebsiteBenchmarkTests(unittest.TestCase):
         self.assertIn("## Page Inventory", markdown)
         self.assertIn("## Cross-Page Patterns", markdown)
         self.assertIn("Landing -> pricing -> demo/contact", markdown)
+
+    def test_non_utf8_html_file_is_decoded_with_declared_charset(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            html_path = Path(tempdir) / "sample_cp949.html"
+            html = """
+            <html>
+              <head>
+                <meta charset="cp949">
+                <title>문의 페이지</title>
+              </head>
+              <body>
+                <main>
+                  <h1>상담 신청</h1>
+                  <form action="/contact" method="post">
+                    <input name="email" />
+                    <textarea name="message"></textarea>
+                    <button>보내기</button>
+                  </form>
+                </main>
+              </body>
+            </html>
+            """
+            html_path.write_bytes(html.encode("cp949"))
+
+            report = analyze_source(str(html_path))
+            markdown = render_markdown(report)
+
+            self.assertEqual(report.pages[0].title, "문의 페이지")
+            self.assertEqual(report.pages[0].encoding, "cp949")
+            self.assertIn("문의 페이지", markdown)
+            self.assertIn("- Encoding: `cp949`", markdown)
+
+    def test_url_failures_are_reported_in_load_notes(self) -> None:
+        with patch("analyzer.urlopen", side_effect=URLError("timed out")):
+            report = analyze_source("https://example.com", max_pages=1, timeout=1)
+            markdown = render_markdown(report)
+
+        self.assertEqual(len(report.pages), 0)
+        self.assertEqual(len(report.load_issues), 1)
+        self.assertIn("## Load Notes", markdown)
+        self.assertIn("URL error: timed out", markdown)
 
 
 if __name__ == "__main__":

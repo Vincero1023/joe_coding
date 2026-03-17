@@ -1,55 +1,43 @@
-$root = Split-Path -Parent $PSScriptRoot
+# ================================
+# 새 프로젝트 생성 스크립트 (최적화 버전)
+# ================================
 
-$name = Read-Host "Project name"
-$desc = Read-Host "Project description"
+param (
+    [string]$ProjectName = "benchmark_tool"
+)
 
-$projectPath = Join-Path $root "projects\$name"
+# 프로젝트 생성
+Write-Host "Creating project: $ProjectName"
 
-if (Test-Path $projectPath) {
-    Write-Host "Project already exists"
-    exit
-}
+New-Item -ItemType Directory -Path $ProjectName -Force | Out-Null
 
-# 프로젝트 폴더 생성
-New-Item -ItemType Directory -Path $projectPath | Out-Null
-New-Item -ItemType Directory -Path "$projectPath\src" | Out-Null
-New-Item -ItemType Directory -Path "$projectPath\tests" | Out-Null
+Set-Location $ProjectName
 
-# README 생성
-$readme = @"
-# $name
+# 기본 폴더 구조
+New-Item -ItemType Directory -Path "core" -Force | Out-Null
+New-Item -ItemType Directory -Path "analyzer" -Force | Out-Null
+New-Item -ItemType Directory -Path "input" -Force | Out-Null
+New-Item -ItemType Directory -Path "output" -Force | Out-Null
 
-$desc
+# 기본 파일 생성
+New-Item -ItemType File -Path "main.py" -Force | Out-Null
+New-Item -ItemType File -Path "PROJECT_GUIDE.md" -Force | Out-Null
 
-## Development
-src : main code  
-tests : test code
-"@
+# 기본 가이드 작성 (핵심만)
+@"
+benchmark_tool 프로젝트
 
-$readme | Out-File "$projectPath\README.md"
+목표:
+HTML → site_analysis.json 생성
 
-# PROJECT 템플릿 복사
-Copy-Item "$root\templates\PROJECT_TEMPLATE.md" "$projectPath\PROJECT.md"
+핵심 기능:
+- HTML 분석
+- UI 구조 추출
+- 기능 추론
 
-# DEVLOG 템플릿 복사
-Copy-Item "$root\templates\DEVLOG_TEMPLATE.md" "$projectPath\DEVLOG.md"
+현재 상태:
+v1 개발 중
+"@ | Set-Content "PROJECT_GUIDE.md"
 
-# requirements 생성
-New-Item "$projectPath\requirements.txt" -ItemType File | Out-Null
-
-# git commit
-Set-Location $root
-
-git add .
-git commit -m "create project $name"
-
-# 프로젝트 폴더 이동
-Set-Location $projectPath
-
-Write-Host ""
-Write-Host "Project created:"
-Write-Host $projectPath
-Write-Host ""
-
-# codex 실행
-codex --full-auto
+Write-Host "Project structure created successfully!"
+Write-Host "Run Codex manually using: cx"

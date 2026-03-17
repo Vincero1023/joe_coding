@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from analyzer import analyze_source
@@ -43,16 +44,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    site_analysis = analyze_source(
-        args.source,
-        max_pages=max(1, args.max_pages),
-        crawl_depth=max(0, args.crawl_depth),
-        timeout=max(1, args.timeout),
-    )
+    try:
+        site_analysis = analyze_source(
+            args.source,
+            max_pages=max(1, args.max_pages),
+            crawl_depth=max(0, args.crawl_depth),
+            timeout=max(1, args.timeout),
+        )
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(render_markdown(site_analysis), encoding="utf-8")
 
+    if site_analysis.load_issues:
+        print(f"Encountered {len(site_analysis.load_issues)} load issue(s).", file=sys.stderr)
     print(f"Analyzed {len(site_analysis.pages)} page(s) and wrote {output_path}")
-    return 0
+    return 0 if site_analysis.pages else 1
