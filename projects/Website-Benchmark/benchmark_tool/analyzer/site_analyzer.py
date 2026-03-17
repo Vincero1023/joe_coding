@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
 from typing import Any
 
 from bs4 import BeautifulSoup, Tag
@@ -12,20 +11,156 @@ FETCH_CALL_REGEX = re.compile(r"fetch\s*\(\s*[\"']([^\"']+)[\"']", re.IGNORECASE
 XHR_OPEN_REGEX = re.compile(r"\.open\s*\(\s*[\"'][A-Z]+[\"']\s*,\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
 AXIOS_CALL_REGEX = re.compile(r"axios\.(get|post|put|delete|patch)\s*\(\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
 AJAX_URL_REGEX = re.compile(r"url\s*:\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
-FUNCTION_ORDER = [
-    "navigation",
-    "search",
-    "login",
-    "registration",
-    "filtering",
-    "data_retrieval",
-    "form_submission",
-    "data_entry",
-    "tabular_data_view",
-    "listing_view",
-    "file_upload",
-    "contact_request",
+
+CORE_FUNCTION_ORDER = [
+    "keyword_analysis",
+    "keyword_expansion",
+    "scoring_system",
+    "data_filtering",
+    "content_guidance",
 ]
+SITE_TYPE_ORDER = ["keyword_tool", "content_site", "general_website"]
+FEATURE_LOGIC_ORDER = [
+    "keyword_analysis",
+    "keyword_expansion",
+    "keyword_scoring",
+    "data_filtering",
+    "content_guidance",
+]
+FEATURE_BLUEPRINTS: dict[str, dict[str, Any]] = {
+    "keyword_analysis": {
+        "goal": "키워드 검색",
+        "description": "사용자가 키워드의 검색량, CPC, 경쟁도를 확인하려고 할 때 선택하는 기능",
+        "ui_roles": ["keyword search", "bulk keyword input", "data results"],
+        "input_roles": ["keyword seed", "bulk keyword seed"],
+        "output_roles": ["keyword metrics"],
+        "flow_names": ["keyword_analysis_flow"],
+        "feature_names": ["keyword_analysis"],
+        "business_logic_items": ["고CPC 키워드 우선 노출", "검색량 + 경쟁도 조합 분석"],
+    },
+    "keyword_expansion": {
+        "goal": "키워드 확장",
+        "description": "기본 키워드에서 연관어와 추천 키워드를 넓혀서 후보군을 만들 때 선택하는 기능",
+        "ui_roles": ["keyword search", "bulk keyword input", "keyword suggestions"],
+        "input_roles": ["keyword seed", "bulk keyword seed"],
+        "output_roles": ["related keyword suggestions"],
+        "flow_names": ["keyword_expansion_flow"],
+        "feature_names": ["keyword_expansion"],
+        "business_logic_items": ["연관 키워드 추천 및 확장"],
+    },
+    "scoring_system": {
+        "goal": "점수 계산",
+        "description": "검색량, CPC, 경쟁도를 조합해 키워드 우선순위를 계산해야 할 때 선택하는 기능",
+        "ui_roles": ["data filtering", "data results"],
+        "input_roles": ["keyword seed", "metric conditions"],
+        "output_roles": ["keyword metrics"],
+        "flow_names": ["keyword_analysis_flow"],
+        "feature_names": ["keyword_scoring"],
+        "business_logic_items": ["검색량 + 경쟁도 조합 분석", "CPC 기반 키워드 점수화"],
+    },
+    "data_filtering": {
+        "goal": "필터링",
+        "description": "결과를 검색량, CPC, 경쟁도 조건으로 좁혀야 할 때 선택하는 기능",
+        "ui_roles": ["data filtering", "data results"],
+        "input_roles": ["metric conditions"],
+        "output_roles": ["keyword metrics"],
+        "flow_names": ["keyword_analysis_flow"],
+        "feature_names": ["data_filtering"],
+        "business_logic_items": ["고가 키워드 필터링"],
+    },
+    "content_guidance": {
+        "goal": "콘텐츠 제공",
+        "description": "가이드나 블로그 문서로 전략과 사용법을 설명해야 할 때 선택하는 기능",
+        "ui_roles": ["guide content"],
+        "input_roles": [],
+        "output_roles": ["guide articles"],
+        "flow_names": ["content_to_tool_flow"],
+        "feature_names": ["content_guidance"],
+        "business_logic_items": [],
+    },
+}
+UI_COMPONENT_ORDER = [
+    ("input", "keyword search"),
+    ("textarea", "bulk keyword input"),
+    ("filter", "data filtering"),
+    ("table", "data results"),
+    ("list", "keyword suggestions"),
+    ("list", "data results"),
+    ("article", "guide content"),
+]
+IMPORTANT_KEYWORD_RULES = [
+    ("CPC", ("cpc",)),
+    ("검색량", ("검색량", "search volume")),
+    ("키워드", ("키워드", "keyword")),
+    ("확장", ("확장", "연관", "related", "expand", "조합", "combine")),
+    ("추천", ("추천", "recommend", "suggest")),
+]
+CONTENT_TERMS = (
+    "blog",
+    "article",
+    "guide",
+    "manual",
+    "tutorial",
+    "블로그",
+    "가이드",
+    "사용법",
+    "방법",
+    "문서",
+    "콘텐츠",
+)
+KEYWORD_TERMS = (
+    "키워드",
+    "keyword",
+    "검색어",
+    "seed keyword",
+    "연관검색어",
+    "롱테일",
+)
+METRIC_TERMS = (
+    "cpc",
+    "검색량",
+    "search volume",
+    "경쟁",
+    "competition",
+    "score",
+    "점수",
+    "스코어",
+)
+EXPANSION_TERMS = (
+    "확장",
+    "연관",
+    "추천",
+    "related",
+    "expand",
+    "recommend",
+    "suggest",
+    "seed",
+    "조합",
+    "combine",
+)
+FILTER_TERMS = (
+    "filter",
+    "sort",
+    "정렬",
+    "필터",
+    "조건",
+    "범위",
+    "최소",
+    "최대",
+)
+SCORING_TERMS = (
+    "score",
+    "scoring",
+    "점수",
+    "스코어",
+    "황금키워드",
+    "golden keyword",
+)
+NAVER_TERMS = ("네이버", "naver", "검색광고", "searchad")
+API_TERMS = ("api", "endpoint", "fetch", "xhr", "ajax")
+CRAWLING_TERMS = ("크롤링", "crawler", "crawl", "scraping", "수집")
+SAAS_TERMS = ("가격안내", "pricing", "plan", "subscription", "구독", "요금", "무료", "유료", "trial", "upgrade")
+AD_TERMS = ("광고", "ad", "애드센스", "애드포스트", "광고수익")
 
 
 def analyze_document(source_path: str, html: str, soup: BeautifulSoup) -> dict[str, Any]:
@@ -35,18 +170,27 @@ def analyze_document(source_path: str, html: str, soup: BeautifulSoup) -> dict[s
     tables = extract_table_components(soup)
     lists = extract_list_components(soup)
     api_patterns = extract_api_patterns(soup, html)
+    text = full_text(soup)
 
-    ui_components = inputs + buttons + forms + tables + lists
-    data_inputs = build_data_inputs(inputs)
-    data_outputs = build_data_outputs(tables, lists)
-    core_functions = infer_core_functions(soup, inputs, buttons, forms, tables, lists, api_patterns)
-    site_type = infer_site_type(soup, core_functions, forms, tables, lists, api_patterns)
-    user_flow = infer_user_flow(core_functions, data_inputs, data_outputs, forms, buttons, api_patterns)
-    feature_logic = infer_feature_logic(core_functions, inputs, buttons, forms, tables, lists, api_patterns, data_inputs, data_outputs)
+    signals = build_semantic_signals(text, inputs, buttons, forms, tables, lists, api_patterns)
+    core_functions = infer_core_functions(signals)
+    site_type = infer_site_type(signals)
+    ui_components = summarize_ui_components(signals)
+    data_inputs = summarize_data_inputs(signals)
+    data_outputs = summarize_data_outputs(signals)
+    user_flow = infer_user_flow(core_functions, site_type, ui_components)
+    feature_logic = infer_feature_logic(core_functions, signals)
+    monetization_model = infer_monetization_model(core_functions, site_type, signals)
+    data_source = infer_data_source(signals)
+    business_logic = infer_business_logic(core_functions, signals)
 
     return {
         "site_type": site_type,
         "core_functions": core_functions,
+        "important_keywords": signals["important_keywords"],
+        "monetization_model": monetization_model,
+        "data_source": data_source,
+        "business_logic": business_logic,
         "ui_components": ui_components,
         "user_flow": user_flow,
         "data_inputs": data_inputs,
@@ -56,51 +200,95 @@ def analyze_document(source_path: str, html: str, soup: BeautifulSoup) -> dict[s
     }
 
 
-def merge_site_analyses(document_analyses: list[dict[str, Any]], content_exports: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def merge_site_analyses(
+    document_analyses: list[dict[str, Any]],
+    content_exports: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    content_exports = content_exports or []
     source_files = [str(item["source_file"]) for item in document_analyses]
-    page_types = [str(item["analysis"]["site_type"]) for item in document_analyses]
-    core_counter: Counter[str] = Counter()
 
-    ui_groups: dict[tuple[str, str, str, str], dict[str, Any]] = {}
-    input_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
-    output_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
-    api_groups: dict[tuple[str, str], dict[str, Any]] = {}
-    flow_groups: dict[str, dict[str, Any]] = {}
-    feature_groups: dict[str, dict[str, Any]] = {}
+    site_types: list[str] = []
+    core_functions: list[str] = []
+    important_keywords: list[str] = []
+    monetization_models: list[str] = []
+    data_sources: list[str] = []
+    business_logic: list[str] = []
+    ui_components: list[dict[str, Any]] = []
+    user_flow: list[dict[str, Any]] = []
+    data_inputs: list[dict[str, Any]] = []
+    data_outputs: list[dict[str, Any]] = []
+    api_patterns: list[dict[str, Any]] = []
+    feature_logic: list[dict[str, Any]] = []
 
     for document in document_analyses:
-        source_file = str(document["source_file"])
         analysis = document["analysis"]
+        site_types.extend(list(analysis.get("site_type", [])))
+        core_functions.extend(list(analysis.get("core_functions", [])))
+        important_keywords.extend(list(analysis.get("important_keywords", [])))
+        monetization_models.append(str(analysis.get("monetization_model", "")))
+        data_sources.append(str(analysis.get("data_source", "")))
+        business_logic.extend(list(analysis.get("business_logic", [])))
+        ui_components.extend(list(analysis.get("ui_components", [])))
+        user_flow.extend(list(analysis.get("user_flow", [])))
+        data_inputs.extend(list(analysis.get("data_inputs", [])))
+        data_outputs.extend(list(analysis.get("data_outputs", [])))
+        api_patterns.extend(list(analysis.get("api_patterns", [])))
+        feature_logic.extend(list(analysis.get("feature_logic", [])))
 
-        for function_name in analysis["core_functions"]:
-            core_counter[str(function_name)] += 1
+    if content_exports:
+        site_types.append("content_site")
+        if "content_guidance" not in core_functions:
+            core_functions.append("content_guidance")
+        ui_components.append({"type": "article", "role": "guide content"})
+        feature_logic.append(
+            {
+                "feature": "content_guidance",
+                "logic": "블로그/가이드 콘텐츠로 키워드 전략과 도구 사용법을 제공",
+            }
+        )
 
-        merge_ui_components(ui_groups, analysis["ui_components"], source_file)
-        merge_data_inputs(input_groups, analysis["data_inputs"], source_file)
-        merge_data_outputs(output_groups, analysis["data_outputs"], source_file)
-        merge_api_patterns(api_groups, analysis["api_patterns"], source_file)
-        merge_user_flows(flow_groups, analysis["user_flow"], source_file)
-        merge_feature_logic(feature_groups, analysis["feature_logic"], source_file)
+    merged_site_types = order_values(deduplicate_strings(site_types), SITE_TYPE_ORDER)
+    merged_core_functions = order_values(deduplicate_strings(core_functions), CORE_FUNCTION_ORDER)
+    merged_keywords = order_values(deduplicate_strings(important_keywords), [item[0] for item in IMPORTANT_KEYWORD_RULES])
+    merged_monetization_model = select_best_monetization_model(monetization_models, merged_core_functions, merged_site_types, merged_keywords)
+    merged_data_source = select_best_data_source(data_sources, merged_keywords)
+    merged_business_logic = order_business_logic(deduplicate_strings(business_logic))
+    merged_ui_components = order_ui_components(deduplicate_dicts(ui_components, ("type", "role")))
+    merged_user_flow = deduplicate_dicts(user_flow, ("name", "process"))
+    merged_data_inputs = deduplicate_dicts(data_inputs, ("type", "role"))
+    merged_data_outputs = deduplicate_dicts(data_outputs, ("type", "role"))
+    merged_api_patterns = deduplicate_dicts(api_patterns, ("type", "pattern"))
+    merged_feature_logic = order_feature_logic(merge_feature_logic_values(feature_logic))
+    features = build_features(
+        merged_core_functions,
+        merged_ui_components,
+        merged_data_inputs,
+        merged_data_outputs,
+        merged_user_flow,
+        merged_feature_logic,
+        merged_business_logic,
+    )
 
-    core_functions = [name for name in FUNCTION_ORDER if core_counter[name] > 0]
-    if not core_functions:
-        core_functions = [name for name, _count in core_counter.most_common()]
-
-    aggregated_api_patterns = sort_grouped_records(api_groups.values(), "count")
-    content_exports = content_exports or []
+    if not merged_site_types:
+        merged_site_types = infer_integrated_site_type(merged_core_functions, merged_keywords, content_exports)
 
     return {
         "pages_analyzed": len(document_analyses),
         "source_files": source_files,
-        "site_type": infer_integrated_site_type(core_functions, page_types, aggregated_api_patterns, content_exports),
-        "core_functions": core_functions,
-        "ui_components": sort_grouped_records(ui_groups.values(), "count"),
-        "user_flow": sort_grouped_records(flow_groups.values(), "count"),
-        "data_inputs": sort_grouped_records(input_groups.values(), "count"),
-        "data_outputs": sort_grouped_records(output_groups.values(), "count"),
-        "api_patterns": aggregated_api_patterns,
-        "feature_logic": sort_grouped_records(feature_groups.values(), "count"),
-        "content_exports": content_exports,
+        "site_type": merged_site_types,
+        "important_keywords": merged_keywords,
+        "core_functions": merged_core_functions,
+        "monetization_model": merged_monetization_model,
+        "data_source": merged_data_source,
+        "business_logic": merged_business_logic,
+        "ui_components": merged_ui_components,
+        "user_flow": merged_user_flow,
+        "data_inputs": merged_data_inputs,
+        "data_outputs": merged_data_outputs,
+        "api_patterns": merged_api_patterns,
+        "feature_logic": merged_feature_logic,
+        "features": features,
+        "content_exports": slim_content_exports(content_exports),
     }
 
 
@@ -108,18 +296,13 @@ def extract_input_components(soup: BeautifulSoup) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for tag in soup.find_all(["input", "textarea", "select"]):
         label = tag_label(tag, soup)
-        role = classify_input_role(tag, label)
         results.append(
             {
                 "component_type": tag.name,
-                "category": "data_input",
-                "role": role,
+                "role": classify_input_role(tag, label),
                 "label": label,
                 "name": tag.get("name", ""),
-                "id": tag.get("id", ""),
-                "input_type": tag.get("type", "") if tag.name == "input" else tag.name,
                 "selector_hint": selector_hint(tag),
-                "form_action": parent_form_action(tag),
             }
         )
     return results
@@ -134,13 +317,9 @@ def extract_button_components(soup: BeautifulSoup) -> list[dict[str, Any]]:
         results.append(
             {
                 "component_type": "button",
-                "category": "action",
                 "role": classify_button_role(tag, label),
                 "label": label,
-                "id": tag.get("id", ""),
-                "button_type": tag.get("type", tag.name),
                 "selector_hint": selector_hint(tag),
-                "form_action": parent_form_action(tag),
             }
         )
     return results
@@ -149,10 +328,7 @@ def extract_button_components(soup: BeautifulSoup) -> list[dict[str, Any]]:
 def extract_form_components(soup: BeautifulSoup) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for form in soup.find_all("form"):
-        child_inputs = [
-            classify_input_role(tag, tag_label(tag, soup))
-            for tag in form.find_all(["input", "textarea", "select"])
-        ]
+        child_roles = [classify_input_role(tag, tag_label(tag, soup)) for tag in form.find_all(["input", "textarea", "select"])]
         submit_labels = [
             tag_label(tag, soup)
             for tag in form.find_all(["button", "input"])
@@ -161,14 +337,9 @@ def extract_form_components(soup: BeautifulSoup) -> list[dict[str, Any]]:
         results.append(
             {
                 "component_type": "form",
-                "category": "workflow_container",
-                "role": infer_form_role(form, child_inputs, submit_labels),
+                "role": infer_form_role(form, child_roles, submit_labels),
                 "label": contextual_label(form, soup),
-                "method": form.get("method", "get").upper(),
                 "action": form.get("action", ""),
-                "field_count": len(form.find_all(["input", "textarea", "select"])),
-                "submit_actions": submit_labels,
-                "selector_hint": selector_hint(form),
             }
         )
     return results
@@ -178,16 +349,12 @@ def extract_table_components(soup: BeautifulSoup) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for table in soup.find_all("table"):
         headers = [clean_text(cell.get_text(" ", strip=True)) for cell in table.find_all("th")]
-        rows = table.find_all("tr")
         results.append(
             {
                 "component_type": "table",
-                "category": "data_output",
-                "role": "tabular_data",
+                "role": classify_table_role(headers, contextual_label(table, soup)),
                 "label": contextual_label(table, soup),
                 "headers": [header for header in headers if header],
-                "row_count": max(len(rows) - 1, 0) if headers else len(rows),
-                "selector_hint": selector_hint(table),
             }
         )
     return results
@@ -196,467 +363,621 @@ def extract_table_components(soup: BeautifulSoup) -> list[dict[str, Any]]:
 def extract_list_components(soup: BeautifulSoup) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for tag in soup.find_all(["ul", "ol", "dl"]):
-        if tag.name == "dl":
-            item_texts = [clean_text(item.get_text(" ", strip=True)) for item in tag.find_all(["dt", "dd"], recursive=False)]
-        else:
-            item_texts = [clean_text(item.get_text(" ", strip=True)) for item in tag.find_all("li", recursive=False)]
-        item_texts = [item for item in item_texts if item]
+        item_texts = extract_list_items(tag)
+        if not item_texts:
+            continue
         results.append(
             {
                 "component_type": "list",
-                "category": "data_output" if tag.find_parent("nav") is None else "navigation",
-                "role": "navigation_list" if tag.find_parent("nav") else "listing_data",
+                "role": classify_list_role(tag, item_texts, contextual_label(tag, soup)),
                 "label": contextual_label(tag, soup),
-                "list_type": tag.name,
-                "item_count": len(item_texts),
                 "items_preview": item_texts[:3],
-                "selector_hint": selector_hint(tag),
             }
         )
     return results
 
 
-def build_data_inputs(inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen: set[tuple[str, str, str]] = set()
-    results: list[dict[str, Any]] = []
-    for item in inputs:
-        key = (str(item["name"]), str(item["label"]), str(item["selector_hint"]))
-        if key in seen:
-            continue
-        seen.add(key)
-        results.append(
-            {
-                "name": item["name"] or item["id"] or item["label"],
-                "label": item["label"],
-                "type": item["input_type"],
-                "role": item["role"],
-                "source": "form_control",
-            }
-        )
-    return results
-
-
-def build_data_outputs(tables: list[dict[str, Any]], lists: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    results: list[dict[str, Any]] = []
-    for table in tables:
-        results.append(
-            {
-                "name": table["label"] or "table_output",
-                "type": "table",
-                "role": table["role"],
-                "fields": table["headers"],
-                "volume_hint": table["row_count"],
-            }
-        )
-    for listing in lists:
-        if listing["role"] == "navigation_list":
-            continue
-        results.append(
-            {
-                "name": listing["label"] or "list_output",
-                "type": "list",
-                "role": listing["role"],
-                "fields": [],
-                "volume_hint": listing["item_count"],
-            }
-        )
-    return results
-
-
-def infer_core_functions(
-    soup: BeautifulSoup,
+def build_semantic_signals(
+    text: str,
     inputs: list[dict[str, Any]],
     buttons: list[dict[str, Any]],
     forms: list[dict[str, Any]],
     tables: list[dict[str, Any]],
     lists: list[dict[str, Any]],
     api_patterns: list[dict[str, Any]],
-) -> list[str]:
-    text = full_text(soup)
-    roles = {item["role"] for item in inputs + buttons + forms}
-    has_nav = len(soup.find_all("a")) >= 2 or bool(soup.find("nav"))
-    has_results = bool(tables) or any(item["role"] != "navigation_list" and item["item_count"] >= 2 for item in lists)
-    has_api = bool(api_patterns)
-    ordered_features = [
-        ("navigation", has_nav),
-        ("search", "search_field" in roles or "search_form" in roles or "search_action" in roles or "search" in text),
-        ("login", "login_form" in roles or "login_action" in roles or ("password_field" in roles and any(role in roles for role in {"email_field", "username_field"}))),
-        ("registration", "registration_form" in roles or "registration_action" in roles or "create account" in text or "sign up" in text),
-        ("filtering", "filter_control" in roles or "filter_form" in roles or "filter_action" in roles),
-        ("data_retrieval", has_results or has_api or "fetch" in text or "xhr" in text),
-        ("form_submission", bool(forms)),
-        ("data_entry", bool(inputs)),
-        ("tabular_data_view", bool(tables)),
-        ("listing_view", any(item["role"] != "navigation_list" and item["item_count"] >= 2 for item in lists)),
-        ("file_upload", "file_upload" in roles),
-        ("contact_request", "contact_form" in roles or "contact_action" in roles),
-    ]
-    return [name for name, matched in ordered_features if matched]
+) -> dict[str, Any]:
+    input_roles = {item["role"] for item in inputs}
+    button_roles = {item["role"] for item in buttons}
+    form_roles = {item["role"] for item in forms}
+    table_roles = {item["role"] for item in tables}
+    list_roles = {item["role"] for item in lists}
+    important_keywords = detect_important_keywords(text)
+
+    has_keyword_context = contains_any(text, KEYWORD_TERMS) or "키워드" in important_keywords
+    has_metric_context = contains_any(text, METRIC_TERMS) or bool(table_roles & {"keyword_metrics", "keyword_results"})
+    has_expansion_context = contains_any(text, EXPANSION_TERMS) or bool(
+        {"expand_keywords", "keyword_suggestions", "keyword_expansion_form"} & (button_roles | list_roles | form_roles)
+    )
+    has_filter_context = contains_any(text, FILTER_TERMS) or bool({"filter_control", "filter_action", "filter_form"} & (input_roles | button_roles | form_roles))
+    has_scoring_context = contains_any(text, SCORING_TERMS) or (
+        ("CPC" in important_keywords) and ("검색량" in important_keywords) and contains_any(text, ("경쟁", "competition", "난이도"))
+    )
+    has_content_context = contains_any(text, CONTENT_TERMS)
+    has_naver_context = contains_any(text, NAVER_TERMS)
+    has_api_context = contains_any(text, API_TERMS) or bool(api_patterns)
+    has_crawling_context = contains_any(text, CRAWLING_TERMS)
+    has_saas_context = contains_any(text, SAAS_TERMS)
+    has_ad_context = contains_any(text, AD_TERMS)
+
+    return {
+        "important_keywords": important_keywords,
+        "has_keyword_context": has_keyword_context,
+        "has_metric_context": has_metric_context,
+        "has_expansion_context": has_expansion_context,
+        "has_filter_context": has_filter_context,
+        "has_scoring_context": has_scoring_context,
+        "has_content_context": has_content_context,
+        "has_naver_context": has_naver_context,
+        "has_api_context": has_api_context,
+        "has_crawling_context": has_crawling_context,
+        "has_saas_context": has_saas_context,
+        "has_ad_context": has_ad_context,
+        "has_keyword_input": bool({"keyword_input", "bulk_keyword_input"} & input_roles),
+        "has_results": bool(table_roles | list_roles),
+        "has_results_table": bool(tables),
+        "has_suggestion_list": "keyword_suggestions" in list_roles,
+        "has_api": bool(api_patterns),
+        "inputs": inputs,
+        "buttons": buttons,
+        "forms": forms,
+        "tables": tables,
+        "lists": lists,
+    }
 
 
-def infer_site_type(
-    soup: BeautifulSoup,
-    core_functions: list[str],
-    forms: list[dict[str, Any]],
-    tables: list[dict[str, Any]],
-    lists: list[dict[str, Any]],
-    api_patterns: list[dict[str, Any]],
-) -> str:
-    text = full_text(soup)
-    feature_set = set(core_functions)
-    if {"login", "data_retrieval"}.issubset(feature_set) and api_patterns:
-        return "web_application"
-    if "login" in feature_set or "registration" in feature_set:
-        return "authentication_portal"
-    if "search" in feature_set or "filtering" in feature_set or tables or api_patterns:
-        return "data_portal"
-    if forms and "form_submission" in feature_set:
-        return "workflow_form_site"
-    if "guide" in text or "manual" in text or ("listing_view" in feature_set and not forms):
-        return "content_site"
-    if "pricing" in text or "plan" in text or "checkout" in text:
-        return "commerce_or_marketing_site"
-    return "general_website"
+def infer_core_functions(signals: dict[str, Any]) -> list[str]:
+    functions: list[str] = []
+
+    if signals["has_keyword_context"] and (
+        signals["has_keyword_input"] or signals["has_metric_context"] or signals["has_results"] or signals["has_api"]
+    ):
+        functions.append("keyword_analysis")
+    if signals["has_expansion_context"]:
+        functions.append("keyword_expansion")
+    if signals["has_scoring_context"]:
+        functions.append("scoring_system")
+    if signals["has_filter_context"]:
+        functions.append("data_filtering")
+    if signals["has_content_context"]:
+        functions.append("content_guidance")
+
+    return order_values(deduplicate_strings(functions), CORE_FUNCTION_ORDER)
+
+
+def infer_site_type(signals: dict[str, Any]) -> list[str]:
+    site_types: list[str] = []
+    important_keywords = set(signals["important_keywords"])
+
+    if important_keywords & {"CPC", "검색량", "키워드", "확장", "추천"} or (
+        signals["has_keyword_context"] and (signals["has_metric_context"] or signals["has_keyword_input"])
+    ):
+        site_types.append("keyword_tool")
+    if signals["has_content_context"]:
+        site_types.append("content_site")
+    if not site_types:
+        site_types.append("general_website")
+
+    return order_values(deduplicate_strings(site_types), SITE_TYPE_ORDER)
+
+
+def summarize_ui_components(signals: dict[str, Any]) -> list[dict[str, str]]:
+    components: list[dict[str, str]] = []
+    if signals["has_keyword_input"]:
+        components.append({"type": "input", "role": "keyword search"})
+    if any(item["role"] == "bulk_keyword_input" for item in signals["inputs"]):
+        components.append({"type": "textarea", "role": "bulk keyword input"})
+    if signals["has_filter_context"]:
+        components.append({"type": "filter", "role": "data filtering"})
+    if signals["has_results_table"]:
+        components.append({"type": "table", "role": "data results"})
+    elif signals["has_results"]:
+        components.append({"type": "list", "role": "data results"})
+    if signals["has_suggestion_list"] or signals["has_expansion_context"]:
+        components.append({"type": "list", "role": "keyword suggestions"})
+    if signals["has_content_context"]:
+        components.append({"type": "article", "role": "guide content"})
+    return deduplicate_dicts(components, ("type", "role"))
+
+
+def summarize_data_inputs(signals: dict[str, Any]) -> list[dict[str, str]]:
+    inputs: list[dict[str, str]] = []
+    if signals["has_keyword_input"]:
+        inputs.append({"type": "input", "role": "keyword seed"})
+    if any(item["role"] == "bulk_keyword_input" for item in signals["inputs"]):
+        inputs.append({"type": "textarea", "role": "bulk keyword seed"})
+    if signals["has_filter_context"]:
+        inputs.append({"type": "filter", "role": "metric conditions"})
+    return deduplicate_dicts(inputs, ("type", "role"))
+
+
+def summarize_data_outputs(signals: dict[str, Any]) -> list[dict[str, str]]:
+    outputs: list[dict[str, str]] = []
+    if signals["has_results_table"]:
+        outputs.append({"type": "table", "role": "keyword metrics"})
+    elif signals["has_results"]:
+        outputs.append({"type": "list", "role": "keyword results"})
+    if signals["has_suggestion_list"] or signals["has_expansion_context"]:
+        outputs.append({"type": "list", "role": "related keyword suggestions"})
+    if signals["has_content_context"]:
+        outputs.append({"type": "article", "role": "guide articles"})
+    return deduplicate_dicts(outputs, ("type", "role"))
 
 
 def infer_user_flow(
     core_functions: list[str],
-    data_inputs: list[dict[str, Any]],
-    data_outputs: list[dict[str, Any]],
-    forms: list[dict[str, Any]],
-    buttons: list[dict[str, Any]],
-    api_patterns: list[dict[str, Any]],
+    site_type: list[str],
+    ui_components: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    feature_set = set(core_functions)
-    outputs = [item["name"] for item in data_outputs] or ["page state or confirmation"]
-    button_labels = [button["label"] for button in buttons if button["label"]]
-    api_targets = [item["pattern"] for item in api_patterns[:3]]
+    component_roles = {item["role"] for item in ui_components}
     flows: list[dict[str, Any]] = []
 
-    def inputs_by_role(role: str) -> list[str]:
-        return [item["label"] or item["name"] for item in data_inputs if item["role"] == role]
-
-    if "search" in feature_set:
+    if "keyword_analysis" in core_functions:
         flows.append(
             {
-                "name": "search_flow",
-                "input": inputs_by_role("search_field") or [item["label"] for item in data_inputs[:2]],
-                "process": "User enters search criteria and triggers a query through form submission or a client-side request.",
-                "output": outputs,
+                "name": "keyword_analysis_flow",
+                "process": "키워드를 입력하고 검색량, CPC, 경쟁도 데이터를 조회",
+                "output": "data results" if "data results" in component_roles else "keyword metrics",
             }
         )
-    if "filtering" in feature_set:
+    if "keyword_expansion" in core_functions:
         flows.append(
             {
-                "name": "filter_flow",
-                "input": [item["label"] for item in data_inputs if item["role"] == "filter_control"],
-                "process": "Selected filter values narrow or reorder the currently displayed dataset.",
-                "output": outputs,
+                "name": "keyword_expansion_flow",
+                "process": "기본 키워드에서 연관어와 추천 키워드를 확장",
+                "output": "keyword suggestions",
             }
         )
-    if "login" in feature_set:
+    if "content_site" in site_type:
         flows.append(
             {
-                "name": "login_flow",
-                "input": inputs_by_role("email_field") + inputs_by_role("username_field") + inputs_by_role("password_field"),
-                "process": "Credential fields are submitted for authentication, usually through a form action or API endpoint.",
-                "output": ["authenticated session or protected content"],
+                "name": "content_to_tool_flow",
+                "process": "가이드 콘텐츠에서 전략을 설명하고 도구 사용으로 연결",
+                "output": "guide content",
             }
         )
-    if "registration" in feature_set:
-        flows.append(
-            {
-                "name": "registration_flow",
-                "input": [item["label"] for item in data_inputs if item["role"] in {"email_field", "username_field", "password_field", "text_entry"}],
-                "process": "Account details are collected and posted to create a new user or workspace.",
-                "output": ["new account record or registration confirmation"],
-            }
-        )
-    if "form_submission" in feature_set and "login" not in feature_set:
-        flows.append(
-            {
-                "name": "submission_flow",
-                "input": [item["label"] for item in data_inputs[:4]],
-                "process": f"Form data is submitted using {forms[0]['method'] if forms else 'form'} logic and optional API integration.",
-                "output": ["confirmation message, saved record, or refreshed page"],
-            }
-        )
-    if "data_retrieval" in feature_set and not any(flow["name"] == "search_flow" for flow in flows):
-        flows.append(
-            {
-                "name": "data_retrieval_flow",
-                "input": button_labels[:2] or ["page load or navigation event"],
-                "process": "The page requests structured data from server-side or client-side endpoints.",
-                "output": outputs + api_targets[:1],
-            }
-        )
-    return flows
+    return deduplicate_dicts(flows, ("name", "process"))
 
 
-def infer_feature_logic(
+def infer_feature_logic(core_functions: list[str], signals: dict[str, Any]) -> list[dict[str, str]]:
+    feature_logic: list[dict[str, str]] = []
+
+    if "keyword_analysis" in core_functions:
+        logic = "입력 키워드의 검색량, CPC, 경쟁도 데이터를 조회"
+        feature_logic.append({"feature": "keyword_analysis", "logic": logic})
+    if "keyword_expansion" in core_functions:
+        feature_logic.append(
+            {
+                "feature": "keyword_expansion",
+                "logic": "기본 키워드에서 연관어, 추천어, 조합 키워드를 생성",
+            }
+        )
+    if "scoring_system" in core_functions:
+        if {"CPC", "검색량"} <= set(signals["important_keywords"]) and contains_any(full_text_from_signals(signals), ("경쟁", "competition", "난이도")):
+            scoring_logic = "CPC + 검색량 + 경쟁도 기반 점수 계산"
+        elif {"CPC", "검색량"} <= set(signals["important_keywords"]):
+            scoring_logic = "CPC + 검색량 기반 점수 계산"
+        else:
+            scoring_logic = "키워드 지표를 조합해 우선순위 점수 계산"
+        feature_logic.append({"feature": "keyword_scoring", "logic": scoring_logic})
+    if "data_filtering" in core_functions:
+        feature_logic.append(
+            {
+                "feature": "data_filtering",
+                "logic": "검색량, CPC, 경쟁도 조건으로 결과를 필터링",
+            }
+        )
+    if "content_guidance" in core_functions:
+        feature_logic.append(
+            {
+                "feature": "content_guidance",
+                "logic": "블로그/가이드 콘텐츠로 키워드 전략과 도구 사용법을 제공",
+            }
+        )
+
+    return order_feature_logic(deduplicate_dicts(feature_logic, ("feature", "logic")))
+
+
+def infer_monetization_model(core_functions: list[str], site_type: list[str], signals: dict[str, Any]) -> str:
+    feature_set = set(core_functions)
+    if "keyword_tool" in site_type and "scoring_system" in feature_set:
+        return "CPC 기반 키워드 분석 SaaS"
+    if "keyword_tool" in site_type and signals["has_metric_context"]:
+        return "키워드 데이터 제공 서비스"
+    if "content_site" in site_type and signals["has_ad_context"]:
+        return "광고 기반 콘텐츠 수익"
+    if "content_site" in site_type:
+        return "콘텐츠 기반 유입 서비스"
+    return "일반 웹서비스"
+
+
+def infer_data_source(signals: dict[str, Any]) -> str:
+    if signals["has_naver_context"] and signals["has_api_context"]:
+        return "네이버 광고 API 추정"
+    if signals["has_naver_context"] and signals["has_metric_context"]:
+        return "네이버 검색 데이터 추정"
+    if signals["has_crawling_context"]:
+        return "크롤링 데이터 추정"
+    if signals["has_metric_context"]:
+        return "검색 데이터 추정"
+    return "데이터 출처 불명"
+
+
+def infer_business_logic(core_functions: list[str], signals: dict[str, Any]) -> list[str]:
+    logic: list[str] = []
+    keyword_set = set(signals["important_keywords"])
+    signal_text = full_text_from_signals(signals)
+
+    if "scoring_system" in core_functions:
+        if {"CPC", "검색량"} <= keyword_set and contains_any(signal_text, ("경쟁", "competition", "난이도")):
+            logic.append("검색량 + 경쟁도 조합 분석")
+        logic.append("CPC 기반 키워드 점수화")
+    if "keyword_analysis" in core_functions and "CPC" in keyword_set:
+        logic.append("고CPC 키워드 우선 노출")
+    if "data_filtering" in core_functions and "CPC" in keyword_set:
+        logic.append("고가 키워드 필터링")
+    if "keyword_expansion" in core_functions:
+        logic.append("연관 키워드 추천 및 확장")
+    return order_business_logic(deduplicate_strings(logic))
+
+
+def build_features(
     core_functions: list[str],
-    inputs: list[dict[str, Any]],
-    buttons: list[dict[str, Any]],
-    forms: list[dict[str, Any]],
-    tables: list[dict[str, Any]],
-    lists: list[dict[str, Any]],
-    api_patterns: list[dict[str, Any]],
+    ui_components: list[dict[str, Any]],
     data_inputs: list[dict[str, Any]],
     data_outputs: list[dict[str, Any]],
+    user_flow: list[dict[str, Any]],
+    feature_logic: list[dict[str, Any]],
+    business_logic: list[str],
 ) -> list[dict[str, Any]]:
-    feature_set = set(core_functions)
-    output_labels = [item["name"] for item in data_outputs]
-    feature_logic: list[dict[str, Any]] = []
+    features: list[dict[str, Any]] = []
+    ui_role_map = {item["role"]: item for item in ui_components}
+    input_role_map = {item["role"]: item for item in data_inputs}
+    output_role_map = {item["role"]: item for item in data_outputs}
+    flow_name_map = {item["name"]: item for item in user_flow}
+    feature_name_map = {item["feature"]: item for item in feature_logic}
 
-    if "search" in feature_set:
-        feature_logic.append(
+    for function_name in core_functions:
+        blueprint = FEATURE_BLUEPRINTS.get(function_name)
+        if blueprint is None:
+            continue
+
+        feature_ui = order_ui_components([ui_role_map[role] for role in blueprint["ui_roles"] if role in ui_role_map])
+        feature_inputs = order_data_ports([input_role_map[role] for role in blueprint["input_roles"] if role in input_role_map])
+        feature_outputs = order_data_ports([output_role_map[role] for role in blueprint["output_roles"] if role in output_role_map])
+
+        logic_entries: list[str] = []
+        for feature_name in blueprint["feature_names"]:
+            feature = feature_name_map.get(feature_name)
+            if feature:
+                logic_entries.append(str(feature["logic"]))
+        for flow_name in blueprint["flow_names"]:
+            flow = flow_name_map.get(flow_name)
+            if flow:
+                logic_entries.append(str(flow["process"]))
+        feature_business_logic = [
+            item for item in business_logic if item in blueprint["business_logic_items"]
+        ]
+        logic_entries.extend(feature_business_logic)
+
+        features.append(
             {
-                "feature": "search",
-                "evidence": collect_evidence(inputs, buttons, forms, api_patterns, {"search_field", "search_action", "search_form"}, {"search", "query", "find"}),
-                "logic": f"Search inputs accept criteria, then the page returns matching results through {', '.join(output_labels) or 'result views'}.",
+                "goal": blueprint["goal"],
+                "description": blueprint["description"],
+                "inputs": feature_inputs,
+                "outputs": feature_outputs,
+                "logic": deduplicate_strings(logic_entries),
+                "ui": feature_ui,
             }
         )
-    if "login" in feature_set:
-        feature_logic.append(
-            {
-                "feature": "login",
-                "evidence": collect_evidence(inputs, buttons, forms, api_patterns, {"password_field", "login_action", "login_form", "email_field", "username_field"}, {"login", "auth", "session", "sign"}),
-                "logic": "Credential-like inputs and submit controls indicate an authentication step before protected content is shown.",
-            }
-        )
-    if "registration" in feature_set:
-        feature_logic.append(
-            {
-                "feature": "registration",
-                "evidence": collect_evidence(inputs, buttons, forms, api_patterns, {"registration_action", "registration_form", "email_field", "password_field"}, {"register", "signup", "account", "join"}),
-                "logic": "User profile or account fields suggest a create-account workflow with backend persistence.",
-            }
-        )
-    if "filtering" in feature_set:
-        feature_logic.append(
-            {
-                "feature": "filtering",
-                "evidence": collect_evidence(inputs, buttons, forms, api_patterns, {"filter_control", "filter_action", "filter_form"}, {"filter", "sort", "status", "type"}),
-                "logic": "Selector-style controls and apply actions indicate filtering or narrowing of visible data.",
-            }
-        )
-    if "data_retrieval" in feature_set:
-        retrieval_evidence = [table["label"] for table in tables] + [listing["label"] for listing in lists if listing["role"] != "navigation_list"]
-        retrieval_evidence += [item["pattern"] for item in api_patterns[:3]]
-        feature_logic.append(
-            {
-                "feature": "data_retrieval",
-                "evidence": ordered_unique([item for item in retrieval_evidence if item]),
-                "logic": "Tables, lists, or network calls indicate that the page retrieves and renders structured records or content collections.",
-            }
-        )
-    if "form_submission" in feature_set:
-        feature_logic.append(
-            {
-                "feature": "form_submission",
-                "evidence": ordered_unique([form["action"] or form["label"] for form in forms] + [item["label"] for item in data_inputs[:3]]),
-                "logic": "Form controls are grouped into submit-capable workflows that send user-provided data for processing.",
-            }
-        )
-    return feature_logic
+
+    return features
 
 
-def extract_api_patterns(soup: BeautifulSoup, html: str) -> list[dict[str, Any]]:
-    patterns: list[dict[str, Any]] = []
+def extract_api_patterns(soup: BeautifulSoup, html: str) -> list[dict[str, str]]:
+    patterns: list[dict[str, str]] = []
     for form in soup.find_all("form"):
         action = str(form.get("action", ""))
         if action and ("/api/" in action or action.startswith("/")):
-            patterns.append({"type": "form_action", "pattern": action, "source": "form"})
+            patterns.append({"type": "form_action", "pattern": action})
     for tag in soup.find_all(True):
         for attr_name, attr_value in tag.attrs.items():
             values = attr_value if isinstance(attr_value, list) else [attr_value]
             for value in values:
                 if isinstance(value, str) and "/api/" in value:
-                    patterns.append({"type": "endpoint", "pattern": value, "source": f"{tag.name}.{attr_name}"})
+                    patterns.append({"type": f"{tag.name}.{attr_name}", "pattern": value})
 
     script_texts = [script.string or script.get_text(" ", strip=False) for script in soup.find_all("script")]
-    raw_script = "\n".join(text for text in script_texts if text)
-    raw_text = "\n".join([html, raw_script])
+    raw_text = "\n".join([html] + [text for text in script_texts if text])
     for endpoint in API_ENDPOINT_REGEX.findall(raw_text):
-        patterns.append({"type": "endpoint", "pattern": endpoint, "source": "html_or_script"})
+        patterns.append({"type": "endpoint", "pattern": endpoint})
     for endpoint in FETCH_CALL_REGEX.findall(raw_text):
-        patterns.append({"type": "fetch", "pattern": endpoint, "source": "script"})
+        patterns.append({"type": "fetch", "pattern": endpoint})
     for endpoint in XHR_OPEN_REGEX.findall(raw_text):
-        patterns.append({"type": "xhr", "pattern": endpoint, "source": "script"})
+        patterns.append({"type": "xhr", "pattern": endpoint})
     for method, endpoint in AXIOS_CALL_REGEX.findall(raw_text):
-        patterns.append({"type": f"axios_{method.lower()}", "pattern": endpoint, "source": "script"})
+        patterns.append({"type": f"axios_{method.lower()}", "pattern": endpoint})
     for endpoint in AJAX_URL_REGEX.findall(raw_text):
-        patterns.append({"type": "ajax", "pattern": endpoint, "source": "script"})
-    if "XMLHttpRequest" in raw_text:
-        patterns.append({"type": "xhr_object", "pattern": "XMLHttpRequest", "source": "script"})
-    if "fetch(" in raw_text:
-        patterns.append({"type": "fetch_call", "pattern": "fetch", "source": "script"})
-
-    seen: set[tuple[str, str, str]] = set()
-    deduped: list[dict[str, Any]] = []
-    for item in patterns:
-        key = (str(item["type"]), str(item["pattern"]), str(item["source"]))
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-    return deduped
+        patterns.append({"type": "ajax", "pattern": endpoint})
+    return deduplicate_dicts(patterns, ("type", "pattern"))
 
 
-def merge_ui_components(groups: dict[tuple[str, str, str, str], dict[str, Any]], components: list[dict[str, Any]], source_file: str) -> None:
-    for component in components:
-        identity = normalize_identity(component.get("label") or component.get("selector_hint") or component.get("component_type"))
-        key = (str(component.get("component_type", "")), str(component.get("category", "")), str(component.get("role", "")), identity)
-        group = groups.setdefault(
-            key,
-            {
-                "component_type": component.get("component_type", ""),
-                "category": component.get("category", ""),
-                "role": component.get("role", ""),
-                "count": 0,
-                "examples": [],
-                "source_files": [],
-                "details": [],
-            },
-        )
-        group["count"] += 1
-        group["examples"] = ordered_unique(group["examples"] + [str(component.get("label", ""))])
-        group["source_files"] = ordered_unique(group["source_files"] + [source_file])
-        details = []
-        for key_name in ("input_type", "button_type", "method", "action"):
-            value = component.get(key_name)
-            if value:
-                details.append(str(value))
-        if component.get("headers"):
-            details.extend(str(item) for item in component["headers"][:3])
-        if component.get("items_preview"):
-            details.extend(str(item) for item in component["items_preview"][:2])
-        group["details"] = ordered_unique(group["details"] + details)
+def detect_important_keywords(text: str) -> list[str]:
+    found: list[str] = []
+    for canonical, keywords in IMPORTANT_KEYWORD_RULES:
+        if any(keyword in text for keyword in keywords):
+            found.append(canonical)
+    return found
 
 
-def merge_data_inputs(groups: dict[tuple[str, str, str], dict[str, Any]], data_inputs: list[dict[str, Any]], source_file: str) -> None:
-    for item in data_inputs:
-        key = (str(item.get("type", "")), str(item.get("role", "")), normalize_identity(item.get("label") or item.get("name")))
-        group = groups.setdefault(
-            key,
-            {
-                "name": item.get("name", ""),
-                "label": item.get("label", ""),
-                "type": item.get("type", ""),
-                "role": item.get("role", ""),
-                "count": 0,
-                "source_files": [],
-            },
-        )
-        group["count"] += 1
-        group["source_files"] = ordered_unique(group["source_files"] + [source_file])
+def extract_list_items(tag: Tag) -> list[str]:
+    if tag.name == "dl":
+        values = [clean_text(item.get_text(" ", strip=True)) for item in tag.find_all(["dt", "dd"], recursive=False)]
+    else:
+        values = [clean_text(item.get_text(" ", strip=True)) for item in tag.find_all("li", recursive=False)]
+    return [value for value in values if value]
 
 
-def merge_data_outputs(groups: dict[tuple[str, str, str], dict[str, Any]], data_outputs: list[dict[str, Any]], source_file: str) -> None:
-    for item in data_outputs:
-        key = (str(item.get("type", "")), str(item.get("role", "")), normalize_identity(item.get("name")))
-        group = groups.setdefault(
-            key,
-            {
-                "name": item.get("name", ""),
-                "type": item.get("type", ""),
-                "role": item.get("role", ""),
-                "fields": list(item.get("fields", [])),
-                "count": 0,
-                "source_files": [],
-                "max_volume_hint": 0,
-            },
-        )
-        group["count"] += 1
-        group["source_files"] = ordered_unique(group["source_files"] + [source_file])
-        group["fields"] = ordered_unique(group["fields"] + list(item.get("fields", [])))
-        group["max_volume_hint"] = max(int(group["max_volume_hint"]), int(item.get("volume_hint", 0) or 0))
+def classify_input_role(tag: Tag, label: str) -> str:
+    input_type = str(tag.get("type", tag.name)).lower()
+    haystack = component_haystack(tag, label)
+    if input_type == "password" or "password" in haystack:
+        return "password_field"
+    if any(keyword in haystack for keyword in ("키워드", "keyword", "검색어", "seed", "주제")):
+        if tag.name == "textarea" or input_type == "textarea":
+            return "bulk_keyword_input"
+        return "keyword_input"
+    if input_type == "search" or any(keyword in haystack for keyword in ("search", "query", "find", "조회", "검색")):
+        return "keyword_input"
+    if input_type in {"checkbox", "radio"} or tag.name == "select" or any(keyword in haystack for keyword in FILTER_TERMS):
+        return "filter_control"
+    if input_type == "email" or "email" in haystack:
+        return "email_field"
+    if tag.name == "textarea":
+        return "long_text"
+    return "text_entry"
 
 
-def merge_api_patterns(groups: dict[tuple[str, str], dict[str, Any]], api_patterns: list[dict[str, Any]], source_file: str) -> None:
-    for item in api_patterns:
-        key = (str(item.get("type", "")), str(item.get("pattern", "")))
-        group = groups.setdefault(
-            key,
-            {
-                "type": item.get("type", ""),
-                "pattern": item.get("pattern", ""),
-                "count": 0,
-                "source_files": [],
-                "sources": [],
-            },
-        )
-        group["count"] += 1
-        group["source_files"] = ordered_unique(group["source_files"] + [source_file])
-        group["sources"] = ordered_unique(group["sources"] + [str(item.get("source", ""))])
+def classify_button_role(tag: Tag, label: str) -> str:
+    haystack = component_haystack(tag, label)
+    if any(keyword in haystack for keyword in ("확장", "추천", "연관", "combine", "expand", "suggest", "recommend")):
+        return "expand_keywords"
+    if any(keyword in haystack for keyword in ("filter", "apply", "sort", "refine", "필터", "정렬", "적용")):
+        return "filter_action"
+    if any(keyword in haystack for keyword in ("search", "find", "lookup", "analy", "조회", "검색", "분석")):
+        return "run_analysis"
+    return "generic_action"
 
 
-def merge_user_flows(groups: dict[str, dict[str, Any]], flows: list[dict[str, Any]], source_file: str) -> None:
-    for item in flows:
-        key = str(item.get("name", "flow"))
-        group = groups.setdefault(
-            key,
-            {
-                "name": item.get("name", ""),
-                "input": [],
-                "process": item.get("process", ""),
-                "output": [],
-                "count": 0,
-                "source_files": [],
-            },
-        )
-        group["count"] += 1
-        group["input"] = ordered_unique(group["input"] + list(item.get("input", [])))
-        group["output"] = ordered_unique(group["output"] + list(item.get("output", [])))
-        group["source_files"] = ordered_unique(group["source_files"] + [source_file])
+def infer_form_role(form: Tag, child_input_roles: list[str], submit_labels: list[str]) -> str:
+    joined = " ".join(submit_labels).lower()
+    action = str(form.get("action", "")).lower()
+    if "keyword_input" in child_input_roles or "bulk_keyword_input" in child_input_roles:
+        if any(keyword in joined or keyword in action for keyword in ("확장", "추천", "연관", "combine", "expand")):
+            return "keyword_expansion_form"
+        return "keyword_search_form"
+    if "filter_control" in child_input_roles:
+        return "filter_form"
+    return "data_entry_form"
 
 
-def merge_feature_logic(groups: dict[str, dict[str, Any]], feature_logic: list[dict[str, Any]], source_file: str) -> None:
-    for item in feature_logic:
-        key = str(item.get("feature", "feature"))
-        group = groups.setdefault(
-            key,
-            {
-                "feature": item.get("feature", ""),
-                "evidence": [],
-                "logic": item.get("logic", ""),
-                "count": 0,
-                "source_files": [],
-            },
-        )
-        group["count"] += 1
-        group["evidence"] = ordered_unique(group["evidence"] + list(item.get("evidence", [])))
-        group["source_files"] = ordered_unique(group["source_files"] + [source_file])
+def classify_table_role(headers: list[str], label: str) -> str:
+    haystack = clean_text(" ".join(headers + [label])).lower()
+    if contains_any(haystack, METRIC_TERMS):
+        return "keyword_metrics"
+    return "keyword_results"
 
 
-def infer_integrated_site_type(core_functions: list[str], page_types: list[str], api_patterns: list[dict[str, Any]], content_exports: list[dict[str, Any]]) -> str:
-    feature_set = set(core_functions)
-    page_type_counter = Counter(page_types)
-    if {"login", "data_retrieval"}.issubset(feature_set):
-        return "web_application"
-    if {"search", "filtering", "data_retrieval"} & feature_set and api_patterns:
-        return "data_portal"
-    if content_exports and len(content_exports) >= max(2, len(page_types) // 2) and "login" not in feature_set:
-        return "content_site"
-    return page_type_counter.most_common(1)[0][0] if page_type_counter else "general_website"
+def classify_list_role(tag: Tag, item_texts: list[str], label: str) -> str:
+    if tag.find_parent("nav"):
+        return "navigation"
+    haystack = clean_text(" ".join(item_texts[:5] + [label])).lower()
+    if contains_any(haystack, EXPANSION_TERMS):
+        return "keyword_suggestions"
+    if contains_any(haystack, CONTENT_TERMS):
+        return "guide_list"
+    return "keyword_results"
 
 
-def collect_evidence(
-    inputs: list[dict[str, Any]],
-    buttons: list[dict[str, Any]],
-    forms: list[dict[str, Any]],
-    api_patterns: list[dict[str, Any]],
-    relevant_roles: set[str],
-    api_keywords: set[str],
+def infer_integrated_site_type(
+    core_functions: list[str],
+    important_keywords: list[str],
+    content_exports: list[dict[str, Any]],
 ) -> list[str]:
-    evidence = [str(item["label"]) for item in inputs if item["role"] in relevant_roles]
-    evidence += [str(item["label"]) for item in buttons if item["role"] in relevant_roles]
-    evidence += [str(item["label"] or item["action"]) for item in forms if item["role"] in relevant_roles]
-    for item in api_patterns:
-        pattern = str(item["pattern"]).lower()
-        if any(keyword in pattern for keyword in api_keywords):
-            evidence.append(str(item["pattern"]))
-    return ordered_unique(evidence)
+    site_types: list[str] = []
+    if important_keywords or any(name in core_functions for name in ("keyword_analysis", "keyword_expansion", "scoring_system")):
+        site_types.append("keyword_tool")
+    if content_exports or "content_guidance" in core_functions:
+        site_types.append("content_site")
+    if not site_types:
+        site_types.append("general_website")
+    return order_values(deduplicate_strings(site_types), SITE_TYPE_ORDER)
+
+
+def slim_content_exports(content_exports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    slimmed: list[dict[str, Any]] = []
+    for item in content_exports:
+        slimmed.append(
+            {
+                "index": item.get("index"),
+                "title": item.get("title", ""),
+                "source_file": item.get("source_file", ""),
+                "html_file": item.get("html_file", ""),
+                "markdown_file": item.get("markdown_file", ""),
+            }
+        )
+    return slimmed
+
+
+def full_text_from_signals(signals: dict[str, Any]) -> str:
+    values: list[str] = []
+    for collection_name in ("inputs", "buttons", "forms", "tables", "lists"):
+        for item in signals.get(collection_name, []):
+            values.extend(str(value) for value in item.values())
+    return clean_text(" ".join(values)).lower()
+
+
+def contains_any(text: str, keywords: tuple[str, ...] | list[str]) -> bool:
+    lowered = text.lower()
+    return any(keyword.lower() in lowered for keyword in keywords)
+
+
+def deduplicate_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        cleaned = clean_text(str(value))
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        result.append(cleaned)
+    return result
+
+
+def deduplicate_dicts(values: list[dict[str, Any]], keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, ...]] = set()
+    result: list[dict[str, Any]] = []
+    for value in values:
+        identity = tuple(clean_text(str(value.get(key, ""))) for key in keys)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        result.append(value)
+    return result
+
+
+def order_values(values: list[str], preferred_order: list[str]) -> list[str]:
+    ranking = {name: index for index, name in enumerate(preferred_order)}
+    return sorted(values, key=lambda item: (ranking.get(item, len(preferred_order)), item))
+
+
+def order_feature_logic(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ranking = {name: index for index, name in enumerate(FEATURE_LOGIC_ORDER)}
+    return sorted(values, key=lambda item: (ranking.get(str(item.get("feature", "")), len(FEATURE_LOGIC_ORDER)), str(item.get("feature", ""))))
+
+
+def select_best_monetization_model(
+    values: list[str],
+    core_functions: list[str],
+    site_types: list[str],
+    important_keywords: list[str],
+) -> str:
+    candidates = deduplicate_strings(values)
+    if candidates:
+        return max(candidates, key=monetization_model_score)
+    if "keyword_tool" in site_types and "scoring_system" in core_functions:
+        return "CPC 기반 키워드 분석 SaaS"
+    if "keyword_tool" in site_types and important_keywords:
+        return "키워드 데이터 제공 서비스"
+    if "content_site" in site_types:
+        return "콘텐츠 기반 유입 서비스"
+    return "일반 웹서비스"
+
+
+def monetization_model_score(value: str) -> tuple[int, int]:
+    lowered = value.lower()
+    signal_score = sum(
+        1
+        for keyword in ("saas", "cpc", "키워드", "광고", "데이터")
+        if keyword in lowered
+    )
+    return (signal_score, len(lowered))
+
+
+def select_best_data_source(values: list[str], important_keywords: list[str]) -> str:
+    candidates = deduplicate_strings(values)
+    if candidates:
+        return max(candidates, key=data_source_score)
+    if {"CPC", "검색량"} & set(important_keywords):
+        return "검색 데이터 추정"
+    return "데이터 출처 불명"
+
+
+def data_source_score(value: str) -> tuple[int, int]:
+    lowered = value.lower()
+    signal_score = sum(
+        1
+        for keyword in ("api", "네이버", "검색", "크롤링")
+        if keyword in lowered
+    )
+    return (signal_score, len(lowered))
+
+
+def order_ui_components(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ranking = {item: index for index, item in enumerate(UI_COMPONENT_ORDER)}
+    return sorted(values, key=lambda item: (ranking.get((str(item.get("type", "")), str(item.get("role", ""))), len(UI_COMPONENT_ORDER)), str(item.get("role", ""))))
+
+
+def order_data_ports(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    preferred_order = [
+        ("input", "keyword seed"),
+        ("textarea", "bulk keyword seed"),
+        ("filter", "metric conditions"),
+        ("table", "keyword metrics"),
+        ("list", "related keyword suggestions"),
+        ("article", "guide articles"),
+    ]
+    ranking = {item: index for index, item in enumerate(preferred_order)}
+    return sorted(values, key=lambda item: (ranking.get((str(item.get("type", "")), str(item.get("role", ""))), len(preferred_order)), str(item.get("role", ""))))
+
+
+def merge_feature_logic_values(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for value in values:
+        feature = clean_text(str(value.get("feature", "")))
+        logic = clean_text(str(value.get("logic", "")))
+        if not feature or not logic:
+            continue
+        existing = merged.get(feature)
+        if existing is None or feature_logic_score(logic) > feature_logic_score(str(existing.get("logic", ""))):
+            merged[feature] = {"feature": feature, "logic": logic}
+    return list(merged.values())
+
+
+def feature_logic_score(logic: str) -> tuple[int, int]:
+    normalized = logic.lower()
+    signal_score = sum(
+        1
+        for keyword in ("경쟁도", "추천어", "조합", "검색량", "cpc", "사용법")
+        if keyword in normalized
+    )
+    return (signal_score, len(normalized))
+
+
+def order_business_logic(values: list[str]) -> list[str]:
+    preferred_order = [
+        "고CPC 키워드 우선 노출",
+        "검색량 + 경쟁도 조합 분석",
+        "CPC 기반 키워드 점수화",
+        "고가 키워드 필터링",
+        "연관 키워드 추천 및 확장",
+    ]
+    ranking = {name: index for index, name in enumerate(preferred_order)}
+    return sorted(values, key=lambda item: (ranking.get(item, len(preferred_order)), item))
+
+
+def component_haystack(tag: Tag, label: str) -> str:
+    return " ".join(
+        [
+            tag.name,
+            str(tag.get("type", "")),
+            label,
+            str(tag.get("name", "")),
+            str(tag.get("id", "")),
+            str(tag.get("placeholder", "")),
+            str(tag.get("aria-label", "")),
+            " ".join(str(item) for item in tag.get("class", [])),
+        ]
+    ).lower()
 
 
 def tag_label(tag: Tag, soup: BeautifulSoup) -> str:
@@ -684,11 +1005,6 @@ def selector_hint(tag: Tag) -> str:
     return tag.name
 
 
-def parent_form_action(tag: Tag) -> str:
-    form = tag.find_parent("form")
-    return str(form.get("action", "")) if form else ""
-
-
 def contextual_label(tag: Tag, soup: BeautifulSoup) -> str:
     for ancestor in [tag] + list(tag.parents):
         if not isinstance(ancestor, Tag):
@@ -704,84 +1020,9 @@ def contextual_label(tag: Tag, soup: BeautifulSoup) -> str:
     return tag_label(tag, soup)
 
 
-def classify_input_role(tag: Tag, label: str) -> str:
-    input_type = str(tag.get("type", tag.name)).lower()
-    haystack = " ".join([tag.name, input_type, label, str(tag.get("name", "")), str(tag.get("id", "")), str(tag.get("placeholder", "")), " ".join(str(item) for item in tag.get("class", []))]).lower()
-    if input_type == "password" or "password" in haystack:
-        return "password_field"
-    if input_type == "search" or any(keyword in haystack for keyword in ["search", "keyword", "query", "find"]):
-        return "search_field"
-    if input_type == "email" or "email" in haystack:
-        return "email_field"
-    if any(keyword in haystack for keyword in ["username", "user name", "login id", "userid", "account id"]):
-        return "username_field"
-    if input_type in {"checkbox", "radio"} or tag.name == "select" or any(keyword in haystack for keyword in ["filter", "sort", "category", "status", "date", "type"]):
-        return "filter_control"
-    if input_type == "file":
-        return "file_upload"
-    if tag.name == "textarea":
-        return "long_text"
-    return "text_entry"
-
-
-def classify_button_role(tag: Tag, label: str) -> str:
-    haystack = " ".join([label, str(tag.get("name", "")), str(tag.get("id", "")), str(tag.get("type", "")), " ".join(str(item) for item in tag.get("class", []))]).lower()
-    if any(keyword in haystack for keyword in ["search", "find", "lookup"]):
-        return "search_action"
-    if any(keyword in haystack for keyword in ["filter", "apply", "sort", "refine"]):
-        return "filter_action"
-    if any(keyword in haystack for keyword in ["login", "log in", "sign in"]):
-        return "login_action"
-    if any(keyword in haystack for keyword in ["sign up", "register", "create account", "join"]):
-        return "registration_action"
-    if any(keyword in haystack for keyword in ["contact", "message", "request demo", "send"]):
-        return "contact_action"
-    if any(keyword in haystack for keyword in ["submit", "save", "create", "update", "continue"]):
-        return "submit_action"
-    return "generic_action"
-
-
-def infer_form_role(form: Tag, child_input_roles: list[str], submit_labels: list[str]) -> str:
-    joined_submit = " ".join(submit_labels).lower()
-    action = str(form.get("action", "")).lower()
-    if "password_field" in child_input_roles and any(role in child_input_roles for role in {"email_field", "username_field"}):
-        if any(keyword in joined_submit or keyword in action for keyword in ["sign up", "register", "create", "join"]):
-            return "registration_form"
-        return "login_form"
-    if "search_field" in child_input_roles:
-        return "search_form"
-    if "filter_control" in child_input_roles and len(child_input_roles) <= 4:
-        return "filter_form"
-    if "file_upload" in child_input_roles:
-        return "upload_form"
-    if any(keyword in joined_submit or keyword in action for keyword in ["contact", "message", "support", "demo"]):
-        return "contact_form"
-    return "data_entry_form"
-
-
-def normalize_identity(value: Any) -> str:
-    return clean_text(str(value or "")).lower()
-
-
 def clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value or "").strip()
 
 
 def full_text(soup: BeautifulSoup) -> str:
     return clean_text(soup.get_text(" ", strip=True)).lower()
-
-
-def ordered_unique(values: list[Any]) -> list[str]:
-    seen: set[str] = set()
-    results: list[str] = []
-    for value in values:
-        cleaned = clean_text(str(value))
-        if not cleaned or cleaned in seen:
-            continue
-        seen.add(cleaned)
-        results.append(cleaned)
-    return results
-
-
-def sort_grouped_records(records: Any, sort_key: str) -> list[dict[str, Any]]:
-    return sorted(list(records), key=lambda item: (-int(item.get(sort_key, 0)), str(item.get("role", item.get("feature", item.get("name", ""))))))

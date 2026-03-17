@@ -35,6 +35,17 @@ class WebsiteBenchmarkTests(unittest.TestCase):
         component_names = {component.name for component in report.common_components}
         self.assertIn("Header", component_names)
         self.assertIn("Footer", component_names)
+        self.assertIn("Hero section", component_names)
+
+    def test_nested_hero_section_is_captured_from_header(self) -> None:
+        report = analyze_source("sample_home.html")
+
+        section_kinds = {section.kind for section in report.pages[0].sections}
+        component_names = {component.name for component in report.pages[0].components}
+
+        self.assertIn("header", section_kinds)
+        self.assertIn("hero", section_kinds)
+        self.assertIn("Hero section", component_names)
 
     def test_markdown_report_contains_inventory_and_flows(self) -> None:
         report = analyze_source(self.build_sample_dir(), max_pages=10)

@@ -2,6 +2,10 @@
 
 Analyzes every HTML file in `input/`, builds one integrated site analysis, and extracts guide-like content into `output/content/`.
 
+Korean usage and JSON field guide:
+
+- `benchmark_tool/USAGE_KO.md`
+
 ## Structure
 
 ```text

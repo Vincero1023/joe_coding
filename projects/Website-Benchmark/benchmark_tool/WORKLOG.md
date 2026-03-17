@@ -14,3 +14,8 @@
 - Normalized the content keyword list in `content_extractor.py` to ASCII-safe unicode escape literals so Korean keyword matching remains stable even when the shell encoding is noisy.
 - Recompiled the analyzer modules and executed `python benchmark_tool\\main.py` again after the keyword cleanup.
 - Confirmed the integrated `site_analysis.json` and `output/content/` exports are still generated.
+
+## 2026-03-17 20:58
+- Added `benchmark_tool/USAGE_KO.md` to document the analyzer purpose, run commands, output files, and how to read `site_analysis.json`.
+- Documented the current AI-oriented `features` schema, including how `goal`, `description`, `inputs`, `outputs`, `logic`, and `ui` should be interpreted.
+- Linked the new guide from `benchmark_tool/README.md` so the current entry point points to the up-to-date JSON decoding guide.

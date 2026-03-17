@@ -47,6 +47,7 @@ SECTION_KEYWORDS = {
     "contact": ["contact", "demo", "sales", "support"],
     "gallery": ["gallery", "carousel", "slider", "showcase"],
 }
+STRUCTURAL_SECTION_TAGS = {"header", "nav", "section", "article", "aside", "footer", "form"}
 
 
 @dataclass(slots=True)
@@ -501,11 +502,11 @@ def extract_forms(root: Node, base_url: str | None) -> list[FormSummary]:
 def extract_sections(root: Node) -> list[SectionSummary]:
     body = find_first(root, lambda node: node.tag == "body") or root
     main = find_first(root, lambda node: node.tag == "main")
-    section_candidates = collect_top_level_sections(main or body)
+    section_candidates = collect_document_sections(body, main)
     if not section_candidates:
         section_candidates = find_all(
             root,
-            lambda node: node.tag in {"header", "nav", "section", "article", "aside", "footer", "form"},
+            lambda node: node.tag in STRUCTURAL_SECTION_TAGS or (node.tag == "div" and looks_like_section(node)),
         )
     summaries: list[SectionSummary] = []
     seen: set[tuple[str, str]] = set()
@@ -537,15 +538,38 @@ def extract_sections(root: Node) -> list[SectionSummary]:
     return summaries[:12]
 
 
-def collect_top_level_sections(root: Node) -> list[Node]:
+def collect_document_sections(body: Node, main: Node | None) -> list[Node]:
     candidates: list[Node] = []
-    for child in root.children:
-        if child.tag in {"header", "nav", "main", "section", "article", "aside", "footer", "form"}:
-            candidates.append(child)
-            continue
-        if looks_like_section(child):
-            candidates.append(child)
+    seen: set[int] = set()
+
+    def append_candidate(node: Node) -> None:
+        node_id = id(node)
+        if node_id in seen:
+            return
+        seen.add(node_id)
+        candidates.append(node)
+
+    for child in body.children:
+        if child.tag != "main" and is_section_candidate(child):
+            append_candidate(child)
+        if child.tag in {"header", "nav", "footer", "aside"}:
+            for grandchild in child.children:
+                if is_section_candidate(grandchild):
+                    append_candidate(grandchild)
+
+    if main:
+        for child in main.children:
+            if is_section_candidate(child):
+                append_candidate(child)
     return candidates
+
+
+def is_section_candidate(node: Node) -> bool:
+    if node.tag in STRUCTURAL_SECTION_TAGS:
+        return True
+    if node.tag == "div":
+        return looks_like_section(node)
+    return False
 
 
 def looks_like_section(node: Node) -> bool:
