@@ -1,4 +1,4 @@
-$root = "F:\joe_coding"
+$root = Split-Path -Parent $PSScriptRoot
 
 $name = Read-Host "Project name"
 $desc = Read-Host "Project description"
