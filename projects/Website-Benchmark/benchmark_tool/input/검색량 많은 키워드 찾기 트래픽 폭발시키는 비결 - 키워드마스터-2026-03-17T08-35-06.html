@@ -1,0 +1,519 @@
+<!doctype html><html><head><meta charset="utf-8"><base href="https://keywordmaster.net/?page=blog_9">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>검색량 많은 키워드 찾기 | 트래픽 폭발시키는 비결 - 키워드마스터</title>
+  <meta name="description" content="검색량이 많으면서도 공략 가능한 키워드를 찾는 필터링 전략. 시즌 키워드, 트렌드 활용법.">
+
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+
+  
+  
+  
+
+  <style>
+    /* ===== KM Unified CSS Variables (Desktop) ===== */
+    :root {
+      --km-bg: #f0f2f5;
+      --km-surface: #ffffff;
+      --km-surface2: #f8f9fa;
+      --km-surface3: #eef1f5;
+      --km-border: #e2e8f0;
+      --km-border-light: #f1f5f9;
+      --km-text: #1e293b;
+      --km-text-secondary: #64748b;
+      --km-text-muted: #94a3b8;
+      --km-primary: #6366f1;
+      --km-primary-light: #818cf8;
+      --km-primary-dark: #4f46e5;
+      --km-primary-glow: rgba(99, 102, 241, 0.15);
+      --km-accent: #06b6d4;
+      --km-success: #10b981;
+      --km-warning: #f59e0b;
+      --km-danger: #ef4444;
+      --km-info: #3b82f6;
+      /* Legacy compatibility aliases */
+      --bg-color: var(--km-bg);
+      --text-color: var(--km-text);
+      --muted: var(--km-text-muted);
+      --surface: var(--km-surface);
+      --surface-border: var(--km-border);
+      --input-bg: var(--km-surface);
+      --input-text: var(--km-text);
+      --link: var(--km-primary);
+    }
+    body.theme-dark {
+      --km-bg: #0b1220;
+      --km-surface: #111827;
+      --km-surface2: #1a2332;
+      --km-surface3: #1f2937;
+      --km-border: #1f2937;
+      --km-border-light: #374151;
+      --km-text: #e5e7eb;
+      --km-text-secondary: #94a3b8;
+      --km-text-muted: #64748b;
+      --km-primary: #818cf8;
+      --km-primary-light: #a5b4fc;
+      --km-primary-dark: #6366f1;
+      --km-primary-glow: rgba(129, 140, 248, 0.2);
+      --km-accent: #22d3ee;
+      --bg-color: var(--km-bg);
+      --text-color: var(--km-text);
+      --muted: var(--km-text-muted);
+      --surface: var(--km-surface);
+      --surface-border: var(--km-border);
+      --input-bg: var(--km-surface2);
+      --input-text: var(--km-text);
+      --link: var(--km-primary);
+    }
+    body.theme-light {
+      --km-bg: #f0f2f5;
+      --km-surface: #ffffff;
+      --km-surface2: #f8f9fa;
+      --km-surface3: #eef1f5;
+      --km-border: #e2e8f0;
+      --km-text: #1e293b;
+      --km-text-secondary: #64748b;
+      --km-text-muted: #94a3b8;
+      --km-primary: #6366f1;
+      --km-primary-light: #818cf8;
+      --km-primary-dark: #4f46e5;
+      --km-primary-glow: rgba(99, 102, 241, 0.15);
+      --bg-color: var(--km-bg);
+      --text-color: var(--km-text);
+      --muted: var(--km-text-muted);
+      --surface: var(--km-surface);
+      --surface-border: var(--km-border);
+      --input-bg: var(--km-surface);
+      --input-text: var(--km-text);
+      --link: var(--km-primary);
+    }
+    body {
+      padding-top: 56px;
+      background: var(--km-bg);
+      color: var(--km-text);
+      font-family: 'Pretendard Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+    }
+    a { color: var(--km-primary); }
+
+    .card, .offcanvas, .modal-content { background: var(--km-surface); color: var(--km-text); border-color: var(--km-border); }
+    .table, .table > :not(caption) > * > * { color: var(--km-text); }
+
+    .form-control, .form-select, .form-range { background: var(--input-bg); color: var(--input-text); border-color: var(--km-border); }
+    .form-control::placeholder { color: var(--km-text-muted); }
+
+    /* ===== Professional Header ===== */
+    .km-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 56px;
+      background: var(--km-surface);
+      border-bottom: 1px solid var(--km-border);
+      z-index: 1050;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      backdrop-filter: saturate(180%) blur(12px);
+      transition: background 0.2s, border-color 0.2s;
+    }
+    body.theme-dark .km-nav {
+      background: rgba(17, 24, 39, 0.95);
+    }
+    .km-nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      margin-right: 32px;
+      flex-shrink: 0;
+    }
+    .km-nav-brand-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--km-primary), var(--km-accent));
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 900;
+      color: #fff;
+    }
+    .km-nav-brand-text {
+      font-size: 17px;
+      font-weight: 800;
+      color: var(--km-text);
+      letter-spacing: -0.5px;
+    }
+    .km-nav-links {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 1;
+    }
+    .km-nav-link {
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--km-text-secondary);
+      text-decoration: none;
+      border-radius: 8px;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .km-nav-link:hover {
+      background: var(--km-primary-glow);
+      color: var(--km-text);
+    }
+    .km-nav-link.active {
+      color: var(--km-primary);
+      background: var(--km-primary-glow);
+    }
+    .km-nav-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+    .km-nav-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      background: var(--km-surface2);
+      border: 1px solid var(--km-border);
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--km-text-secondary);
+    }
+    .km-nav-badge .lv {
+      color: var(--km-primary);
+      font-weight: 800;
+    }
+    .km-nav-btn {
+      padding: 6px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .km-nav-btn-primary {
+      background: var(--km-primary);
+      color: #fff;
+    }
+    .km-nav-btn-primary:hover { background: var(--km-primary-dark); color: #fff; }
+    .km-nav-btn-ghost {
+      background: transparent;
+      color: var(--km-text-secondary);
+      border: 1px solid var(--km-border);
+    }
+    .km-nav-btn-ghost:hover { background: var(--km-surface2); color: var(--km-text); }
+    .km-nav-theme-toggle {
+      width: 36px;
+      height: 36px;
+      border: none;
+      background: var(--km-surface2);
+      color: var(--km-text-secondary);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+      transition: background 0.15s;
+    }
+    .km-nav-theme-toggle:hover { background: var(--km-surface3); }
+
+    /* Mobile hamburger on desktop breakpoint */
+    .km-nav-mobile-toggle {
+      display: none;
+      width: 36px;
+      height: 36px;
+      border: none;
+      background: var(--km-surface2);
+      color: var(--km-text);
+      border-radius: 8px;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 18px;
+    }
+    @media (max-width: 1024px) {
+      .km-nav-links { display: none; }
+      .km-nav-badge { display: none; }
+      .km-nav-mobile-toggle { display: flex; }
+    }
+
+    /* ===== Level table (keep for mypage/pricing) ===== */
+    .level-table { width: 100%; max-width: 600px; border-collapse: collapse; }
+    .level-table tr td { padding: 8px; text-align: center; }
+    .my-level-row {
+      background: linear-gradient(90deg, rgba(99,102,241,0.15) 0%, rgba(6,182,212,0.15) 100%);
+      font-weight: bold; color: var(--km-primary); position: relative;
+      box-shadow: 0 0 10px var(--km-primary-glow); border: 2px solid var(--km-primary);
+    }
+    .my-level-row td:first-child::before { content: ""; }
+    .cpc-lv0 { border:1px solid var(--km-border) !important; }
+    .cpc-lv1 { border:2px solid #bbf7d0 !important; }
+    .cpc-lv2 { border:3px solid #93c5fd !important; }
+    .cpc-lv3 { border:4px solid #a5b4fc !important; }
+    .cpc-lv4 { border:5px solid #c4b5fd !important; }
+    .cpc-lv5 { border:6px solid #f9a8d4 !important; }
+    .cpc-lv6 { border:7px solid #fca5a5 !important; }
+
+    /* ===== Session Timer ===== */
+    .km-session-timer {
+      cursor: pointer;
+      font-variant-numeric: tabular-nums;
+      transition: color 0.3s, background 0.3s;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .km-session-timer.safe { color: var(--km-success); }
+    .km-session-timer.warn { color: #f59e0b; background: rgba(245,158,11,0.1); }
+    .km-session-timer.danger { color: #ef4444; background: rgba(239,68,68,0.15); animation: km-session-blink 1s infinite; }
+    @keyframes km-session-blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  </style>
+
+      <style id="__text_copy_helper_snapshot_unlock__">
+        html, body, body * {
+          user-select: text !important;
+          -webkit-user-select: text !important;
+          -moz-user-select: text !important;
+          -ms-user-select: text !important;
+        }
+      </style>
+    </head><body>
+<nav class="km-nav">
+  <a class="km-nav-brand" href="https://keywordmaster.net/?page=search" target="_blank" rel="noopener noreferrer">
+    <div class="km-nav-brand-icon">KM</div>
+    <span class="km-nav-brand-text">키워드마스터</span>
+  </a>
+
+  <div class="km-nav-links">
+    <a class="km-nav-link " href="https://keywordmaster.net/?page=search" target="_blank" rel="noopener noreferrer">키워드분석</a>
+    <a class="km-nav-link active" href="https://keywordmaster.net/?page=blog" target="_blank" rel="noopener noreferrer">가이드</a>
+    <a class="km-nav-link " href="https://keywordmaster.net/?page=magazine" target="_blank" rel="noopener noreferrer">키마비키</a>
+    <a class="km-nav-link " href="https://keywordmaster.net/?page=pricing" target="_blank" rel="noopener noreferrer">가격안내</a>
+        <a class="km-nav-link" href="https://keywordmaster.net/?page=support" target="_blank" rel="noopener noreferrer">고객센터</a>
+      </div>
+
+  <div class="km-nav-right">
+          <a href="https://keywordmaster.net/?page=login" class="km-nav-btn km-nav-btn-primary" target="_blank" rel="noopener noreferrer">로그인</a>
+        <button id="themeToggleBtnDesktop" class="km-nav-theme-toggle" title="테마 전환" aria-label="테마 전환">🌙</button>
+    <button class="km-nav-mobile-toggle" type="button" data-bs-toggle="offcanvas" data-bs-target="#globalOffcanvasMenu" aria-label="메뉴">☰</button>
+  </div>
+</nav>
+
+<!-- 오프캔버스 메뉴 (태블릿/작은화면용) -->
+<div class="offcanvas offcanvas-end" tabindex="-1" id="globalOffcanvasMenu" aria-labelledby="globalOffcanvasMenuLabel" style="background:var(--km-surface);color:var(--km-text);">
+  <div class="offcanvas-header" style="border-bottom:1px solid var(--km-border);">
+    <h5 class="offcanvas-title" id="globalOffcanvasMenuLabel" style="font-weight:800;">메뉴</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+  </div>
+  <div class="offcanvas-body">
+    <div class="list-group list-group-flush">
+      <a class="list-group-item list-group-item-action" href="https://keywordmaster.net/?page=search" style="background:var(--km-surface);color:var(--km-text);border-color:var(--km-border);" target="_blank" rel="noopener noreferrer">키워드분석</a>
+      <a class="list-group-item list-group-item-action" href="https://keywordmaster.net/?page=blog" style="background:var(--km-surface);color:var(--km-text);border-color:var(--km-border);" target="_blank" rel="noopener noreferrer">키워드마스터 가이드</a>
+      <a class="list-group-item list-group-item-action" href="https://keywordmaster.net/?page=guide" style="background:var(--km-surface);color:var(--km-text);border-color:var(--km-border);" target="_blank" rel="noopener noreferrer">키워드 분석 가이드</a>
+      <a class="list-group-item list-group-item-action" href="https://keywordmaster.net/?page=how_to_use" style="background:var(--km-surface);color:var(--km-text);border-color:var(--km-border);" target="_blank" rel="noopener noreferrer">사용방법</a>
+      <a class="list-group-item list-group-item-action" href="https://keywordmaster.net/?page=pricing" style="background:var(--km-surface);color:var(--km-text);border-color:var(--km-border);" target="_blank" rel="noopener noreferrer">가격안내</a>
+                      </div>
+  </div>
+</div>
+<div class="container mt-3">
+
+    
+<link rel="stylesheet" href="https://keywordmaster.net/pages/css/blog.css">
+
+<article class="blog-article">
+  <nav class="blog-breadcrumb">
+    <a href="https://keywordmaster.net/?page=search" target="_blank" rel="noopener noreferrer">홈</a><span>›</span><a href="https://keywordmaster.net/?page=blog" target="_blank" rel="noopener noreferrer">키워드마스터 가이드</a><span>›</span>검색량 많은 키워드 찾기
+  </nav>
+
+  <div class="blog-hero blog-hero-bg-9">
+    <div class="blog-hero-content">
+      <div class="blog-hero-badge">키워드마스터 GUIDE 09</div>
+      <h1>검색량 많은 키워드 찾기<br>트래픽 폭발시키는 비결</h1>
+      <div class="blog-hero-sub">검색량은 높되 공략 가능한 키워드를 필터링하는 실전 전략</div>
+    </div>
+  </div>
+
+  <div class="blog-body">
+    <h2>검색량이 많은 키워드의 가치</h2>
+    <p>블로그나 사이트에 많은 방문자를 유치하려면 <strong>검색량이 많은 키워드</strong>를 공략해야 합니다. 검색량이 많다는 것은 그만큼 많은 사람이 해당 주제에 관심을 가지고 있다는 뜻입니다. 하지만 단순히 검색량만 높다고 좋은 키워드는 아닙니다.</p>
+
+    <p>핵심은 <strong>"검색량이 많으면서도 내가 상위노출할 수 있는 키워드"</strong>를 찾는 것입니다. 이를 위해서는 검색량 데이터를 올바르게 분석하고, 경쟁도와 함께 종합적으로 판단해야 합니다.</p>
+
+    <h2>키워드마스터로 고검색량 키워드 찾기</h2>
+
+    <h3>방법 1: 필터를 활용한 검색</h3>
+    <p>키워드마스터의 좌측 사이드바에 있는 <strong>필터 옵션</strong>을 활용하면 원하는 검색량 범위의 키워드만 추출할 수 있습니다.</p>
+
+    <ol class="blog-steps">
+      <li><strong>시드 키워드 대량수집</strong> — 관심 분야의 시드 키워드를 입력하고 대량수집을 실행합니다</li>
+      <li><strong>합계↑ 필터 설정</strong> — 합계↑에 원하는 최소 검색량을 입력합니다. 예: 1000 (월 검색량 1,000 이상)</li>
+      <li><strong>합계↓ 필터 설정</strong> — 너무 큰 키워드를 제외하려면 합계↓에 최대값을 설정합니다. 예: 10000</li>
+      <li><strong>결과 확인</strong> — 필터링된 키워드 목록에서 경쟁도와 CPC를 함께 확인합니다</li>
+    </ol>
+
+    <h3>방법 2: 실시간/인기 피드 활용</h3>
+    <p>키워드마스터 우측 패널에는 <strong>실시간, 고가, 인기</strong> 3가지 피드가 있습니다.</p>
+    <ul>
+      <li><strong>실시간</strong> — 지금 이 순간 검색량이 급상승하고 있는 키워드</li>
+      <li><strong>고가</strong> — CPC가 높은 고가치 키워드 (1만+, 2만+, 5만+ 등 티어별)</li>
+      <li><strong>인기</strong> — 최근 지속적으로 인기 있는 키워드</li>
+    </ul>
+
+    <p>특히 <strong>실시간 피드</strong>는 현재 급상승하는 트렌드 키워드를 보여주므로, 빠르게 대응하면 단기간에 높은 트래픽을 얻을 수 있습니다.</p>
+
+    <div class="blog-tip">
+      <div class="blog-tip-title">🔥 트렌드 키워드 선점 전략</div>
+      실시간 피드에서 검색량이 급상승하는 키워드를 발견하면, 해당 키워드로 빠르게 양질의 글을 작성하세요. 경쟁자가 아직 글을 쓰지 않은 시점에 선점하면 상위노출이 훨씬 수월합니다.
+    </div>
+
+    <h2>검색량 vs 경쟁도: 밸런스 찾기</h2>
+    <p>검색량이 많은 키워드는 경쟁도도 높은 경우가 대부분입니다. 따라서 <strong>검색량과 경쟁도 사이의 최적 밸런스</strong>를 찾아야 합니다.</p>
+
+    <div class="blog-table-wrap">
+      <table class="blog-table">
+        <thead>
+          <tr><th>키워드 유형</th><th>검색량</th><th>경쟁도</th><th>전략</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>빅 키워드</td><td>10,000+</td><td>매우 높음</td><td>장기적 목표로 설정, 당장은 피함</td></tr>
+          <tr><td>미들 키워드</td><td>1,000~10,000</td><td>보통~높음</td><td>핵심 공략 대상, 경쟁도 확인 후 선별</td></tr>
+          <tr><td>스몰 키워드</td><td>100~1,000</td><td>낮음~보통</td><td>초보 블로거의 최적 타겟</td></tr>
+          <tr><td>마이크로 키워드</td><td>10~100</td><td>매우 낮음</td><td>롱테일 전략, 다량 생산 필요</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>시즌 키워드로 트래픽 폭발시키기</h2>
+    <p><strong>시즌 키워드</strong>는 특정 시기에 검색량이 급격히 증가하는 키워드입니다. 시즌 키워드를 미리 파악하고 콘텐츠를 준비하면 해당 시기에 엄청난 트래픽을 얻을 수 있습니다.</p>
+
+    <div class="blog-table-wrap">
+      <table class="blog-table">
+        <thead>
+          <tr><th>시기</th><th>시즌 키워드 예시</th><th>준비 시점</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1~2월</td><td>설날 선물, 새해 다이어트, 연말정산</td><td>12월부터</td></tr>
+          <tr><td>3~4월</td><td>벚꽃 명소, 입학 준비, 봄 옷</td><td>2월부터</td></tr>
+          <tr><td>5~6월</td><td>어버이날 선물, 여름 휴가지, 에어컨 추천</td><td>4월부터</td></tr>
+          <tr><td>7~8월</td><td>여름 휴가, 물놀이, 제습기</td><td>6월부터</td></tr>
+          <tr><td>9~10월</td><td>추석 선물, 가을 여행, 단풍</td><td>8월부터</td></tr>
+          <tr><td>11~12월</td><td>블랙프라이데이, 크리스마스 선물, 연말</td><td>10월부터</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="blog-tip">
+      <div class="blog-tip-title">📅 시즌 키워드 꿀팁</div>
+      시즌 키워드는 <strong>시즌 시작 1~2개월 전에 글을 발행</strong>하는 것이 이상적입니다. 네이버에서 새 글이 안정적으로 인덱싱되고 순위가 잡히려면 시간이 필요하기 때문입니다. 키워드마스터에서 미리 시즌 키워드를 수집해두세요.
+    </div>
+
+    <h2>고검색량 키워드 공략 시 주의사항</h2>
+    <ul>
+      <li><strong>검색량만 보고 뛰어들지 마세요</strong> — 반드시 경쟁도(블로그 발행량)를 함께 확인하세요</li>
+      <li><strong>클릭수도 확인하세요</strong> — 검색량은 많지만 클릭수가 적은 키워드는 실제 유입이 적을 수 있습니다</li>
+      <li><strong>한 바구니에 모든 달걀을 담지 마세요</strong> — 빅 키워드 하나에 올인하기보다 중소형 키워드를 다수 공략하는 것이 안전합니다</li>
+      <li><strong>글의 품질이 우선</strong> — 검색량이 많은 키워드일수록 글의 품질이 중요합니다. 경쟁자의 글보다 더 유용한 정보를 제공하세요</li>
+    </ul>
+
+    <div class="blog-quote">
+      "트래픽은 한 번에 폭발시키는 것이 아니라, 여러 개의 잘 선별된 키워드로 꾸준히 쌓아올리는 것입니다. 키워드마스터로 매일 새로운 키워드를 발굴하세요."
+    </div>
+
+    <p>검색량 많은 키워드를 찾는 것은 블로그 성장의 핵심입니다. 키워드마스터의 필터와 피드 기능을 적극 활용하여, 검색량은 높되 경쟁은 가능한 범위의 키워드를 체계적으로 발굴해보세요.</p>
+  </div>
+
+  <div class="blog-tags">
+    <span class="blog-tag">#검색량</span>
+    <span class="blog-tag">#트래픽</span>
+    <span class="blog-tag">#인기키워드</span>
+    <span class="blog-tag">#검색량분석</span>
+    <span class="blog-tag">#키워드필터</span>
+  </div>
+
+  <div class="blog-cta">
+    <a href="https://keywordmaster.net/" class="blog-cta-btn" target="_blank" rel="noopener noreferrer">키워드마스터 바로가기</a>
+    <div class="blog-cta-desc">지금 바로 무료로 키워드 분석을 시작하세요</div>
+  </div>
+
+  <div class="blog-related">
+    <div class="blog-related-title">관련 글 더보기</div>
+    <ul class="blog-related-list">
+      <li><a href="https://keywordmaster.net/?page=blog_3" target="_blank" rel="noopener noreferrer">네이버 키워드 검색량 조회, 정확하게 확인하는 방법</a></li>
+      <li><a href="https://keywordmaster.net/?page=blog_5" target="_blank" rel="noopener noreferrer">황금키워드 찾는법 | 남들이 모르는 고수익 키워드 발굴</a></li>
+      <li><a href="https://keywordmaster.net/?page=blog_7" target="_blank" rel="noopener noreferrer">블로그 상위노출 키워드 전략 | 경쟁 피하고 1페이지 진입</a></li>
+      <li><a href="https://keywordmaster.net/?page=blog_10" target="_blank" rel="noopener noreferrer">롱테일 키워드 찾는법 | 적은 노력으로 확실한 유입</a></li>
+    </ul>
+  </div>
+</article>
+</div>
+
+  <footer style="background: var(--km-surface); border-top: 1px solid var(--km-border); padding: 40px 20px; margin-top: 40px;">
+    <div style="max-width: 1200px; margin: 0 auto;">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:32px;margin-bottom:24px;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+            <div style="width:28px;height:28px;background:linear-gradient(135deg,var(--km-primary),var(--km-accent));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:#fff;">KM</div>
+            <span style="font-size:15px;font-weight:800;color:var(--km-text);">키워드마스터</span>
+          </div>
+          <p style="color:var(--km-text-muted);font-size:13px;line-height:1.6;max-width:300px;">네이버 키워드 검색량 조회, CPC 분석, 블로그 키워드 발굴을 위한 전문 도구</p>
+        </div>
+        <div style="display:flex;gap:48px;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--km-text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">서비스</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <a href="https://keywordmaster.net/?page=search" style="color:var(--km-text-secondary);text-decoration:none;font-size:13px;font-weight:500;" target="_blank" rel="noopener noreferrer">키워드분석</a>
+              <a href="https://keywordmaster.net/?page=pricing" style="color:var(--km-text-secondary);text-decoration:none;font-size:13px;font-weight:500;" target="_blank" rel="noopener noreferrer">가격안내</a>
+              <a href="https://keywordmaster.net/?page=guide" style="color:var(--km-text-secondary);text-decoration:none;font-size:13px;font-weight:500;" target="_blank" rel="noopener noreferrer">가이드</a>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--km-text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">법적고지</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <a href="https://keywordmaster.net/?page=privacy_policy" style="color:var(--km-text-secondary);text-decoration:none;font-size:13px;font-weight:500;" target="_blank" rel="noopener noreferrer">개인정보처리방침</a>
+              <a href="https://keywordmaster.net/?page=privacy_policy#refund" style="color:var(--km-text-secondary);text-decoration:none;font-size:13px;font-weight:500;" target="_blank" rel="noopener noreferrer">환불정책</a>
+              <a href="https://keywordmaster.net/?page=terms_of_service" style="color:var(--km-text-secondary);text-decoration:none;font-size:13px;font-weight:500;" target="_blank" rel="noopener noreferrer">이용약관</a>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--km-text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">고객센터</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <a href="https://keywordmaster.net/?page=support" style="color:var(--km-text-secondary);text-decoration:none;font-size:13px;font-weight:500;" target="_blank" rel="noopener noreferrer">문의하기</a>
+              <a href="https://keywordmaster.net/?page=how_to_use" style="color:var(--km-text-secondary);text-decoration:none;font-size:13px;font-weight:500;" target="_blank" rel="noopener noreferrer">사용방법</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--km-border);padding-top:20px;">
+        <div style="color:var(--km-text-muted);font-size:12px;line-height:1.8;">
+          <p style="margin:2px 0;">상호명: 티온 | 사업자등록번호: 621-42-00020 | 대표자: 문호영</p>
+          <p style="margin:2px 0;">주소: 대구광역시 달서구 상화로 235 | 통신판매업: 제 2016-대구달서-4286 호</p>
+          <p style="margin:8px 0 0;font-size:11px;">© 2025 KeywordMaster. All rights reserved.</p>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+
+
+    
+</body></html>

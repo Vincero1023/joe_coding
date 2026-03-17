@@ -11,7 +11,11 @@
 - 분석 결과를 Markdown 문서로 기록
 
 ## Tech Stack
-- TBD
+- Python 3
+- 표준 라이브러리 기반 CLI (`argparse`)
+- HTML 파싱 (`html.parser`)
+- URL 로드/크롤링 (`urllib.request`, `urllib.parse`)
+- Markdown 리포트 출력
 
 ## Development Plan
 1. 입력 방식(URL/정적 파일) 정의
@@ -21,3 +25,8 @@
 
 ## Idea
 웹사이트를 분석하여 핵심 기능 및 구조를 추출하는 프로그램
+
+## Current Scope
+- URL, 단일 HTML 파일, HTML 디렉터리 입력 지원
+- 규칙 기반으로 페이지 역할/섹션/기능/컴포넌트/사용자 흐름 추출
+- Markdown 리포트 자동 생성
