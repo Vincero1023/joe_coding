@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+import time
+from datetime import datetime, timezone
+from typing import Any
+
+from app.analyzer.main import analyzer_module
+from app.collector.main import collector_module
+from app.expander.main import expander_module
+from app.selector.main import selector_module
+from app.title_gen.main import title_generator_module
+
+
+class PipelineService:
+    def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        debug_enabled = bool(input_data.get("debug"))
+        pipeline_debug = _start_pipeline_debug() if debug_enabled else None
+
+        collector_input = _build_collector_input(input_data)
+        if debug_enabled:
+            collector_input["debug"] = True
+        collected_result = _run_stage(
+            pipeline_debug,
+            stage_name="collector",
+            runner=lambda: collector_module.run(collector_input),
+        )
+
+        expander_input = _build_expander_input(input_data)
+        expander_input["collected_keywords"] = _get_list(collected_result, "collected_keywords")
+        expanded_result = _run_stage(
+            pipeline_debug,
+            stage_name="expander",
+            runner=lambda: expander_module.run(expander_input),
+        )
+
+        analyzed_result = _run_stage(
+            pipeline_debug,
+            stage_name="analyzer",
+            runner=lambda: analyzer_module.run(
+                {"expanded_keywords": _get_list(expanded_result, "expanded_keywords")}
+            ),
+        )
+        selected_result = _run_stage(
+            pipeline_debug,
+            stage_name="selector",
+            runner=lambda: selector_module.run(
+                {"analyzed_keywords": _get_list(analyzed_result, "analyzed_keywords")}
+            ),
+        )
+        titled_result = _run_stage(
+            pipeline_debug,
+            stage_name="title_gen",
+            runner=lambda: title_generator_module.run(_build_title_input(input_data, selected_result)),
+        )
+
+        result = {
+            "collected_keywords": _get_list(collected_result, "collected_keywords"),
+            "expanded_keywords": _get_list(expanded_result, "expanded_keywords"),
+            "analyzed_keywords": _get_list(analyzed_result, "analyzed_keywords"),
+            "selected_keywords": _get_list(selected_result, "selected_keywords"),
+            "generated_titles": _get_list(titled_result, "generated_titles"),
+            "title_generation_meta": titled_result.get("generation_meta", {})
+            if isinstance(titled_result, dict)
+            else {},
+        }
+
+        if pipeline_debug is not None:
+            pipeline_debug["duration_ms"] = _elapsed_ms(pipeline_debug["perf_started_at"])
+            pipeline_debug["counts"] = {
+                "collected_keywords": len(result["collected_keywords"]),
+                "expanded_keywords": len(result["expanded_keywords"]),
+                "analyzed_keywords": len(result["analyzed_keywords"]),
+                "selected_keywords": len(result["selected_keywords"]),
+                "generated_titles": len(result["generated_titles"]),
+            }
+            pipeline_debug.pop("perf_started_at", None)
+            result["debug"] = pipeline_debug
+
+        return result
+
+
+def _build_collector_input(input_data: dict[str, Any]) -> dict[str, Any]:
+    collector_defaults = {
+        "mode": input_data.get("mode", "category"),
+        "category": input_data.get("category", ""),
+        "seed_input": input_data.get("seed_input", ""),
+        "options": input_data.get("options", {}),
+        "analysis_json_path": input_data.get("collector_analysis_json_path")
+        or input_data.get("analysis_json_path", ""),
+    }
+    return _merge_stage_config(collector_defaults, input_data.get("collector"))
+
+
+def _build_expander_input(input_data: dict[str, Any]) -> dict[str, Any]:
+    expander_defaults = {
+        "analysis_json_path": input_data.get("expander_analysis_json_path", ""),
+    }
+    return _merge_stage_config(expander_defaults, input_data.get("expander"))
+
+
+def _build_title_input(
+    input_data: dict[str, Any],
+    selected_result: dict[str, Any],
+) -> dict[str, Any]:
+    title_defaults = {
+        "selected_keywords": _get_list(selected_result, "selected_keywords"),
+        "title_options": input_data.get("title_options", {}),
+    }
+    return _merge_stage_config(title_defaults, input_data.get("title"))
+
+
+def _merge_stage_config(defaults: dict[str, Any], overrides: Any) -> dict[str, Any]:
+    merged = dict(defaults)
+    if not isinstance(overrides, dict):
+        return merged
+
+    for key, value in overrides.items():
+        if value is None:
+            continue
+        merged[key] = value
+    return merged
+
+
+def _get_list(payload: Any, key: str) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+
+    items = payload.get(key)
+    if not isinstance(items, list):
+        return []
+
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _start_pipeline_debug() -> dict[str, Any]:
+    return {
+        "stage": "pipeline",
+        "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "perf_started_at": time.perf_counter(),
+        "stages": {},
+    }
+
+
+def _run_stage(
+    pipeline_debug: dict[str, Any] | None,
+    *,
+    stage_name: str,
+    runner: Any,
+) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    result = runner()
+
+    if pipeline_debug is not None:
+        payload = result if isinstance(result, dict) else {}
+        pipeline_debug["stages"][stage_name] = {
+            "duration_ms": _elapsed_ms(started_at),
+            "result_keys": sorted(payload.keys()),
+            "debug": payload.get("debug"),
+        }
+
+    return result if isinstance(result, dict) else {}
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((time.perf_counter() - started_at) * 1000)

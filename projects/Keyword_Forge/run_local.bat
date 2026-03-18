@@ -4,6 +4,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 set "PYTHONUTF8=1"
 set "INTERACTIVE=0"
+set "APP_URL=http://127.0.0.1:8000"
 if "%~1"=="" set "INTERACTIVE=1"
 
 call :resolve_python
@@ -34,7 +35,7 @@ echo [3] Analyzer 예시 실행
 echo [4] Selector 예시 실행
 echo [5] Title 예시 실행
 echo [6] 전체 예시 순차 실행
-echo [7] FastAPI 서버 실행
+echo [7] FastAPI 서버 실행 + 브라우저 열기
 echo [0] 종료
 echo.
 choice /C 12345670 /N /M "실행할 번호를 선택하세요: "
@@ -97,9 +98,11 @@ goto :end
 
 :run_api
 call :banner "FastAPI 서버 실행"
-echo 주소: http://127.0.0.1:8000
+echo 주소: %APP_URL%
+echo 브라우저: 자동 열기
 echo 종료: Ctrl + C
 echo.
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; Start-Process '%APP_URL%'" >nul 2>nul
 "%PYTHON_CMD%" -m uvicorn app.main:app --reload
 call :maybe_pause
 if "%INTERACTIVE%"=="1" goto :menu

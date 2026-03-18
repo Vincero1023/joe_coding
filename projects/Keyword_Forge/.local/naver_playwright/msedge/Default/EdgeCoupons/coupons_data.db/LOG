@@ -1,0 +1,6 @@
+2026/03/18-18:39:00.795 4b90 Reusing MANIFEST D:\joe_coding\projects\Keyword_Forge\.local\naver_playwright\msedge\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/03/18-18:39:00.805 4b90 Recovering log #39
+2026/03/18-18:39:00.806 4b90 Reusing old log D:\joe_coding\projects\Keyword_Forge\.local\naver_playwright\msedge\Default\EdgeCoupons/coupons_data.db/000039.log 
+2026/03/18-18:39:01.095 7208 Level-0 table #43: started
+2026/03/18-18:39:01.174 7208 Level-0 table #43: 681704 bytes OK
+2026/03/18-18:39:01.199 7208 Delete type=0 #39

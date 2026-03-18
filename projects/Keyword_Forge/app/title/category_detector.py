@@ -5,7 +5,7 @@ from app.title.types import CategoryType
 
 
 _CATEGORY_PATTERNS: dict[CategoryType, tuple[str, ...]] = {
-    "product": ("추천", "리뷰", "후기", "가격", "구매", "모델", "제품"),
+    "product": ("가격", "구매", "모델", "제품", "브랜드", "성능"),
     "travel": ("여행", "호텔", "항공", "코스", "숙소", "제주", "부산"),
     "finance": ("보험", "대출", "카드", "지원금", "세금", "투자", "청약"),
     "health": ("건강", "병원", "다이어트", "영양제", "질환", "통증"),
@@ -13,14 +13,41 @@ _CATEGORY_PATTERNS: dict[CategoryType, tuple[str, ...]] = {
     "food": ("맛집", "카페", "레시피", "빵", "메뉴", "디저트", "떡"),
 }
 
+_CATEGORY_PRIORITY: tuple[CategoryType, ...] = (
+    "finance",
+    "real_estate",
+    "travel",
+    "health",
+    "food",
+    "product",
+)
+
 
 
 def detect_category(keyword: str) -> CategoryType:
     normalized_keyword = normalize_text(keyword)
     normalized_key = normalize_key(keyword)
+    if not normalized_keyword:
+        return "general"
 
-    for category, patterns in _CATEGORY_PATTERNS.items():
-        if any(pattern in normalized_keyword or normalize_key(pattern) in normalized_key for pattern in patterns):
+    matches = {
+        category: _count_matches(normalized_keyword, normalized_key, patterns)
+        for category, patterns in _CATEGORY_PATTERNS.items()
+    }
+    best_score = max(matches.values(), default=0)
+    if best_score <= 0:
+        return "general"
+
+    for category in _CATEGORY_PRIORITY:
+        if matches.get(category) == best_score:
             return category
 
     return "general"
+
+
+def _count_matches(keyword: str, keyword_key: str, patterns: tuple[str, ...]) -> int:
+    return sum(
+        1
+        for pattern in patterns
+        if pattern in keyword or normalize_key(pattern) in keyword_key
+    )

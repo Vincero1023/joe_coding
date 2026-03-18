@@ -24,14 +24,15 @@ def filter_expansions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
 
         tokens = tokenize_text(keyword)
-        if len(tokens) < 2 or len(tokens) > 5:
+        if len(tokens) < 1 or len(tokens) > 6:
             continue
         if _is_noisy_keyword(keyword, tokens):
             continue
-        if not is_relevant(keyword, origin):
-            continue
-        if similarity(keyword, origin) < 0.3 and normalize_key(origin) not in normalize_key(keyword):
-            continue
+        if expansion_type != "related":
+            if not is_relevant(keyword, origin):
+                continue
+            if similarity(keyword, origin) < 0.3 and normalize_key(origin) not in normalize_key(keyword):
+                continue
 
         filtered.append(
             {

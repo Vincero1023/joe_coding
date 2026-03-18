@@ -4,4 +4,6 @@ sqlalchemy==2.0.43
 psycopg[binary]==3.2.9
 pydantic-settings==2.10.1
 beautifulsoup4==4.14.3
+browser-cookie3==0.20.1
+playwright==1.58.0
 pytest==8.4.2

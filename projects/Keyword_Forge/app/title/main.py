@@ -14,17 +14,22 @@ if _PROJECT_ROOT not in sys.path:
 from typing import Any
 
 from app.core.interfaces import ModuleRunner
+from app.title.ai_client import TitleGenerationOptions
 from app.title.title_generator import generate_titles
 
 
 class TitleService:
     def run(self, input_data: Any) -> Any:
         items = _coerce_input_items(input_data)
-        generated = generate_titles(items)
+        options = TitleGenerationOptions.from_input(input_data) if isinstance(input_data, dict) else None
+        generated, meta = generate_titles(items, options=options)
 
         if isinstance(input_data, list):
             return generated
-        return {"generated_titles": generated}
+        return {
+            "generated_titles": generated,
+            "generation_meta": meta,
+        }
 
 
 service = TitleService()

@@ -1,36 +1,35 @@
-﻿import sys
+import sys
 from pathlib import Path
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from app.collector.categories import DEFAULT_CATEGORY
 from app.collector.service import CollectorService
 from app.core.interfaces import ModuleRunner
 
 
 service = CollectorService()
 
-# 예시 입력: 카테고리 모드로 특정 주제의 키워드만 수집한다.
 EXAMPLE_INPUT = {
     "mode": "category",
-    "category": "비즈니스경제",
+    "category": DEFAULT_CATEGORY,
+    "category_source": "preset_search",
     "seed_input": "",
     "options": {
-        "collect_related": False,
-        "collect_autocomplete": False,
+        "collect_related": True,
+        "collect_autocomplete": True,
         "collect_bulk": True,
     },
-    "analysis_json_path": "app/collector/sample/site_analysis2.json",
 }
 
-# 예시 출력: 실제 실행 시에는 collected_keywords 전체가 반환된다.
 EXAMPLE_OUTPUT = {
     "collected_keywords": [
         {
-            "keyword": "애착유형 테스트",
-            "category": "비즈니스·경제",
-            "source": "naver_trend",
-            "raw": "애착유형 테스트",
+            "keyword": "경제 뉴스",
+            "category": DEFAULT_CATEGORY,
+            "source": "naver_autocomplete",
+            "raw": "경제",
         }
     ]
 }
@@ -62,4 +61,3 @@ if __name__ == "__main__":
     print(f"수집 건수: {len(result['collected_keywords'])}")
     print("처음 5개만 표시합니다.")
     pprint(preview, sort_dicts=False)
-

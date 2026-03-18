@@ -3,12 +3,14 @@
 import json
 import sys
 from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from app.core.keyword_inputs import coerce_collected_keyword_items
 from app.core.interfaces import ModuleRunner
 from app.expander.engines.autocomplete_engine import expand_autocomplete_engine
 from app.expander.engines.combinator_engine import expand_combinator_engine
@@ -26,23 +28,25 @@ from app.expander.utils.tokenizer import normalize_key, normalize_text
 _MAX_DEPTH = 3
 _MAX_PER_ORIGIN_PER_DEPTH = 20
 _MAX_TOTAL_PER_ORIGIN = 50
+ExpansionProgressCallback = Callable[[dict[str, Any]], None]
 
 
 @dataclass(frozen=True)
 class ExpansionRequest:
     collected_keywords: tuple[dict[str, Any], ...]
     analysis_json_path: Path | None
+    enable_combinator: bool
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ExpansionRequest":
-        raw_keywords = raw.get("collected_keywords")
-        collected_keywords = tuple(item for item in raw_keywords if isinstance(item, dict)) if isinstance(raw_keywords, list) else ()
+        collected_keywords = tuple(coerce_collected_keyword_items(raw))
 
         raw_path = raw.get("analysis_json_path")
         analysis_json_path = Path(raw_path.strip()) if isinstance(raw_path, str) and raw_path.strip() else None
         return cls(
             collected_keywords=collected_keywords,
             analysis_json_path=analysis_json_path,
+            enable_combinator=bool(raw.get("enable_combinator", False)),
         )
 
 
@@ -130,7 +134,7 @@ class ExpansionStrategy:
         return cls(
             use_autocomplete=supports_keyword_expansion,
             use_related=supports_keyword_expansion or supports_keyword_analysis,
-            use_combinator=supports_keyword_expansion or supports_bulk_input,
+            use_combinator=supports_bulk_input,
             related_terms=tuple(dict.fromkeys(term for term in related_terms if term)),
             intent_terms=tuple(dict.fromkeys(term for term in intent_terms if term)),
             time_terms=tuple(dict.fromkeys(term for term in time_terms if term)),
@@ -146,28 +150,15 @@ class ExpansionStrategy:
 
 class ExpanderService:
     def run(self, input_data: dict) -> dict:
-        analysis_data = load_analysis_data(input_data.get("analysis_json_path"))
-        return run_expander(input_data, analysis_data)
+        return run_with_progress(input_data)
 
 
 service = ExpanderService()
 
 # 예시 입력: 수집된 키워드를 받아 전략 기반 다중 엔진 확장을 수행한다.
 EXAMPLE_INPUT = {
-    "collected_keywords": [
-        {
-            "keyword": "버터떡",
-            "category": "맛집",
-            "source": "naver_trend",
-            "raw": "버터떡",
-        },
-        {
-            "keyword": "성심당 빵 추천",
-            "category": "맛집",
-            "source": "naver_trend",
-            "raw": "성심당 빵 추천",
-        },
-    ],
+    "keywords_text": "버터떡\n성심당 빵 추천",
+    "category": "맛집",
     "analysis_json_path": "app/expander/sample/site_analysis.json",
 }
 
@@ -188,8 +179,26 @@ expander_module = ExpanderModule(service=service)
 
 
 def run_expander(input_data: dict, analysis_data: dict[str, Any]) -> dict:
+    return _run_expander_internal(input_data, analysis_data)
+
+
+def run_with_progress(
+    input_data: dict,
+    progress_callback: ExpansionProgressCallback | None = None,
+) -> dict:
+    analysis_data = load_analysis_data(input_data.get("analysis_json_path"))
+    return _run_expander_internal(input_data, analysis_data, progress_callback=progress_callback)
+
+
+def _run_expander_internal(
+    input_data: dict,
+    analysis_data: dict[str, Any],
+    progress_callback: ExpansionProgressCallback | None = None,
+) -> dict:
     request = ExpansionRequest.from_dict(input_data)
     strategy = ExpansionStrategy.from_analysis(analysis_data)
+    if not request.enable_combinator and strategy.use_combinator:
+        strategy = replace(strategy, use_combinator=False)
     engine_payload = strategy.to_engine_payload()
     queue = _build_initial_queue(request.collected_keywords)
     results: list[dict[str, str]] = []
@@ -199,13 +208,60 @@ def run_expander(input_data: dict, analysis_data: dict[str, Any]) -> dict:
         for node in queue
     )
 
-    for _depth in range(_MAX_DEPTH):
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "type": "started",
+                "total_origins": len(queue),
+                "max_depth": _MAX_DEPTH,
+            }
+        )
+
+    for depth_index in range(_MAX_DEPTH):
         if not queue:
             break
 
+        depth = depth_index + 1
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "type": "depth_started",
+                    "depth": depth,
+                    "queue_size": len(queue),
+                    "total_results": len(results),
+                }
+            )
+
         depth_expanded: list[dict[str, str]] = []
-        for node in queue:
-            depth_expanded.extend(_expand_all_engines(node, strategy, engine_payload))
+        for node_index, node in enumerate(queue, start=1):
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "type": "keyword_started",
+                        "depth": depth,
+                        "index": node_index,
+                        "total": len(queue),
+                        "keyword": node.current_keyword,
+                        "origin": node.root_origin,
+                    }
+                )
+
+            node_results = _expand_all_engines(node, strategy, engine_payload)
+            if progress_callback is not None:
+                preview_results = deduplicate_expansions(filter_expansions(node_results))
+                if preview_results:
+                    progress_callback(
+                        {
+                            "type": "keyword_results",
+                            "depth": depth,
+                            "index": node_index,
+                            "total": len(queue),
+                            "keyword": node.current_keyword,
+                            "origin": node.root_origin,
+                            "items": preview_results,
+                        }
+                    )
+            depth_expanded.extend(node_results)
 
         filtered_results = filter_expansions(depth_expanded)
         deduplicated_results = deduplicate_expansions(filtered_results)
@@ -221,6 +277,17 @@ def run_expander(input_data: dict, analysis_data: dict[str, Any]) -> dict:
 
         results.extend(accepted_results)
         queue = _build_next_queue(accepted_results, request.collected_keywords, seen_queue)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "type": "depth_completed",
+                    "depth": depth,
+                    "accepted_count": len(accepted_results),
+                    "total_results": len(results),
+                    "next_queue_size": len(queue),
+                    "items": accepted_results,
+                }
+            )
 
     final_results = deduplicate_expansions(results)
     final_results = limit_expansions_per_origin(final_results, max_per_origin=_MAX_TOTAL_PER_ORIGIN)
@@ -333,9 +400,10 @@ if __name__ == "__main__":
 
     result = run(EXAMPLE_INPUT)
     preview = {"expanded_keywords": result["expanded_keywords"][:10]}
+    input_keywords = [item for item in EXAMPLE_INPUT["keywords_text"].splitlines() if item.strip()]
 
     print("다중 깊이 확장 예시 결과")
-    print(f"입력 키워드 수: {len(EXAMPLE_INPUT['collected_keywords'])}")
+    print(f"입력 키워드 수: {len(input_keywords)}")
     print(f"확장 결과 수: {len(result['expanded_keywords'])}")
     print("처음 10개만 표시합니다.")
     pprint(preview, sort_dicts=False)

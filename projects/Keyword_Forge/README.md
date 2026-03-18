@@ -5,9 +5,12 @@
 
 ## 현재 구현 상태
 
+- 이 프로젝트는 현재 `개인 로컬 실행 도구`를 기준으로 설계합니다.
+- Creator Advisor 인증이 필요한 수집은 서버형 SaaS보다 로컬 브라우저 세션 재사용 흐름을 우선합니다.
 - `collector`
-  - 벤치마크 분석 JSON을 읽어 수집 전략을 추론합니다.
-  - 샘플 HTML 구조를 해석해 키워드와 카테고리를 수집합니다.
+  - 고정 카테고리 목록을 선택해 실시간 네이버 검색 데이터를 수집합니다.
+  - category 모드에서는 Creator Advisor 주제별 인기 유입 검색어를 우선 조회합니다.
+  - 자동완성이 비면 네이버 검색 결과 페이지를 긁어 키워드 후보를 보강합니다.
   - `category` 모드와 `seed` 모드를 지원합니다.
 - `expander`
   - 다중 엔진 구조(`autocomplete`, `related`, `combinator`)로 확장합니다.
@@ -20,7 +23,9 @@
 - `selector`
   - 분석 결과 중 골든 키워드만 최종 선별합니다.
 - `title_gen`
-  - 아직 구현 전입니다.
+  - 선별된 골든 키워드를 기반으로 네이버 홈형, 블로그형 제목을 생성합니다.
+- `pipeline`
+  - 수집부터 제목 생성까지 전 단계를 서버에서 한 번에 실행합니다.
 
 ## 처리 흐름
 
@@ -28,6 +33,7 @@
 2. `expander`가 실데이터와 규칙 기반으로 키워드를 확장합니다.
 3. `analyzer`가 CPC, bid, volume, competition을 바탕으로 점수를 계산합니다.
 4. `selector`가 실제 수익 가능성이 높은 골든 키워드만 남깁니다.
+5. `title_gen`이 채널별 제목 후보를 생성합니다.
 
 ## 기술 스택
 
@@ -47,6 +53,9 @@
 - `POST /analyze`
 - `POST /select`
 - `POST /generate-title`
+- `POST /pipeline`
+- `POST /local/naver-session`
+- `POST /local/naver-login-browser`
 
 ## 실행 메모
 
@@ -56,9 +65,18 @@
 - `python app/expander/main.py`
 - `python app/analyzer/main.py`
 - `python app/selector/main.py`
+- `python app/title_gen/main.py`
+- `python app/pipeline/main.py`
+
+로컬 메뉴 실행은 `run_local.bat`를 사용합니다.
+
+- `run_local.bat`
+- 메뉴 `7` 또는 `run_local.bat api` 실행 시 FastAPI 서버를 띄우고 브라우저를 자동으로 엽니다.
+- 메인 UI에서 `전용 로그인 브라우저 열기` 버튼으로 앱 전용 Edge/Chrome 브라우저를 띄우고, 그 안에서 로그인한 세션을 바로 저장할 수 있습니다.
+- `브라우저에서 쿠키 불러오기` 버튼은 기존 Edge/Chrome 세션을 직접 읽는 보조 경로이며, 브라우저 쿠키 DB 잠금/권한 문제로 실패할 수 있습니다.
+- Creator Advisor 기준 페이지가 `/naver_blog/...`이면 서비스도 `naver_blog`로 맞춰야 합니다.
 
 ## 다음 작업
 
-- `title_gen` 구현
-- 모듈 간 전체 파이프라인 통합
-- 테스트 보강 및 API 계약 정리
+- 로컬 브라우저 로그인 연동을 더 자연스럽게 다듬기
+- seed/search fallback 노이즈 필터 정교화

@@ -1,0 +1,20 @@
+{
+  "browser": "msedge",
+  "cookie_header": "NID_AUT=svYwbv2UD0hQdhZNMk/mob+dEhKbIWrteXAyQVC+fgNNxZLUP6izLg9yui1hSdGZ; NID_SES=AAABcwK+p3Yb029CYfmYDnvfg9PCZD+ZltSHwwRYGeNtaX/BzBLqJjSxlR4mE7NjJJ30XyHJWJ3s7fpQi2IfO244K5Gbsjj0sTXQLFa+XCq7RGx3WjolIctWJJjHxGFF87+3/0aBl2ueqhJ1Ll8JscC/aMQnzh77LFDnETLa+R7Ja0MJt5EqZwu3tf3KekKNXiDRcqYO3LjkkVdQ/JKFRTBubshJg1ksyRDudFy+qailWmhtKqpdaktl7PcBFbmmmxchy6qxXygI63wpy0HRB6/xhFsGUhvvFVgr7hnLej3IJJ0NEhxyQSwaJHz4Pg9NvLiezGYQk/Omh5s9XECf7bjR7fgfp/U9GDf27Y7QMyDj4750Intw4zfuJss12myf3tALRJnPzvGUqStt/KY322BuMfKdovqi1vgKEB8zmFH9oNb9xarr8jeb/SgNcxCsTVeQxAtOMb/6C4heqJ5eccPK/0qVZTIgXDmhFyO8fPs3jXDOHPdPZFBUkItbCMtN81tKjA==",
+  "cookie_names": [
+    "NID_AUT",
+    "NID_SES"
+  ],
+  "cookie_count": 2,
+  "target_url": "https://creator-advisor.naver.com/naver_blog/goodbuy40/trends",
+  "profile_dir": ".local\\naver_playwright\\msedge",
+  "saved_at": 1773826745,
+  "attempts": [
+    {
+      "browser": "msedge",
+      "status": "success",
+      "detail": "Loaded.",
+      "hint": null
+    }
+  ]
+}

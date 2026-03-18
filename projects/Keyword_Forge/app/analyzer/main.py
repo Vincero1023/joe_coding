@@ -9,6 +9,7 @@ if __package__ in {None, ""}:
 
 from app.analyzer.config import DEFAULT_CONFIG
 from app.analyzer.scorer import analyze_items
+from app.core.keyword_inputs import coerce_expanded_keyword_items
 from app.core.interfaces import ModuleRunner
 
 
@@ -51,18 +52,10 @@ analyzer_module = AnalyzerModule(service=service)
 
 
 def _coerce_input_items(input_data: Any) -> list[dict[str, Any]]:
-    if isinstance(input_data, list):
-        return [item for item in input_data if isinstance(item, dict)]
+    if isinstance(input_data, dict) and isinstance(input_data.get("analyzed_keywords"), list):
+        return [item for item in input_data["analyzed_keywords"] if isinstance(item, dict)]
 
-    if isinstance(input_data, dict):
-        if isinstance(input_data.get("expanded_keywords"), list):
-            return [item for item in input_data["expanded_keywords"] if isinstance(item, dict)]
-        if isinstance(input_data.get("keywords"), list):
-            return [item for item in input_data["keywords"] if isinstance(item, dict)]
-        if isinstance(input_data.get("analyzed_keywords"), list):
-            return [item for item in input_data["analyzed_keywords"] if isinstance(item, dict)]
-
-    return []
+    return coerce_expanded_keyword_items(input_data)
 
 
 if __name__ == "__main__":

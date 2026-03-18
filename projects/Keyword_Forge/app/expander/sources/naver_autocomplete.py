@@ -1,18 +1,16 @@
 ﻿from __future__ import annotations
 
 import json
-import time
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from app.expander.utils.throttle import wait_for_naver_keyword_request
 from app.expander.utils.tokenizer import normalize_text
 
 
 _ENDPOINT = "https://ac.search.naver.com/nx/ac"
-_RATE_LIMIT_SECONDS = 0.2
 _CACHE: dict[str, list[str]] = {}
-_LAST_REQUEST_AT = 0.0
 
 
 def get_naver_autocomplete(keyword: str) -> list[str]:
@@ -24,10 +22,7 @@ def get_naver_autocomplete(keyword: str) -> list[str]:
     if cache_key in _CACHE:
         return list(_CACHE[cache_key])
 
-    global _LAST_REQUEST_AT
-    elapsed = time.monotonic() - _LAST_REQUEST_AT
-    if elapsed < _RATE_LIMIT_SECONDS:
-        time.sleep(_RATE_LIMIT_SECONDS - elapsed)
+    wait_for_naver_keyword_request()
 
     params = urlencode(
         {
@@ -49,7 +44,6 @@ def get_naver_autocomplete(keyword: str) -> list[str]:
     try:
         with urlopen(request, timeout=3.0) as response:
             body = response.read().decode("utf-8", errors="ignore")
-        _LAST_REQUEST_AT = time.monotonic()
         data = _parse_response_body(body)
         suggestions = _extract_suggestions(data.get("items"))
     except Exception:
