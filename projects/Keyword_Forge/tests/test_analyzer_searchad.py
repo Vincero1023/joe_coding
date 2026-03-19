@@ -72,3 +72,59 @@ def test_analyzer_keeps_existing_stats_over_searchad_bids() -> None:
     assert analyzed[0]["metrics"]["cpc"] == 273.3333
     assert analyzed[0]["metrics"]["bid"] == 500.0
     assert analyzed[0]["metrics"]["bid_2"] == 190.0
+
+
+def test_analyzer_prefers_keywordmaster_benchmark_over_searchad_when_enabled() -> None:
+    keyword = "tesla model y price"
+
+    with patch(
+        "app.analyzer.main.build_keywordmaster_benchmark_index",
+        return_value={
+            normalize_key(keyword): KeywordStats(
+                keyword=keyword,
+                pc_searches=600.0,
+                mobile_searches=2460.0,
+                blog_results=80916.0,
+                pc_clicks=1.4,
+                mobile_clicks=42.6,
+                bid_1=5460.0,
+                bid_2=1380.0,
+                bid_3=1000.0,
+                source="keywordmaster_benchmark",
+            )
+        },
+    ), patch(
+        "app.analyzer.main.build_searchad_keyword_tool_index",
+        return_value={
+            normalize_key(keyword): KeywordStats(
+                keyword=keyword,
+                pc_searches=10.0,
+                mobile_searches=10.0,
+                pc_clicks=0.0,
+                mobile_clicks=0.0,
+                source="naver_searchad_keywordtool",
+            )
+        },
+    ), patch(
+        "app.analyzer.main.build_blog_search_index",
+        return_value={},
+    ), patch(
+        "app.analyzer.main.build_searchad_bid_index",
+        return_value={
+            normalize_key(keyword): KeywordStats(
+                keyword=keyword,
+                bid_1=70.0,
+                bid_2=70.0,
+                bid_3=70.0,
+                source="naver_searchad",
+            )
+        },
+    ):
+        result = run({"keywords_text": keyword})
+
+    analyzed = result["analyzed_keywords"]
+    assert len(analyzed) == 1
+    assert analyzed[0]["metrics"]["volume"] == 3060.0
+    assert analyzed[0]["metrics"]["blog_results"] == 80916.0
+    assert analyzed[0]["metrics"]["cpc"] == 2613.3333
+    assert analyzed[0]["metrics"]["bid"] == 5460.0

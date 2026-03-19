@@ -42,35 +42,56 @@ const DOWNSTREAM_STAGE_KEYS = {
 const TREND_SETTINGS_STORAGE_KEY = "keyword_forge_trend_settings";
 const TREND_SETTINGS_VERSION = 3;
 const TITLE_SETTINGS_STORAGE_KEY = "keyword_forge_title_settings";
+const DASHBOARD_SESSION_STORAGE_KEY = "keyword_forge_dashboard_session_v1";
 const TITLE_PROVIDER_DEFAULT_MODELS = {
     openai: "gpt-4o-mini",
     gemini: "gemini-2.5-flash",
     anthropic: "claude-sonnet-4-0",
 };
+const GRADE_ORDER = ["S", "A", "B", "C", "D", "F"];
+const GRADE_PRESET_MAP = {
+    all: [...GRADE_ORDER],
+    sa: ["S", "A"],
+    ab: ["A", "B"],
+    bc: ["B", "C"],
+    cd: ["C", "D"],
+    df: ["D", "F"],
+};
+const RESULT_VIEW_ORDER = STAGES.map((stage) => stage.key);
 
 const state = {
     results: createEmptyResults(),
     stageStatus: createInitialStageStatus(),
     diagnostics: createEmptyDiagnostics(),
     selectedCollectedKeys: [],
+    selectGradeFilters: [...GRADE_ORDER],
+    gradeSelectionTouched: false,
+    activeResultView: "",
     lastError: null,
     isBusy: false,
     tickerId: null,
 };
 
 const elements = {};
+let dashboardSessionSaveTimer = null;
 
 document.addEventListener("DOMContentLoaded", () => {
     bindElements();
     loadTrendSettings();
     loadTitleSettings();
+    const restoredDashboard = restoreDashboardSession();
     bindEvents();
+    window.addEventListener("pagehide", persistDashboardSessionNow);
     startTicker();
     addLog("대시보드가 준비되었습니다. 단계별 실행과 디버그 정보를 바로 확인할 수 있습니다.", "success");
+    if (restoredDashboard && elements.activityLog?.firstElementChild) {
+        elements.activityLog.removeChild(elements.activityLog.firstElementChild);
+    }
     renderAll();
 });
 
 function bindElements() {
+    elements.layoutGrid = document.querySelector(".layout-grid");
     elements.categoryInput = document.getElementById("categoryInput");
     elements.categorySourceInput = document.getElementById("categorySourceInput");
     elements.seedInput = document.getElementById("seedInput");
@@ -102,6 +123,8 @@ function bindElements() {
     elements.titleFallback = document.getElementById("titleFallback");
     elements.titleModeBadge = document.getElementById("titleModeBadge");
     elements.statusList = document.getElementById("statusList");
+    elements.resultsRailPanel = document.getElementById("resultsRailPanel");
+    elements.resultsRail = document.getElementById("resultsRail");
     elements.resultsGrid = document.getElementById("resultsGrid");
     elements.activityLog = document.getElementById("activityLog");
     elements.pipelineStatus = document.getElementById("pipelineStatus");
@@ -118,7 +141,7 @@ function bindEvents() {
         element.addEventListener("change", renderInputState);
     });
     document.getElementById("runCollectButton").addEventListener("click", () => {
-        runWithGuard(runCollectStage, "수집 단계 실행 중");
+        runWithGuard(runCollectFromScratch, "수집 단계 실행 중");
     });
     document.getElementById("runExpandButton").addEventListener("click", () => {
         runWithGuard(runThroughExpand, "확장 단계 실행 중");
@@ -128,6 +151,23 @@ function bindEvents() {
     });
     document.getElementById("runSelectButton").addEventListener("click", () => {
         runWithGuard(runThroughSelect, "선별 단계 실행 중");
+    });
+    elements.gradePresetButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            applyGradePreset(button.dataset.gradePreset || "");
+        });
+    });
+    elements.gradeToggleButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            toggleGradeFilter(button.dataset.gradeToggle || "");
+        });
+    });
+    elements.runGradeSelectButton?.addEventListener("click", () => {
+        const grades = getSelectedGradeFilters();
+        runWithGuard(
+            () => runThroughGradeSelect(grades),
+            grades.length ? `${buildGradeRunLabel(grades)} 선별 실행 중` : "등급별 선별 실행 중",
+        );
     });
     document.getElementById("runTitleButton").addEventListener("click", () => {
         runWithGuard(runThroughTitle, "제목 생성 단계 실행 중");
@@ -208,9 +248,14 @@ async function runFullFlow() {
     await runCollectStage();
     await runExpandStage();
     await runAnalyzeStage();
-    await runSelectStage();
+    await runSelectStage(getForwardSelectOptions());
     await runTitleStage();
     addLog("전체 파이프라인 실행이 완료되었습니다.", "success");
+}
+
+async function runCollectFromScratch() {
+    resetAll();
+    await runCollectStage();
 }
 
 async function runThroughExpand() {
@@ -222,7 +267,7 @@ async function runThroughAnalyze() {
 }
 
 async function runThroughSelect() {
-    await runSelectStage();
+    await runSelectStage(getForwardSelectOptions());
 }
 
 async function runThroughTitle() {
@@ -361,7 +406,9 @@ async function executeStage({ stageKey, endpoint, inputData }) {
     const stage = getStage(stageKey);
     const startedAt = Date.now();
     const startedAtLabel = new Date(startedAt).toISOString();
+    const requestController = beginAbortableRequest(stageKey, endpoint);
 
+    setActiveResultView(stageKey);
     state.stageStatus[stageKey] = {
         state: "running",
         message: `${stage.label} 실행 중`,
@@ -372,7 +419,7 @@ async function executeStage({ stageKey, endpoint, inputData }) {
     renderAll();
 
     try {
-        const response = await postModule(endpoint, inputData);
+        const response = await postModule(endpoint, inputData, { signal: requestController.signal });
         const result = response.result || {};
         const itemCount = countItems(result[stage.resultKey]);
         const durationMs = Date.now() - startedAt;
@@ -399,6 +446,30 @@ async function executeStage({ stageKey, endpoint, inputData }) {
 
         return result;
     } catch (error) {
+        if (isAbortLikeError(error)) {
+            const finishedAt = Date.now();
+            const durationMs = finishedAt - startedAt;
+            state.stageStatus[stageKey] = {
+                state: "cancelled",
+                message: "사용자 중지",
+                startedAt,
+                finishedAt,
+                durationMs,
+            };
+            state.diagnostics[stageKey] = {
+                stageKey,
+                stageLabel: stage.label,
+                status: "cancelled",
+                endpoint,
+                requestId: "",
+                startedAt: startedAtLabel,
+                durationMs,
+                request: sanitizeSensitiveData(inputData),
+            };
+            renderAll();
+            throw error;
+        }
+
         const normalizedError = normalizeError(error, {
             stageKey,
             endpoint,
@@ -428,6 +499,8 @@ async function executeStage({ stageKey, endpoint, inputData }) {
         state.lastError = normalizedError;
         renderAll();
         throw normalizedError;
+    } finally {
+        completeAbortableRequest(requestController);
     }
 }
 
@@ -522,8 +595,9 @@ async function executeExpandStageStream(inputData) {
     }
 }
 
-async function postModule(endpoint, inputData) {
+async function postModule(endpoint, inputData, options = {}) {
     const startedAt = Date.now();
+    const signal = options?.signal;
     let response;
 
     try {
@@ -572,8 +646,12 @@ async function postModuleStream(endpoint, inputData, onEvent) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ input_data: inputData }),
+            signal,
         });
     } catch (error) {
+        if (isAbortLikeError(error)) {
+            throw createRequestAbortError(endpoint, startedAt);
+        }
         const networkError = new Error("?쒕쾭 ?붿껌???ㅽ뙣?덉뒿?덈떎. ?ㅽ듃?뚰겕 ?먮뒗 ?쒕쾭 ?곹깭瑜??뺤씤??二쇱꽭??");
         networkError.code = "network_error";
         networkError.endpoint = endpoint;
@@ -869,13 +947,22 @@ function buildAnalyzeInput() {
 
 function withAnalyzeKeywordStats(inputData) {
     const keywordStatsText = elements.analyzeKeywordStatsInput?.value.trim();
+    const benchmarkSettings = {
+        enabled: true,
+        max_workers: 6,
+        max_keywords: 60,
+    };
     if (!keywordStatsText) {
-        return inputData;
+        return {
+            ...inputData,
+            keywordmaster_benchmark: benchmarkSettings,
+        };
     }
 
     return {
         ...inputData,
         keyword_stats_text: keywordStatsText,
+        keywordmaster_benchmark: benchmarkSettings,
     };
 }
 
@@ -1222,6 +1309,8 @@ function resetAll() {
     state.stageStatus = createInitialStageStatus();
     state.diagnostics = createEmptyDiagnostics();
     state.selectedCollectedKeys = [];
+    state.selectGradeFilters = [...GRADE_ORDER];
+    state.gradeSelectionTouched = false;
     state.lastError = null;
     setGlobalStatus("대기 중", "idle");
     renderAll();
@@ -1242,6 +1331,12 @@ function clearStageAndDownstream(stageKey) {
 
     if (stageKey === "collected") {
         state.selectedCollectedKeys = [];
+    }
+
+    if (stageKey === "collected" || stageKey === "expanded" || stageKey === "analyzed") {
+        state.selectGradeFilters = [...GRADE_ORDER];
+        state.gradeSelectionTouched = false;
+        state.analyzedFilters = createDefaultAnalyzedFilters();
     }
 
     DOWNSTREAM_STAGE_KEYS[stageKey].forEach((nextStageKey) => {
@@ -1289,6 +1384,31 @@ function getStage(stageKey) {
     return STAGES.find((stage) => stage.key === stageKey);
 }
 
+function normalizeResultViewKey(viewKey) {
+    const safeViewKey = String(viewKey || "").trim();
+    return RESULT_VIEW_ORDER.includes(safeViewKey) ? safeViewKey : "";
+}
+
+function setActiveResultView(viewKey) {
+    const normalizedViewKey = normalizeResultViewKey(viewKey);
+    if (!normalizedViewKey) {
+        return;
+    }
+    state.activeResultView = normalizedViewKey;
+}
+
+function resolveActiveResultView(resultViews) {
+    const availableViews = new Set((resultViews || []).map((view) => view.key));
+    const activeView = normalizeResultViewKey(state.activeResultView);
+    if (activeView && availableViews.has(activeView)) {
+        return activeView;
+    }
+
+    const fallbackView = [...RESULT_VIEW_ORDER].reverse().find((viewKey) => availableViews.has(viewKey)) || "";
+    state.activeResultView = fallbackView;
+    return fallbackView;
+}
+
 function renderAll() {
     renderCounts();
     renderProgress();
@@ -1296,9 +1416,11 @@ function renderAll() {
     renderInputState();
     renderTrendSettingsState();
     renderTitleSettingsState();
+    syncControlFocus();
     renderGuideTabs();
     renderResults();
     renderDiagnostics();
+    scheduleDashboardSessionSave();
 }
 
 function renderInputState() {
@@ -1838,6 +1960,7 @@ function addLog(message, kind = "info") {
     line.className = `log-entry ${kind}`.trim();
     line.textContent = `[${now}] ${message}`;
     elements.activityLog.prepend(line);
+    scheduleDashboardSessionSave();
 }
 
 function buildStageDetail(status) {
@@ -1887,7 +2010,10 @@ function formatPriority(priority) {
 function formatNumber(value) {
     const number = Number(value ?? 0);
     if (!Number.isFinite(number)) return "0";
-    return number.toFixed(2).replace(/\.00$/, "");
+    return new Intl.NumberFormat("en-US", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    }).format(number);
 }
 
 function buildErrorHeadline(error) {
@@ -1928,6 +2054,303 @@ function readLocalStorageJson(key) {
     } catch (error) {
         return null;
     }
+}
+
+function readSessionStorageJson(key) {
+    try {
+        const rawValue = window.sessionStorage.getItem(key);
+        if (!rawValue) {
+            return null;
+        }
+        return JSON.parse(rawValue);
+    } catch (error) {
+        return null;
+    }
+}
+
+function buildDashboardFormSnapshot() {
+    const collectorMode = getCollectorMode();
+    return {
+        collectorMode,
+        categoryInput: elements.categoryInput?.value || "",
+        categorySourceInput: elements.categorySourceInput?.value || "",
+        seedInput: elements.seedInput?.value || "",
+        trendServiceInput: elements.trendServiceInput?.value || "",
+        trendDateInput: elements.trendDateInput?.value || "",
+        trendBrowserInput: elements.trendBrowserInput?.value || "",
+        trendCookieInput: elements.trendCookieInput?.value || "",
+        trendFallbackInput: Boolean(elements.trendFallbackInput?.checked),
+        optionRelated: Boolean(elements.optionRelated?.checked),
+        optionAutocomplete: Boolean(elements.optionAutocomplete?.checked),
+        optionBulk: Boolean(elements.optionBulk?.checked),
+        optionDebug: Boolean(elements.optionDebug?.checked),
+        expanderAnalysisPath: elements.expanderAnalysisPath?.value || "",
+        expandInputSource: elements.expandInputSource?.value || "collector_all",
+        expandManualInput: elements.expandManualInput?.value || "",
+        expandOptionRelated: Boolean(elements.expandOptionRelated?.checked),
+        expandOptionAutocomplete: Boolean(elements.expandOptionAutocomplete?.checked),
+        expandOptionSeedFilter: Boolean(elements.expandOptionSeedFilter?.checked),
+        expandMaxResultsInput: elements.expandMaxResultsInput?.value || "",
+        analyzeInputSource: elements.analyzeInputSource?.value || "expanded_results",
+        analyzeManualInput: elements.analyzeManualInput?.value || "",
+        analyzeKeywordStatsInput: elements.analyzeKeywordStatsInput?.value || "",
+        titleMode: syncTitleModeInputFromRadios(),
+        titleProvider: elements.titleProvider?.value || "",
+        titleModel: elements.titleModel?.value || "",
+        titleApiKey: elements.titleApiKey?.value || "",
+        titleTemperature: elements.titleTemperature?.value || "",
+        titleFallback: Boolean(elements.titleFallback?.checked),
+        localCookieStatus: elements.localCookieStatus?.textContent || "",
+    };
+}
+
+function applyDashboardFormSnapshot(formState) {
+    if (!formState || typeof formState !== "object") {
+        return;
+    }
+
+    document.querySelectorAll("input[name='collectorMode']").forEach((radio) => {
+        radio.checked = radio.value === String(formState.collectorMode || "seed");
+    });
+
+    if (elements.categoryInput && typeof formState.categoryInput === "string") {
+        elements.categoryInput.value = formState.categoryInput;
+    }
+    if (elements.categorySourceInput && typeof formState.categorySourceInput === "string") {
+        elements.categorySourceInput.value = formState.categorySourceInput;
+    }
+    if (elements.seedInput && typeof formState.seedInput === "string") {
+        elements.seedInput.value = formState.seedInput;
+    }
+    if (elements.trendServiceInput && typeof formState.trendServiceInput === "string") {
+        elements.trendServiceInput.value = formState.trendServiceInput;
+    }
+    if (elements.trendDateInput && typeof formState.trendDateInput === "string") {
+        elements.trendDateInput.value = formState.trendDateInput;
+    }
+    if (elements.trendBrowserInput && typeof formState.trendBrowserInput === "string") {
+        elements.trendBrowserInput.value = formState.trendBrowserInput;
+    }
+    if (elements.trendCookieInput && typeof formState.trendCookieInput === "string") {
+        elements.trendCookieInput.value = formState.trendCookieInput;
+    }
+    if (elements.trendFallbackInput) {
+        elements.trendFallbackInput.checked = Boolean(formState.trendFallbackInput);
+    }
+    if (elements.optionRelated) {
+        elements.optionRelated.checked = Boolean(formState.optionRelated);
+    }
+    if (elements.optionAutocomplete) {
+        elements.optionAutocomplete.checked = Boolean(formState.optionAutocomplete);
+    }
+    if (elements.optionBulk) {
+        elements.optionBulk.checked = Boolean(formState.optionBulk);
+    }
+    if (elements.optionDebug) {
+        elements.optionDebug.checked = Boolean(formState.optionDebug);
+    }
+    if (elements.expanderAnalysisPath && typeof formState.expanderAnalysisPath === "string") {
+        elements.expanderAnalysisPath.value = formState.expanderAnalysisPath;
+    }
+    if (elements.expandInputSource && typeof formState.expandInputSource === "string") {
+        elements.expandInputSource.value = formState.expandInputSource;
+    }
+    if (elements.expandManualInput && typeof formState.expandManualInput === "string") {
+        elements.expandManualInput.value = formState.expandManualInput;
+    }
+    if (elements.expandOptionRelated) {
+        elements.expandOptionRelated.checked = Boolean(formState.expandOptionRelated);
+    }
+    if (elements.expandOptionAutocomplete) {
+        elements.expandOptionAutocomplete.checked = Boolean(formState.expandOptionAutocomplete);
+    }
+    if (elements.expandOptionSeedFilter) {
+        elements.expandOptionSeedFilter.checked = Boolean(formState.expandOptionSeedFilter);
+    }
+    if (elements.expandMaxResultsInput && formState.expandMaxResultsInput !== undefined) {
+        elements.expandMaxResultsInput.value = String(formState.expandMaxResultsInput || "");
+    }
+    if (elements.analyzeInputSource && typeof formState.analyzeInputSource === "string") {
+        elements.analyzeInputSource.value = formState.analyzeInputSource;
+    }
+    if (elements.analyzeManualInput && typeof formState.analyzeManualInput === "string") {
+        elements.analyzeManualInput.value = formState.analyzeManualInput;
+    }
+    if (elements.analyzeKeywordStatsInput && typeof formState.analyzeKeywordStatsInput === "string") {
+        elements.analyzeKeywordStatsInput.value = formState.analyzeKeywordStatsInput;
+    }
+
+    const restoredTitleMode = String(formState.titleMode || "").trim();
+    if (restoredTitleMode) {
+        (elements.titleModeRadios || []).forEach((radio) => {
+            radio.checked = radio.value === restoredTitleMode;
+        });
+    }
+    if (elements.titleProvider && typeof formState.titleProvider === "string") {
+        elements.titleProvider.value = formState.titleProvider;
+    }
+    if (elements.titleModel && typeof formState.titleModel === "string") {
+        elements.titleModel.value = formState.titleModel;
+    }
+    if (elements.titleApiKey && typeof formState.titleApiKey === "string") {
+        elements.titleApiKey.value = formState.titleApiKey;
+    }
+    if (elements.titleTemperature && formState.titleTemperature !== undefined) {
+        elements.titleTemperature.value = String(formState.titleTemperature || "");
+    }
+    if (elements.titleFallback) {
+        elements.titleFallback.checked = Boolean(formState.titleFallback);
+    }
+    if (elements.localCookieStatus && typeof formState.localCookieStatus === "string" && formState.localCookieStatus.trim()) {
+        elements.localCookieStatus.textContent = formState.localCookieStatus;
+    }
+}
+
+function captureDashboardLogEntries(limit = 200) {
+    return Array.from(elements.activityLog?.querySelectorAll(".log-entry") || [])
+        .slice(0, limit)
+        .map((entry) => ({
+            className: entry.className || "log-entry",
+            text: entry.textContent || "",
+        }));
+}
+
+function restoreDashboardLogEntries(entries) {
+    if (!elements.activityLog) {
+        return;
+    }
+    elements.activityLog.innerHTML = "";
+    (Array.isArray(entries) ? entries : []).forEach((entry) => {
+        const line = document.createElement("div");
+        line.className = String(entry?.className || "log-entry").trim() || "log-entry";
+        line.textContent = String(entry?.text || "");
+        elements.activityLog.append(line);
+    });
+}
+
+function normalizePersistedStageStatus(stageStatusMap) {
+    const nextStageStatus = createInitialStageStatus();
+
+    STAGES.forEach((stage) => {
+        const rawStatus = stageStatusMap?.[stage.key];
+        if (!rawStatus || typeof rawStatus !== "object") {
+            return;
+        }
+
+        const normalizedStatus = {
+            ...createPendingStatus(),
+            ...rawStatus,
+        };
+        if (normalizedStatus.state === "running") {
+            const finishedAt = Date.now();
+            normalizedStatus.state = "cancelled";
+            normalizedStatus.message = "페이지 이동으로 중지됨";
+            normalizedStatus.finishedAt = finishedAt;
+            normalizedStatus.durationMs = normalizedStatus.startedAt
+                ? Math.max(0, finishedAt - normalizedStatus.startedAt)
+                : 0;
+        }
+        nextStageStatus[stage.key] = normalizedStatus;
+    });
+
+    return nextStageStatus;
+}
+
+function buildDashboardSessionPayload() {
+    return {
+        results: state.results,
+        stageStatus: state.stageStatus,
+        diagnostics: state.diagnostics,
+        selectedCollectedKeys: state.selectedCollectedKeys,
+        selectGradeFilters: state.selectGradeFilters,
+        gradeSelectionTouched: state.gradeSelectionTouched,
+        activeResultView: state.activeResultView,
+        lastError: state.lastError,
+        analyzedFilters: state.analyzedFilters,
+        formState: buildDashboardFormSnapshot(),
+        logEntries: captureDashboardLogEntries(),
+        globalStatus: {
+            message: elements.pipelineStatus?.textContent || "",
+            kind: elements.pipelineStatus?.classList.contains("running")
+                ? "running"
+                : elements.pipelineStatus?.classList.contains("error")
+                    ? "error"
+                    : elements.pipelineStatus?.classList.contains("cancelled")
+                        ? "cancelled"
+                        : "idle",
+        },
+    };
+}
+
+function persistDashboardSessionNow() {
+    if (!elements.resultsGrid) {
+        return;
+    }
+
+    try {
+        window.sessionStorage.setItem(
+            DASHBOARD_SESSION_STORAGE_KEY,
+            JSON.stringify(buildDashboardSessionPayload()),
+        );
+    } catch (error) {
+        // Ignore storage failures and keep the dashboard usable.
+    }
+}
+
+function scheduleDashboardSessionSave() {
+    if (dashboardSessionSaveTimer) {
+        window.clearTimeout(dashboardSessionSaveTimer);
+    }
+    dashboardSessionSaveTimer = window.setTimeout(() => {
+        dashboardSessionSaveTimer = null;
+        persistDashboardSessionNow();
+    }, 120);
+}
+
+function restoreDashboardSession() {
+    const snapshot = readSessionStorageJson(DASHBOARD_SESSION_STORAGE_KEY);
+    if (!snapshot || typeof snapshot !== "object") {
+        return false;
+    }
+
+    applyDashboardFormSnapshot(snapshot.formState);
+
+    state.results = {
+        ...createEmptyResults(),
+        ...(snapshot.results || {}),
+    };
+    state.stageStatus = normalizePersistedStageStatus(snapshot.stageStatus);
+    state.diagnostics = {
+        ...createEmptyDiagnostics(),
+        ...(snapshot.diagnostics || {}),
+    };
+    state.selectedCollectedKeys = Array.isArray(snapshot.selectedCollectedKeys)
+        ? [...snapshot.selectedCollectedKeys]
+        : [];
+    state.selectGradeFilters = normalizeGradeList(snapshot.selectGradeFilters?.length ? snapshot.selectGradeFilters : GRADE_ORDER);
+    state.gradeSelectionTouched = Boolean(snapshot.gradeSelectionTouched);
+    state.activeResultView = normalizeResultViewKey(snapshot.activeResultView) || "";
+    state.lastError = snapshot.lastError || null;
+    state.analyzedFilters = {
+        ...createDefaultAnalyzedFilters(),
+        ...(snapshot.analyzedFilters || {}),
+    };
+    state.isBusy = false;
+    state.streamAbortController = null;
+    state.streamAbortEndpoint = "";
+    state.streamAbortRequested = false;
+    state.requestAbortController = null;
+    state.requestAbortStageKey = "";
+    state.requestAbortEndpoint = "";
+    state.requestAbortRequested = false;
+
+    restoreDashboardLogEntries(snapshot.logEntries);
+
+    const globalStatus = snapshot.globalStatus || {};
+    if (globalStatus.message) {
+        setGlobalStatus(globalStatus.message, globalStatus.kind || "idle");
+    }
+    return true;
 }
 
 function sanitizeSensitiveData(value) {
@@ -2586,12 +3009,18 @@ function bindElements() {
     elements.expandOptionSeedFilter = document.getElementById("expandOptionSeedFilter");
     elements.expandMaxResultsInput = document.getElementById("expandMaxResultsInput");
     elements.expandLimitButtons = Array.from(document.querySelectorAll("[data-expand-limit]"));
+    elements.expandSourceVisibilityBlocks = Array.from(document.querySelectorAll("[data-expand-source-visibility]"));
     elements.analyzeInputSource = document.getElementById("analyzeInputSource");
     elements.analyzeManualInput = document.getElementById("analyzeManualInput");
     elements.analyzeKeywordStatsInput = document.getElementById("analyzeKeywordStatsInput");
     elements.exportCsvButton = document.getElementById("exportCsvButton");
+    elements.analyzeSourceVisibilityBlocks = Array.from(document.querySelectorAll("[data-analyze-source-visibility]"));
     elements.selectedCollectedCount = document.getElementById("selectedCollectedCount");
     elements.manualAnalyzeCount = document.getElementById("manualAnalyzeCount");
+    elements.gradePresetButtons = Array.from(document.querySelectorAll("[data-grade-preset]"));
+    elements.gradeToggleButtons = Array.from(document.querySelectorAll("[data-grade-toggle]"));
+    elements.runGradeSelectButton = document.getElementById("runGradeSelectButton");
+    elements.gradeSelectSummary = document.getElementById("gradeSelectSummary");
     elements.titleMode = document.getElementById("titleMode");
     elements.titleProvider = document.getElementById("titleProvider");
     elements.titleModel = document.getElementById("titleModel");
@@ -2618,7 +3047,7 @@ function bindEvents() {
         element.addEventListener("change", renderInputState);
     });
     document.getElementById("runCollectButton").addEventListener("click", () => {
-        runWithGuard(runCollectStage, "수집 단계 실행 중");
+        runWithGuard(runCollectFromScratch, "수집 단계 실행 중");
     });
     document.getElementById("runExpandButton").addEventListener("click", () => {
         runWithGuard(runThroughExpand, "확장 단계 실행 중");
@@ -2998,6 +3427,24 @@ function mergeAnalyzedKeywords(existingItems, incomingItems) {
         merged.set(keyword, item);
     });
     return [...merged.values()].sort((left, right) => Number(right.score || 0) - Number(left.score || 0));
+}
+
+function resolveAnalysisGrade(item) {
+    const directGrade = normalizeGradeValue(item?.grade);
+    if (directGrade) {
+        return directGrade;
+    }
+
+    const score = Number(item?.score);
+    if (!Number.isFinite(score)) {
+        return "";
+    }
+    if (score >= 85) return "S";
+    if (score >= 70) return "A";
+    if (score >= 55) return "B";
+    if (score >= 40) return "C";
+    if (score >= 25) return "D";
+    return "F";
 }
 
 function renderStageList() {
@@ -3816,6 +4263,9 @@ function buildExpandStreamStatusMessage(streamMeta) {
 state.streamAbortController = null;
 state.streamAbortEndpoint = "";
 state.streamAbortRequested = false;
+state.requestAbortController = null;
+state.requestAbortStageKey = "";
+state.requestAbortRequested = false;
 
 function bindElements() {
     elements.categoryInput = document.getElementById("categoryInput");
@@ -3830,6 +4280,7 @@ function bindElements() {
     elements.launchLoginBrowserButton = document.getElementById("launchLoginBrowserButton");
     elements.loadLocalCookieButton = document.getElementById("loadLocalCookieButton");
     elements.localCookieStatus = document.getElementById("localCookieStatus");
+    elements.expanderAnalysisPath = document.getElementById("expanderAnalysisPath");
     elements.optionRelated = document.getElementById("optionRelated");
     elements.optionAutocomplete = document.getElementById("optionAutocomplete");
     elements.optionBulk = document.getElementById("optionBulk");
@@ -3841,12 +4292,18 @@ function bindElements() {
     elements.expandOptionSeedFilter = document.getElementById("expandOptionSeedFilter");
     elements.expandMaxResultsInput = document.getElementById("expandMaxResultsInput");
     elements.expandLimitButtons = Array.from(document.querySelectorAll("[data-expand-limit]"));
+    elements.expandSourceVisibilityBlocks = Array.from(document.querySelectorAll("[data-expand-source-visibility]"));
     elements.analyzeInputSource = document.getElementById("analyzeInputSource");
     elements.analyzeManualInput = document.getElementById("analyzeManualInput");
     elements.analyzeKeywordStatsInput = document.getElementById("analyzeKeywordStatsInput");
     elements.exportCsvButton = document.getElementById("exportCsvButton");
+    elements.analyzeSourceVisibilityBlocks = Array.from(document.querySelectorAll("[data-analyze-source-visibility]"));
     elements.selectedCollectedCount = document.getElementById("selectedCollectedCount");
     elements.manualAnalyzeCount = document.getElementById("manualAnalyzeCount");
+    elements.gradePresetButtons = Array.from(document.querySelectorAll("[data-grade-preset]"));
+    elements.gradeToggleButtons = Array.from(document.querySelectorAll("[data-grade-toggle]"));
+    elements.runGradeSelectButton = document.getElementById("runGradeSelectButton");
+    elements.gradeSelectSummary = document.getElementById("gradeSelectSummary");
     elements.titleMode = document.getElementById("titleMode");
     elements.titleProvider = document.getElementById("titleProvider");
     elements.titleModel = document.getElementById("titleModel");
@@ -3857,6 +4314,12 @@ function bindElements() {
     elements.titleModeRadios = Array.from(document.querySelectorAll("input[name='titleModeOption']"));
     elements.titleModeVisibilityBlocks = Array.from(document.querySelectorAll("[data-title-mode-visibility]"));
     elements.statusList = document.getElementById("statusList");
+    elements.controlStack = document.getElementById("controlStack");
+    elements.controlBlocks = Array.from(document.querySelectorAll("[data-control-block]"));
+    elements.launcherGrid = document.getElementById("launcherGrid");
+    elements.controlCards = Array.from(document.querySelectorAll("[data-control-card]"));
+    elements.resultsRailPanel = document.getElementById("resultsRailPanel");
+    elements.resultsRail = document.getElementById("resultsRail");
     elements.resultsGrid = document.getElementById("resultsGrid");
     elements.activityLog = document.getElementById("activityLog");
     elements.pipelineStatus = document.getElementById("pipelineStatus");
@@ -3878,7 +4341,7 @@ function bindEvents() {
     });
     document.querySelectorAll("[data-run-action='collect']").forEach((button) => {
         button.addEventListener("click", () => {
-            runWithGuard(runCollectStage, "\uc218\uc9d1 \ub2e8\uacc4 \uc2e4\ud589 \uc911");
+            runWithGuard(runCollectFromScratch, "\uc218\uc9d1 \ub2e8\uacc4 \uc2e4\ud589 \uc911");
         });
     });
     document.getElementById("runExpandButton").addEventListener("click", () => {
@@ -3889,6 +4352,25 @@ function bindEvents() {
     });
     document.getElementById("runSelectButton").addEventListener("click", () => {
         runWithGuard(runThroughSelect, "\uc120\ubcc4 \ub2e8\uacc4 \uc2e4\ud589 \uc911");
+    });
+    elements.gradePresetButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            applyGradePreset(button.dataset.gradePreset || "");
+        });
+    });
+    elements.gradeToggleButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            toggleGradeFilter(button.dataset.gradeToggle || "");
+        });
+    });
+    elements.runGradeSelectButton?.addEventListener("click", () => {
+        const grades = getSelectedGradeFilters();
+        runWithGuard(
+            () => runThroughGradeSelect(grades),
+            grades.length
+                ? `${buildGradeRunLabel(grades)} \uc120\ubcc4 \uc2e4\ud589 \uc911`
+                : "\ub4f1\uae09\ubcc4 \uc120\ubcc4 \uc2e4\ud589 \uc911",
+        );
     });
     document.getElementById("runTitleButton").addEventListener("click", () => {
         runWithGuard(runThroughTitle, "\uc81c\ubaa9 \uc0dd\uc131 \ub2e8\uacc4 \uc2e4\ud589 \uc911");
@@ -3920,10 +4402,10 @@ function bindEvents() {
         element?.addEventListener("input", handleTrendSettingsChange);
         element?.addEventListener("change", handleTrendSettingsChange);
     });
-    elements.loadLocalCookieButton.addEventListener("click", () => {
+    elements.loadLocalCookieButton?.addEventListener("click", () => {
         runWithGuard(importLocalNaverCookie, "\ub85c\uceec \ub124\uc774\ubc84 \uc138\uc158 \ubd88\ub7ec\uc624\ub294 \uc911");
     });
-    elements.launchLoginBrowserButton.addEventListener("click", () => {
+    elements.launchLoginBrowserButton?.addEventListener("click", () => {
         runWithGuard(openDedicatedLoginBrowser, "\uc804\uc6a9 \ub85c\uadf8\uc778 \ube0c\ub77c\uc6b0\uc800 \uc5ec\ub294 \uc911");
     });
     [
@@ -4088,7 +4570,9 @@ function renderTrendSettingsState() {
     elements.trendCookieInput.disabled = !usesTrendSource;
     elements.trendFallbackInput.disabled = !categoryMode;
     elements.launchLoginBrowserButton.disabled = !usesTrendSource;
-    elements.loadLocalCookieButton.disabled = !usesTrendSource;
+    if (elements.loadLocalCookieButton) {
+        elements.loadLocalCookieButton.disabled = !usesTrendSource;
+    }
 
     if (elements.trendSourceHelp) {
         if (usesTrendSource) {
@@ -4098,7 +4582,7 @@ function renderTrendSettingsState() {
             const fallbackLabel = elements.trendFallbackInput.checked ? "\ucf1c\uc9d0" : "\uaebc\uc9d0";
             elements.trendSourceHelp.textContent = hasCookie
                 ? `\ud604\uc7ac Creator Advisor ${service} \ud2b8\ub80c\ub4dc\ub97c \uc9c1\uc811 \uc870\ud68c\ud569\ub2c8\ub2e4. \ub85c\uceec \ube0c\ub77c\uc6b0\uc800\ub294 ${browser}, fallback\uc740 ${fallbackLabel} \uc0c1\ud0dc\uc785\ub2c8\ub2e4.`
-                : `\ud604\uc7ac Creator Advisor ${service} \ucfe0\ud0a4\uac00 \ube44\uc5b4 \uc788\uc2b5\ub2c8\ub2e4. '\uc804\uc6a9 \ub85c\uadf8\uc778 \ube0c\ub77c\uc6b0\uc800 \uc5f4\uae30'\ub85c \ub85c\uceec \uc138\uc158\uc744 \ub9cc\ub4e4\uac70\ub098 \ucfe0\ud0a4\ub97c \ubd99\uc5ec\ub123\uc5b4 \uc8fc\uc138\uc694.`;
+                : `\ud604\uc7ac Creator Advisor ${service} \uc138\uc158\uc774 \ube44\uc5b4 \uc788\uc2b5\ub2c8\ub2e4. '\uc804\uc6a9 \ub85c\uadf8\uc778 \ube0c\ub77c\uc6b0\uc800 \uc5f4\uae30'\ub85c \ub85c\uceec \uc138\uc158\uc744 \uc900\ube44\ud574 \uc8fc\uc138\uc694.`;
         } else {
             elements.trendSourceHelp.textContent = "\uce74\ud14c\uace0\ub9ac \uc218\uc9d1 \uc18c\uc2a4\uac00 preset fallback\uc774\uba74 \uae30\uc874 \uacf5\uac1c \uac80\uc0c9 \uacbd\ub85c\ub85c \ud0a4\uc6cc\ub4dc\ub97c \uc218\uc9d1\ud569\ub2c8\ub2e4.";
         }
@@ -4174,6 +4658,18 @@ function completeStreamRequest(controller) {
 }
 
 function cancelActiveStream() {
+    if (state.requestAbortController) {
+        if (state.requestAbortRequested) {
+            return;
+        }
+        state.requestAbortRequested = true;
+        addLog("현재 작업 중지를 요청했습니다. 지금까지 받은 결과는 유지됩니다.", "info");
+        updateStopButtonState();
+        state.requestAbortController.abort("user_cancelled");
+        renderAll();
+        return;
+    }
+
     if (!state.streamAbortController || state.streamAbortRequested) {
         return;
     }
@@ -4191,6 +4687,7 @@ async function executeExpandStageStream(inputData) {
     const startedAtLabel = new Date(startedAt).toISOString();
     const streamController = beginStreamRequest("/expand/stream");
 
+    setActiveResultView(stageKey);
     state.stageStatus[stageKey] = {
         state: "running",
         message: `${stage.label} \uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911`,
@@ -4312,6 +4809,7 @@ async function executeExpandAnalyzeStageStream(inputData) {
     const startedAtLabel = new Date(expandedStartedAt).toISOString();
     const streamController = beginStreamRequest("/expand/analyze/stream");
 
+    setActiveResultView("analyzed");
     state.stageStatus.expanded = {
         state: "running",
         message: "\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911",
@@ -4593,7 +5091,16 @@ async function postModuleStream(endpoint, inputData, onEvent, options = {}) {
         if (isAbortLikeError(error)) {
             throw createStreamAbortError(endpoint, startedAt);
         }
-        throw error;
+        const streamReadError = error instanceof Error
+            ? error
+            : new Error("실시간 응답을 읽는 중 오류가 발생했습니다.");
+        streamReadError.code = streamReadError.code || "stream_read_error";
+        streamReadError.endpoint = streamReadError.endpoint || endpoint;
+        streamReadError.requestId = streamReadError.requestId || requestId;
+        streamReadError.statusCode = streamReadError.statusCode || response?.status || 0;
+        streamReadError.detail = streamReadError.detail || (error instanceof Error ? error.message : String(error));
+        streamReadError.durationMs = streamReadError.durationMs || (Date.now() - startedAt);
+        throw streamReadError;
     } finally {
         try {
             reader.releaseLock();
@@ -4665,6 +5172,15 @@ function isAbortLikeError(error) {
 
 function createStreamAbortError(endpoint, startedAt) {
     const error = new Error("\uc2e4\uc2dc\uac04 \ud655\uc7a5\uc744 \uc911\uc9c0\ud588\uc2b5\ub2c8\ub2e4.");
+    error.name = "AbortError";
+    error.code = "abort_error";
+    error.endpoint = endpoint;
+    error.durationMs = Date.now() - startedAt;
+    return error;
+}
+
+function createRequestAbortError(endpoint, startedAt) {
+    const error = new Error("작업을 중지했습니다.");
     error.name = "AbortError";
     error.code = "abort_error";
     error.endpoint = endpoint;
@@ -4762,6 +5278,154 @@ function renderTitleSettingsState() {
     elements.titleModeBadge.textContent = isAiMode ? `ai:${elements.titleProvider.value}` : "template";
 }
 
+function resetAll() {
+    state.results = createEmptyResults();
+    state.stageStatus = createInitialStageStatus();
+    state.diagnostics = createEmptyDiagnostics();
+    state.selectedCollectedKeys = [];
+    state.selectGradeFilters = [...GRADE_ORDER];
+    state.gradeSelectionTouched = false;
+    state.activeResultView = "";
+    state.lastError = null;
+    state.analyzedFilters = createDefaultAnalyzedFilters();
+    state.streamAbortController = null;
+    state.streamAbortEndpoint = "";
+    state.streamAbortRequested = false;
+    state.requestAbortController = null;
+    state.requestAbortStageKey = "";
+    state.requestAbortEndpoint = "";
+    state.requestAbortRequested = false;
+    setGlobalStatus("대기 중", "idle");
+    renderAll();
+    addLog("결과와 디버그 정보를 초기화했습니다.");
+}
+
+function renderInputState() {
+    const mode = getCollectorMode();
+    const categoryMode = mode === "category";
+    const selectedCount = getSelectedCollectedItems().length;
+    const expandCount = parseKeywordText(elements.expandManualInput?.value || "").length;
+    const analyzeCount = parseKeywordText(elements.analyzeManualInput?.value || "").length;
+    const expandSource = elements.expandInputSource?.value || "collector_all";
+    const analyzeSource = elements.analyzeInputSource?.value || "expanded_results";
+    const expandUsesManual = expandSource === "manual_text";
+    const analyzeUsesManual = analyzeSource === "manual_text";
+    const usesTrendSource = categoryMode && elements.categorySourceInput?.value === "naver_trend";
+
+    setBlocksVisibility(elements.modeVisibilityBlocks, mode, "modeVisibility");
+    setBlocksVisibility(elements.expandSourceVisibilityBlocks, expandSource, "expandSourceVisibility");
+    setBlocksVisibility(elements.analyzeSourceVisibilityBlocks, analyzeSource, "analyzeSourceVisibility");
+
+    if (elements.selectedCollectedCount) {
+        if (expandUsesManual) {
+            elements.selectedCollectedCount.textContent = `직접 입력 ${expandCount}건`;
+        } else if (expandSource === "collector_selected") {
+            elements.selectedCollectedCount.textContent = `선택 ${selectedCount}건`;
+        } else {
+            elements.selectedCollectedCount.textContent = "수집 결과 전체";
+        }
+    }
+
+    if (elements.manualAnalyzeCount) {
+        elements.manualAnalyzeCount.textContent = analyzeUsesManual
+            ? `직접 입력 ${analyzeCount}건`
+            : "확장 결과 사용";
+    }
+
+    if (elements.expandManualInput) {
+        elements.expandManualInput.disabled = !expandUsesManual;
+    }
+    if (elements.analyzeManualInput) {
+        elements.analyzeManualInput.disabled = !analyzeUsesManual;
+    }
+    if (elements.seedInput) {
+        elements.seedInput.disabled = categoryMode;
+        elements.seedInput.title = categoryMode ? "카테고리 모드에서는 시드 키워드를 사용하지 않습니다." : "";
+    }
+    if (elements.categoryInput) {
+        elements.categoryInput.disabled = !categoryMode;
+        elements.categoryInput.title = categoryMode ? "" : "시드 모드에서는 카테고리를 사용하지 않습니다.";
+    }
+    if (elements.categorySourceInput) {
+        elements.categorySourceInput.disabled = !categoryMode;
+    }
+    if (elements.optionRelated) {
+        elements.optionRelated.title = usesTrendSource ? "트렌드 수집은 preset fallback 설정에서만 적용됩니다." : "";
+    }
+    if (elements.optionAutocomplete) {
+        elements.optionAutocomplete.title = usesTrendSource ? "트렌드 수집은 preset fallback 설정에서만 적용됩니다." : "";
+    }
+    if (elements.optionBulk) {
+        elements.optionBulk.title = usesTrendSource ? "트렌드 수집은 preset fallback 설정에서만 적용됩니다." : "";
+    }
+    if (elements.stopStreamButton) {
+        elements.stopStreamButton.title = (state.streamAbortController || state.requestAbortController)
+            ? "실시간 확장/분석 스트림을 중지합니다."
+            : "";
+    }
+
+    updateGradeFilterUI();
+    renderTrendSettingsState();
+}
+
+function renderCollectedList(items) {
+    const selectedCount = getSelectedCollectedItems().length;
+    const groupedQueryCount = new Set(items.map((item) => String(item.raw || item.keyword || "").trim()).filter(Boolean)).size;
+    const sourceCounts = summarizeCollectedSources(items);
+
+    return `
+        <div class="collector-compact-board">
+            <div class="collector-compact-toolbar">
+                <div class="collector-compact-stats">
+                    <span class="collector-compact-stat"><strong>${escapeHtml(String(items.length))}</strong>수집</span>
+                    <span class="collector-compact-stat"><strong>${escapeHtml(String(selectedCount))}</strong>선택</span>
+                    <span class="collector-compact-stat"><strong>${escapeHtml(String(groupedQueryCount))}</strong>원본 묶음</span>
+                </div>
+                <div class="collector-toolbar-actions">
+                    <button type="button" class="ghost-btn collector-action-btn" data-collector-action="select_all">전체 선택</button>
+                    <button type="button" class="ghost-btn collector-action-btn" data-collector-action="clear_all">선택 해제</button>
+                </div>
+            </div>
+            ${sourceCounts.length ? `
+                <div class="collector-compact-sources">
+                    ${sourceCounts.map((item) => `
+                        <span class="badge">${escapeHtml(formatCollectorSource(item.source))} ${escapeHtml(String(item.count))}건</span>
+                    `).join("")}
+                </div>
+            ` : ""}
+            <div class="collector-compact-grid">
+                ${items.slice(0, 40).map((item) => {
+                    const identity = createCollectedIdentity(item);
+                    const selected = state.selectedCollectedKeys.includes(identity);
+
+                    return `
+                        <label class="collector-compact-card ${selected ? "selected" : ""}">
+                            <div class="collector-compact-head">
+                                <strong>${escapeHtml(item.keyword || "-")}</strong>
+                                <span class="collector-compact-source">${escapeHtml(formatCollectorSource(item.source))}</span>
+                            </div>
+                            <div class="collector-compact-meta">
+                                <span class="badge">원본 ${escapeHtml(item.raw || "-")}</span>
+                                <span class="badge">카테고리 ${escapeHtml(item.category || "미분류")}</span>
+                                ${item.rank ? `<span class="badge">순위 ${escapeHtml(String(item.rank))}</span>` : ""}
+                                ${item.rank_change !== undefined ? `<span class="badge">${escapeHtml(formatTrendRankChange(item.rank_change))}</span>` : ""}
+                            </div>
+                            <span class="collector-compact-select">
+                                <input
+                                    type="checkbox"
+                                    data-collected-key="${escapeHtml(identity)}"
+                                    ${selected ? "checked" : ""}
+                                />
+                                <span>확장 입력에 사용</span>
+                            </span>
+                        </label>
+                    `;
+                }).join("")}
+            </div>
+        </div>
+    `;
+}
+
 function getActiveGuideTab() {
     if (state.activeGuideTab) {
         return state.activeGuideTab;
@@ -4841,13 +5505,151 @@ function renderProgress() {
         : `${completedCount}개 단계가 완료되었습니다.`;
 }
 
+function resolveControlFocusStage() {
+    if (state.stageStatus.titled.state === "running") {
+        return "title";
+    }
+    if (state.stageStatus.selected.state === "running") {
+        return "select";
+    }
+    if (state.stageStatus.analyzed.state === "running") {
+        return "analyze";
+    }
+    if (state.stageStatus.expanded.state === "running") {
+        return "expand";
+    }
+    if (state.stageStatus.collected.state === "running") {
+        return "collect";
+    }
+
+    if (state.results.selected?.selected_keywords?.length && !state.results.titled?.generated_titles?.length) {
+        return "title";
+    }
+    if (state.results.analyzed?.analyzed_keywords?.length && !state.results.selected?.selected_keywords?.length) {
+        return "select";
+    }
+    if (state.results.expanded?.expanded_keywords?.length && !state.results.analyzed?.analyzed_keywords?.length) {
+        return "analyze";
+    }
+    if (state.results.collected?.collected_keywords?.length && !state.results.expanded?.expanded_keywords?.length) {
+        return "expand";
+    }
+    return "collect";
+}
+
+function reorderControlNodes(container, nodes, order, dataKey) {
+    if (!container || !Array.isArray(nodes) || nodes.length === 0) {
+        return;
+    }
+
+    const orderMap = new Map(order.map((key, index) => [key, index]));
+    [...nodes]
+        .sort((left, right) => {
+            const leftOrder = orderMap.get(left.dataset[dataKey] || "") ?? 99;
+            const rightOrder = orderMap.get(right.dataset[dataKey] || "") ?? 99;
+            return leftOrder - rightOrder;
+        })
+        .forEach((node) => container.appendChild(node));
+}
+
+function syncControlFocus() {
+    const focusStage = resolveControlFocusStage();
+    const fixedBlockOrder = ["collect", "pipeline", "expand", "analyze", "title"];
+
+    reorderControlNodes(
+        elements.controlStack,
+        elements.controlBlocks,
+        fixedBlockOrder,
+        "controlBlock",
+    );
+
+    elements.controlBlocks?.forEach((block) => {
+        const key = block.dataset.controlBlock || "";
+        const isFocused = key === focusStage
+            || (focusStage === "select" && key === "pipeline");
+        block.classList.toggle("focus-stage", isFocused);
+    });
+
+    elements.controlCards?.forEach((card) => {
+        const key = card.dataset.controlCard || "";
+        const isFocused = (focusStage === "expand" && key === "expand")
+            || (focusStage === "analyze" && key === "analyze");
+        card.classList.toggle("focus-stage", isFocused);
+    });
+}
+
+function beginAbortableRequest(stageKey, endpoint) {
+    const controller = new AbortController();
+    state.requestAbortController = controller;
+    state.requestAbortStageKey = String(stageKey || "");
+    state.requestAbortEndpoint = String(endpoint || "");
+    state.requestAbortRequested = false;
+    syncBusyButtons();
+    renderAll();
+    return controller;
+}
+
+function completeAbortableRequest(controller) {
+    if (state.requestAbortController === controller) {
+        state.requestAbortController = null;
+        state.requestAbortStageKey = "";
+        state.requestAbortEndpoint = "";
+        state.requestAbortRequested = false;
+    }
+    syncBusyButtons();
+}
+
+function getAbortableStageKeys() {
+    if (state.requestAbortController && state.requestAbortStageKey) {
+        return [state.requestAbortStageKey];
+    }
+    if (!state.streamAbortController) {
+        return [];
+    }
+    if (state.streamAbortEndpoint === "/expand/analyze/stream") {
+        return ["expanded", "analyzed"];
+    }
+    if (state.streamAbortEndpoint === "/expand/stream") {
+        return ["expanded"];
+    }
+    return [];
+}
+
+function isStageAbortable(stageKey) {
+    return getAbortableStageKeys().includes(String(stageKey || ""));
+}
+
+function isAbortRequestedForStage(stageKey) {
+    const safeStageKey = String(stageKey || "");
+    if (state.requestAbortController && state.requestAbortStageKey === safeStageKey) {
+        return Boolean(state.requestAbortRequested);
+    }
+    return isStageAbortable(safeStageKey) && Boolean(state.streamAbortRequested);
+}
+
+function renderStageStopAction(stageKey) {
+    if (!isStageAbortable(stageKey)) {
+        return "";
+    }
+    const requested = isAbortRequestedForStage(stageKey);
+    return `
+        <button
+            type="button"
+            class="inline-action-btn ${requested ? "requested" : ""}"
+            data-inline-action="stop_stage_run"
+            data-stage-stop="${escapeHtml(String(stageKey || ""))}"
+            ${requested ? "disabled" : ""}
+        >${requested ? "중지 요청됨..." : "중지"}</button>
+    `;
+}
+
 function updateStopButtonState() {
     if (!elements.stopStreamButton) {
         return;
     }
 
-    const isActive = Boolean(state.isBusy && state.streamAbortController);
-    const isRequested = Boolean(state.streamAbortRequested);
+    const isActive = Boolean(state.isBusy && (state.streamAbortController || state.requestAbortController));
+    const isRequested = Boolean(state.streamAbortRequested || state.requestAbortRequested);
     elements.stopStreamButton.disabled = !isActive || isRequested;
     elements.stopStreamButton.classList.toggle("requested", isRequested);
     elements.stopStreamButton.textContent = isRequested ? "중지 요청됨..." : "중지";
@@ -4932,32 +5734,182 @@ function buildExpandedLiveSubtitle() {
         : "\uc2e4\uc2dc\uac04\uc73c\ub85c \ud655\uc7a5 \ud0a4\uc6cc\ub4dc\ub97c \ubcf4\uc5ec\uc8fc\uace0 \uc788\uc2b5\ub2c8\ub2e4.";
 }
 
-async function runSelectStage() {
+function normalizeGradeValue(grade) {
+    const safeGrade = String(grade || "").trim().toUpperCase();
+    return GRADE_ORDER.includes(safeGrade) ? safeGrade : "";
+}
+
+function normalizeGradeList(grades) {
+    const gradeSet = new Set(
+        (grades || [])
+            .map((grade) => normalizeGradeValue(grade))
+            .filter(Boolean),
+    );
+    return GRADE_ORDER.filter((grade) => gradeSet.has(grade));
+}
+
+function getSelectedGradeFilters() {
+    return normalizeGradeList(state.selectGradeFilters);
+}
+
+function buildGradeRunLabel(grades) {
+    const normalizedGrades = normalizeGradeList(grades);
+    return normalizedGrades.length === GRADE_ORDER.length
+        ? "전체 등급"
+        : `${normalizedGrades.join(", ")} 등급`;
+}
+
+function updateGradeFilterUI() {
+    const selectedGrades = getSelectedGradeFilters();
+    const selectedSet = new Set(selectedGrades);
+
+    elements.gradeToggleButtons?.forEach((button) => {
+        const grade = normalizeGradeValue(button.dataset.gradeToggle || "");
+        const isActive = selectedSet.has(grade);
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+
+    elements.gradePresetButtons?.forEach((button) => {
+        const presetGrades = normalizeGradeList(GRADE_PRESET_MAP[button.dataset.gradePreset || ""] || []);
+        const isActive = presetGrades.length === selectedGrades.length
+            && presetGrades.every((grade) => selectedSet.has(grade));
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+
+    if (elements.gradeSelectSummary) {
+        elements.gradeSelectSummary.textContent = selectedGrades.length === GRADE_ORDER.length
+            ? "전체 등급 선별"
+            : selectedGrades.length
+                ? `선택 등급: ${selectedGrades.join(", ")}`
+                : "등급을 1개 이상 선택하세요.";
+    }
+
+    if (elements.runGradeSelectButton) {
+        elements.runGradeSelectButton.disabled = state.isBusy || selectedGrades.length === 0;
+    }
+}
+
+function applyGradePreset(presetKey) {
+    const presetGrades = normalizeGradeList(GRADE_PRESET_MAP[presetKey] || []);
+    const selectedGrades = getSelectedGradeFilters();
+    const isSamePreset = presetGrades.length === selectedGrades.length
+        && presetGrades.every((grade) => selectedGrades.includes(grade));
+
+    state.selectGradeFilters = isSamePreset ? [] : presetGrades;
+    state.gradeSelectionTouched = true;
+    updateGradeFilterUI();
+    renderResults();
+}
+
+function toggleGradeFilter(grade) {
+    const normalizedGrade = normalizeGradeValue(grade);
+    if (!normalizedGrade) {
+        return;
+    }
+
+    const selectedSet = new Set(getSelectedGradeFilters());
+    if (selectedSet.has(normalizedGrade)) {
+        selectedSet.delete(normalizedGrade);
+    } else {
+        selectedSet.add(normalizedGrade);
+    }
+    state.selectGradeFilters = GRADE_ORDER.filter((item) => selectedSet.has(item));
+    state.gradeSelectionTouched = true;
+    updateGradeFilterUI();
+    renderResults();
+}
+
+async function runThroughGradeSelect(allowedGrades) {
+    await runSelectStage({ allowedGrades });
+}
+
+function getForwardSelectOptions() {
+    if (!state.gradeSelectionTouched) {
+        return {};
+    }
+
+    const allowedGrades = getSelectedGradeFilters();
+    return allowedGrades.length ? { allowedGrades } : {};
+}
+
+function hasMatchingSelectionProfile(allowedGrades) {
+    const normalizedGrades = normalizeGradeList(allowedGrades || []);
+    const profile = state.results.selected?.selection_profile || null;
+
+    if (!normalizedGrades.length) {
+        return !profile || profile.mode !== "grade_filter";
+    }
+
+    const profileGrades = normalizeGradeList(profile?.allowed_grades || []);
+    return profile?.mode === "grade_filter"
+        && profileGrades.length === normalizedGrades.length
+        && normalizedGrades.every((grade) => profileGrades.includes(grade));
+}
+
+async function runSelectStage(options = {}) {
     if (!state.results.analyzed?.analyzed_keywords?.length) {
         await runAnalyzeStage();
     } else if (state.stageStatus.analyzed.state === "cancelled") {
         addLog(`중지 전까지 분석된 ${countItems(state.results.analyzed.analyzed_keywords)}건으로 선별을 이어갑니다.`);
     }
 
-    addLog("선별 시작: 골든 키워드 기준을 적용합니다.");
+    const allowedGrades = normalizeGradeList(options.allowedGrades || []);
+    const analyzedKeywords = state.results.analyzed?.analyzed_keywords || [];
+    const selectionCandidates = allowedGrades.length
+        ? analyzedKeywords.filter((item) => allowedGrades.includes(resolveAnalysisGrade(item)))
+        : analyzedKeywords;
+
+    if (!selectionCandidates.length) {
+        if (allowedGrades.length) {
+            throw new Error(`선택한 등급(${allowedGrades.join(", ")})에 맞는 분석 결과가 없습니다.`);
+        }
+        throw new Error("선별할 분석 결과가 없습니다.");
+    }
+
+    addLog(
+        allowedGrades.length
+            ? `선별 시작: ${allowedGrades.join(", ")} 등급 ${countItems(selectionCandidates)}건에 골든 기준을 적용합니다.`
+            : "선별 시작: 골든 키워드 기준을 적용합니다.",
+    );
     clearStageAndDownstream("selected");
     const result = await executeStage({
         stageKey: "selected",
         endpoint: "/select",
         inputData: {
-            analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
+            analyzed_keywords: selectionCandidates,
+            select_options: allowedGrades.length
+                ? { allowed_grades: allowedGrades, mode: "grade_filter" }
+                : {},
         },
     });
 
-    state.results.selected = result;
-    addLog(`선별 완료: ${countItems(result.selected_keywords)}건`, "success");
+    state.results.selected = {
+        ...result,
+        selection_profile: {
+            mode: allowedGrades.length ? "grade_filter" : "default",
+            allowed_grades: allowedGrades,
+            candidate_count: selectionCandidates.length,
+        },
+    };
+    addLog(
+        allowedGrades.length
+            ? `선별 완료 (${allowedGrades.join(", ")}): ${countItems(result.selected_keywords)}건`
+            : `선별 완료: ${countItems(result.selected_keywords)}건`,
+        "success",
+    );
     renderAll();
-    return result;
+    return state.results.selected;
 }
 
 async function runTitleStage() {
-    if (!state.results.selected?.selected_keywords?.length) {
-        await runSelectStage();
+    const forwardSelectOptions = getForwardSelectOptions();
+    if (
+        !state.results.selected?.selected_keywords?.length
+        || !hasMatchingSelectionProfile(forwardSelectOptions.allowedGrades || [])
+    ) {
+        await runSelectStage(forwardSelectOptions);
     }
 
     const titleOptions = buildTitleOptions();
@@ -4987,6 +5939,13 @@ async function runTitleStage() {
 
 function handleResultsGridClick(event) {
     if (!(event.target instanceof Element)) {
+        return;
+    }
+
+    const resultTabTrigger = event.target.closest("[data-result-tab]");
+    if (resultTabTrigger) {
+        setActiveResultView(resultTabTrigger.getAttribute("data-result-tab") || "");
+        renderResults();
         return;
     }
 
@@ -5038,72 +5997,466 @@ function handleResultsGridClick(event) {
     applyCollectedSelection(groupItems, action === "select_group");
 }
 
+function renderResultStageTabs(resultViews, activeViewKey) {
+    return `
+        <div class="results-stage-switcher">
+            ${resultViews.map((view) => `
+                <button
+                    type="button"
+                    class="results-stage-tab ${escapeHtml(view.state || "pending")}${view.key === activeViewKey ? " active" : ""}"
+                    data-result-tab="${escapeHtml(view.key)}"
+                    aria-pressed="${view.key === activeViewKey ? "true" : "false"}"
+                >
+                    <span class="results-stage-step">${escapeHtml(view.stageLabel)}</span>
+                    <strong>${escapeHtml(view.tabTitle)}</strong>
+                    <span class="results-stage-meta">${escapeHtml(view.countLabel)}</span>
+                </button>
+            `).join("")}
+        </div>
+    `;
+}
+
 function renderResults() {
-    const cards = [];
+    const collectedItems = state.results.collected?.collected_keywords || [];
     const expandedItems = state.results.expanded?.expanded_keywords || [];
     const analyzedItems = state.results.analyzed?.analyzed_keywords || [];
     const selectedItems = state.results.selected?.selected_keywords || [];
+    const generatedTitles = state.results.titled?.generated_titles || [];
+    const selectedProfile = state.results.selected?.selection_profile || null;
+    const collectedState = state.stageStatus.collected.state;
+    const selectedState = state.stageStatus.selected.state;
+    const titledState = state.stageStatus.titled.state;
+    const expandedRunning = state.stageStatus.expanded.state === "running";
+    const analyzedRunning = state.stageStatus.analyzed.state === "running";
     const expandedCancelled = state.stageStatus.expanded.state === "cancelled";
     const analyzedCancelled = state.stageStatus.analyzed.state === "cancelled";
+    const workbenchAvailable = (
+        expandedItems.length
+        || analyzedItems.length
+        || expandedRunning
+        || analyzedRunning
+        || expandedCancelled
+        || analyzedCancelled
+        || state.stageStatus.expanded.state === "error"
+        || state.stageStatus.analyzed.state === "error"
+    );
+    const analyzedViewAvailable = analyzedItems.length || analyzedRunning || analyzedCancelled || state.stageStatus.analyzed.state === "error";
+    const resultViews = [];
 
-    if (state.results.collected?.collected_keywords) {
-        cards.push(
-            resultCard("수집 키워드", state.results.collected.collected_keywords, renderCollectedList, {
-                subtitle: "원본 쿼리별로 묶어서 바로 선택할 수 있습니다.",
+    if (collectedItems.length || collectedState !== "pending") {
+        resultViews.push({
+            key: "collected",
+            stageLabel: "1단계 수집",
+            tabTitle: "수집",
+            countLabel: collectedItems.length
+                ? `${countItems(collectedItems)}건`
+                : (collectedState === "running" ? "실행 중" : state.stageStatus.collected.message),
+            state: collectedState,
+            render: () => resultCard("수집 키워드", collectedItems, collectedItems.length ? renderCollectedList : () => '<div class="collector-empty">수집 결과를 준비하는 중입니다.</div>', {
+                subtitle: collectedItems.length
+                    ? "원본 쿼리별로 묶어서 바로 선택할 수 있습니다."
+                    : state.stageStatus.collected.message,
                 className: "collector-result-card",
+                actionsHtml: renderStageStopAction("collected"),
             }),
-        );
-    }
-    if (expandedItems.length) {
-        cards.push(
-            resultCard("확장 키워드", expandedItems, renderExpandedList, {
-                subtitle: state.stageStatus.expanded.state === "running"
-                    ? buildExpandedLiveSubtitle()
-                    : expandedCancelled
-                        ? `중지 전까지 누적된 ${countItems(expandedItems)}건입니다. 이 결과로 바로 분석을 이어갈 수 있습니다.`
-                        : "기본 12건만 먼저 보여주고, 필요하면 전체를 펼쳐 볼 수 있습니다.",
-                subtitleClassName: expandedCancelled ? "partial" : "",
-                className: "expanded-result-card",
-                actionsHtml: !analyzedItems.length
-                    ? `<button type="button" class="inline-action-btn" data-inline-action="continue_analyze">이 결과로 분석 계속</button>`
-                    : "",
-            }),
-        );
-    }
-    if (analyzedItems.length) {
-        cards.push(
-            resultCard("분석 결과", analyzedItems, renderAnalyzedList, {
-                subtitle: analyzedCancelled
-                    ? `중지 전까지 평가된 ${countItems(analyzedItems)}건입니다. 이 결과로 선별을 이어갈 수 있습니다.`
-                    : "",
-                subtitleClassName: analyzedCancelled ? "partial" : "",
-                actionsHtml: !selectedItems.length
-                    ? `<button type="button" class="inline-action-btn" data-inline-action="continue_select">이 결과로 선별 계속</button>`
-                    : "",
-            }),
-        );
-    }
-    if (selectedItems.length) {
-        cards.push(
-            resultCard("골든 키워드", selectedItems, renderSelectedList, {
-                actionsHtml: !state.results.titled?.generated_titles?.length
-                    ? `<button type="button" class="inline-action-btn" data-inline-action="continue_title">이 결과로 제목 생성</button>`
-                    : "",
-            }),
-        );
-    }
-    if (state.results.titled?.generated_titles) {
-        cards.push(resultCard("생성된 제목", state.results.titled.generated_titles, renderTitleList));
+        });
     }
 
-    elements.resultsGrid.innerHTML = cards.length > 0
-        ? cards.join("")
+    if (workbenchAvailable) {
+        resultViews.push({
+            key: "expanded",
+            stageLabel: "2단계 확장",
+            tabTitle: "확장",
+            countLabel: expandedItems.length
+                ? `확장 ${countItems(expandedItems)}건`
+                : (expandedRunning ? "실행 중" : state.stageStatus.expanded.message),
+            state: state.stageStatus.expanded.state,
+            render: () => renderKeywordWorkbenchCard(expandedItems, analyzedItems, {
+                selectedCount: selectedItems.length,
+                primaryView: "expanded",
+                displayMode: "expanded_only",
+            }),
+        });
+    }
+
+    if (analyzedViewAvailable) {
+        resultViews.push({
+            key: "analyzed",
+            stageLabel: "3단계 분석",
+            tabTitle: "분석",
+            countLabel: analyzedItems.length
+                ? `검증 ${countItems(analyzedItems)}건`
+                : (analyzedRunning ? "실행 중" : state.stageStatus.analyzed.message),
+            state: state.stageStatus.analyzed.state,
+            render: () => renderKeywordWorkbenchCard(expandedItems, analyzedItems, {
+                selectedCount: selectedItems.length,
+                primaryView: "analyzed",
+                displayMode: "analyzed_only",
+            }),
+        });
+    }
+
+    if (selectedItems.length || selectedState !== "pending") {
+        const selectedTitle = selectedProfile?.mode === "grade_filter"
+            ? "등급 선별 키워드"
+            : "골든 키워드";
+        const selectedSubtitle = selectedProfile?.allowed_grades?.length
+            ? `${selectedProfile.allowed_grades.join(", ")} 등급 키워드를 그대로 다음 단계로 보낸 결과입니다.`
+            : "";
+        resultViews.push({
+            key: "selected",
+            stageLabel: "4단계 선별",
+            tabTitle: "선별",
+            countLabel: selectedItems.length
+                ? `${countItems(selectedItems)}건`
+                : (selectedState === "running" ? "실행 중" : state.stageStatus.selected.message),
+            state: selectedState,
+            render: () => resultCard(selectedTitle, selectedItems, selectedItems.length ? renderSelectedList : () => '<div class="collector-empty">선별 결과를 준비하는 중입니다.</div>', {
+                className: "downstream-result-card",
+                subtitle: selectedItems.length ? selectedSubtitle : state.stageStatus.selected.message,
+                actionsHtml: [
+                    renderStageStopAction("selected"),
+                    selectedItems.length && !generatedTitles.length
+                        ? `<button type="button" class="inline-action-btn" data-inline-action="continue_title">이 결과로 제목 생성</button>`
+                        : "",
+                ].join(""),
+            }),
+        });
+    }
+
+    if (generatedTitles.length || titledState !== "pending") {
+        resultViews.push({
+            key: "titled",
+            stageLabel: "5단계 제목 생성",
+            tabTitle: "제목",
+            countLabel: generatedTitles.length
+                ? `${countItems(generatedTitles)}세트`
+                : (titledState === "running" ? "실행 중" : state.stageStatus.titled.message),
+            state: titledState,
+            render: () => resultCard("생성된 제목", generatedTitles, generatedTitles.length ? renderTitleList : () => '<div class="collector-empty">제목 결과를 준비하는 중입니다.</div>', {
+                className: "downstream-result-card",
+                subtitle: generatedTitles.length ? "" : state.stageStatus.titled.message,
+                actionsHtml: renderStageStopAction("titled"),
+            }),
+        });
+    }
+
+    const activeViewKey = resolveActiveResultView(resultViews);
+    const activeView = resultViews.find((view) => view.key === activeViewKey) || null;
+    const railHtml = activeViewKey === "expanded" || activeViewKey === "analyzed"
+        ? renderWorkbenchAside(expandedItems, analyzedItems)
+        : "";
+
+    elements.layoutGrid?.classList.toggle("results-first", Boolean(activeView));
+    elements.resultsGrid.innerHTML = activeView
+        ? `
+            ${renderResultStageTabs(resultViews, activeViewKey)}
+            <div class="results-stage-body">${activeView.render()}</div>
+        `
         : `
             <div class="placeholder">
-                실행 버튼을 누르면 단계별 결과와 진단 정보가 이 영역에 표시됩니다.<br />
-                수집 결과는 쿼리별로 묶어 보여주고, collector 진단은 코드 대신 읽기 쉬운 요약 카드로 정리됩니다.
+                실행 버튼을 누르면 수집 결과와 확장·검증 작업대가 이 영역에 표시됩니다.<br />
+                현재 단계 결과가 자동으로 앞으로 오고, 이전 단계는 탭으로 다시 확인할 수 있습니다.
             </div>
         `;
+
+    if (elements.resultsRail && elements.resultsRailPanel) {
+        elements.resultsRail.innerHTML = railHtml;
+        elements.resultsRailPanel.hidden = !railHtml;
+    }
+}
+
+function renderKeywordWorkbenchCard(expandedItems, analyzedItems, options = {}) {
+    const expandedRunning = state.stageStatus.expanded.state === "running";
+    const analyzedRunning = state.stageStatus.analyzed.state === "running";
+    const expandedCancelled = state.stageStatus.expanded.state === "cancelled";
+    const analyzedCancelled = state.stageStatus.analyzed.state === "cancelled";
+    const primaryView = options.primaryView === "analyzed" ? "analyzed" : "expanded";
+    const prioritizeAnalysis = primaryView === "analyzed" && (analyzedItems.length || analyzedRunning || analyzedCancelled);
+    const displayMode = options.displayMode === "expanded_only" || options.displayMode === "analyzed_only"
+        ? options.displayMode
+        : "combined";
+    const allOrigins = new Set(
+        [...expandedItems, ...analyzedItems]
+            .map((item) => String(item.origin || item.raw || item.keyword || "").trim())
+            .filter(Boolean),
+    );
+    const measuredCount = analyzedItems.filter(isMeasuredItem).length;
+    const goldenCount = analyzedItems.filter(isGoldenCandidate).length;
+    const highBidCount = analyzedItems.filter((item) => Number(item.metrics?.bid || 0) >= 500).length;
+    const queueSize = Number(state.results.expanded?.stream_meta?.queueSize || 0);
+    const measuredRatio = analyzedItems.length
+        ? `${Math.round((measuredCount / analyzedItems.length) * 100)}%`
+        : "0%";
+    const subtitleClassName = expandedCancelled || analyzedCancelled
+        ? "result-subtitle partial"
+        : "result-subtitle";
+    const actions = [];
+    const stopStageKey = primaryView === "analyzed" ? "analyzed" : "expanded";
+    const stopActionHtml = renderStageStopAction(stopStageKey);
+
+    if (stopActionHtml && !(stopStageKey === "expanded" && expandedRunning)) {
+        actions.push(stopActionHtml);
+    }
+
+    if (!analyzedItems.length && expandedItems.length) {
+        actions.push('<button type="button" class="inline-action-btn" data-inline-action="continue_analyze">이 결과로 분석 계속</button>');
+    }
+    if (!options.selectedCount && analyzedItems.length) {
+        actions.push('<button type="button" class="inline-action-btn" data-inline-action="continue_select">이 결과로 선별 계속</button>');
+    }
+
+    const expandedSection = `
+        <section class="workbench-panel">
+            <div class="workbench-panel-head">
+                <div>
+                    <p class="panel-kicker">Live Expansion</p>
+                    <h4>실시간 확장</h4>
+                </div>
+                <span class="badge">원본 ${escapeHtml(String(allOrigins.size || 0))}개</span>
+            </div>
+            ${(expandedItems.length || expandedRunning || expandedCancelled)
+                ? renderExpandedList(expandedItems)
+                : '<div class="collector-empty">확장 결과가 쌓이면 이 영역에서 실시간 누적 상태를 바로 볼 수 있습니다.</div>'}
+        </section>
+    `;
+    const analyzedSection = `
+        <section class="workbench-panel">
+            <div class="workbench-panel-head">
+                <div>
+                    <p class="panel-kicker">Validation Console</p>
+                    <h4>키워드 검증 테이블</h4>
+                </div>
+                <span class="badge">${escapeHtml(String(measuredCount))}건 실측</span>
+            </div>
+            ${(analyzedItems.length || analyzedRunning || analyzedCancelled)
+                ? renderAnalyzedList(analyzedItems)
+                : '<div class="collector-empty">확장 결과가 쌓이면 PC/MO조회, 클릭수, 입찰가 기준으로 바로 검증할 수 있습니다.</div>'}
+        </section>
+    `;
+    const orderedPanels = prioritizeAnalysis
+        ? [analyzedSection, expandedSection]
+        : [expandedSection, analyzedSection];
+    const visiblePanels = displayMode === "expanded_only"
+        ? [expandedSection]
+        : displayMode === "analyzed_only"
+            ? [analyzedSection]
+            : orderedPanels;
+
+    return `
+        <article class="result-card keyword-workbench-card">
+            <div class="workbench-head">
+                <div class="result-head">
+                    <div class="result-head-copy">
+                        <h3>확장 · 검증 작업대</h3>
+                        <p class="${subtitleClassName}">${escapeHtml(buildWorkbenchSubtitle({
+                            expandedItems,
+                            analyzedItems,
+                            measuredCount,
+                            goldenCount,
+                            highBidCount,
+                            expandedRunning,
+                            analyzedRunning,
+                            expandedCancelled,
+                            analyzedCancelled,
+                        }))}</p>
+                    </div>
+                    <div class="result-actions">
+                        <span class="result-count">확장 ${countItems(expandedItems)}건</span>
+                        <span class="result-count">검증 ${countItems(analyzedItems)}건</span>
+                        ${actions.join("")}
+                    </div>
+                </div>
+                <div class="workbench-hero-strip">
+                    <div class="collector-stat-card">
+                        <span>원본 수</span>
+                        <strong>${escapeHtml(String(allOrigins.size || 0))}</strong>
+                    </div>
+                    <div class="collector-stat-card">
+                        <span>실측 비중</span>
+                        <strong>${escapeHtml(measuredRatio)}</strong>
+                    </div>
+                    <div class="collector-stat-card">
+                        <span>${escapeHtml(getQuickCandidateLabel())}</span>
+                        <strong>${escapeHtml(String(goldenCount))}</strong>
+                    </div>
+                    <div class="collector-stat-card">
+                        <span>입찰1 500+</span>
+                        <strong>${escapeHtml(String(highBidCount))}</strong>
+                    </div>
+                    ${(expandedRunning || analyzedRunning) && queueSize
+                        ? `
+                            <div class="collector-stat-card">
+                                <span>대기</span>
+                                <strong>${escapeHtml(String(queueSize))}</strong>
+                            </div>
+                        `
+                        : ""}
+                </div>
+            </div>
+            <div class="workbench-shell">
+                <div class="workbench-main">
+                    ${visiblePanels.join("")}
+                </div>
+            </div>
+        </article>
+    `;
+}
+
+function buildWorkbenchSubtitle({
+    expandedItems,
+    analyzedItems,
+    measuredCount,
+    goldenCount,
+    highBidCount,
+    expandedRunning,
+    analyzedRunning,
+    expandedCancelled,
+    analyzedCancelled,
+}) {
+    const parts = [];
+    if (expandedRunning) {
+        parts.push(buildExpandedLiveSubtitle());
+    }
+    if (analyzedRunning) {
+        parts.push(state.stageStatus.analyzed.message || "실시간 검증 중");
+    }
+    if (!parts.length && (expandedCancelled || analyzedCancelled)) {
+        if (expandedCancelled) {
+            parts.push(`중지 전까지 확장 ${countItems(expandedItems)}건이 누적됐습니다.`);
+        }
+        if (analyzedCancelled) {
+            parts.push(`중지 전까지 검증 ${countItems(analyzedItems)}건이 평가됐습니다.`);
+        }
+    }
+    if (!parts.length && analyzedItems.length) {
+        parts.push(`실측 ${measuredCount}건 · ${getQuickCandidateLabel()} ${goldenCount}건 · 입찰1위 500원+ ${highBidCount}건`);
+    }
+    if (!parts.length && expandedItems.length) {
+        parts.push(`확장 결과 ${countItems(expandedItems)}건을 바로 검증으로 넘길 수 있습니다.`);
+    }
+    return parts.join(" · ") || "실시간 확장과 검증 결과를 한 화면에서 이어서 비교합니다.";
+}
+
+function renderWorkbenchAside(expandedItems, analyzedItems) {
+    const bidLeaders = getTopAnalyzedItems(analyzedItems, (item) => item.metrics?.bid);
+    const volumeLeaders = getTopAnalyzedItems(analyzedItems, (item) => item.metrics?.volume);
+    const modeSummary = summarizeAnalysisModes(analyzedItems);
+    const typeSummary = summarizeExpandedTypes(expandedItems);
+    const scoreGuideCard = `
+        <section class="workbench-side-card score-guide-card">
+            <div class="workbench-side-head">
+                <strong>스코어 등급 안내</strong>
+                <span>샘플 기준 공식을 현재 검증 화면에 맞춰 바로 볼 수 있게 정리했습니다.</span>
+            </div>
+            <div class="workbench-guide-list">
+                ${[
+                    ["S", "85+ 최고 가치"],
+                    ["A", "70+ 높은 가치"],
+                    ["B", "55+ 양호"],
+                    ["C", "40+ 보통"],
+                    ["D", "25+ 낮음"],
+                    ["F", "25 미만 낮음"],
+                ].map(([grade, label]) => `
+                    <div class="workbench-guide-row">
+                        ${renderGradeBadge(grade)}
+                        <span>${escapeHtml(label)}</span>
+                    </div>
+                `).join("")}
+            </div>
+            <div class="workbench-guide-note">
+                <strong>스코어 = CPC(40%) + 검색량(35%) + 희귀성(25%)</strong><br />
+                CPC가 높고, 검색량이 많고, 블로그 글이 적을수록 높은 점수로 봅니다.
+            </div>
+        </section>
+    `;
+
+    return `
+        ${renderWorkbenchFeedCard(
+            "고가 키워드",
+            "입찰1위 기준 상단 후보",
+            bidLeaders,
+            "입찰 데이터가 있는 키워드가 아직 없습니다.",
+            (item) => `입찰1 ${formatNumber(item.metrics?.bid)} · CPC ${formatNumber(item.metrics?.cpc)}`,
+        )}
+        ${renderWorkbenchFeedCard(
+            "인기 키워드",
+            "총조회 기준 상단 후보",
+            volumeLeaders,
+            "조회 데이터가 있는 키워드가 아직 없습니다.",
+            (item) => `총조회 ${formatNumber(item.metrics?.volume)} · 블로그 ${formatNumber(item.metrics?.blog_results)}`,
+        )}
+        <section class="workbench-side-card">
+            <div class="workbench-side-head">
+                <strong>출처 / 유형</strong>
+                <span>현재 검증에 섞인 측정 방식과 확장 유형입니다.</span>
+            </div>
+            <div class="workbench-chip-strip">
+                <span class="analysis-source-pill measured">실측 ${escapeHtml(String(modeSummary.measured))}건</span>
+                <span class="analysis-source-pill estimated">추정 ${escapeHtml(String(modeSummary.estimated))}건</span>
+                ${typeSummary.map((item) => `
+                    <span class="analysis-source-pill type">${escapeHtml(formatExpandedType(item.type))} ${escapeHtml(String(item.count))}건</span>
+                `).join("")}
+            </div>
+        </section>
+        ${scoreGuideCard}
+    `;
+}
+
+function renderWorkbenchFeedCard(title, subtitle, entries, emptyText, metaBuilder) {
+    return `
+        <section class="workbench-side-card">
+            <div class="workbench-side-head">
+                <strong>${escapeHtml(title)}</strong>
+                <span>${escapeHtml(subtitle)}</span>
+            </div>
+            ${entries.length
+                ? `
+                    <div class="workbench-feed-list">
+                        ${entries.map(({ item }, index) => `
+                            <div class="workbench-feed-row">
+                                <span class="workbench-feed-rank ${index < 3 ? "top" : ""}">${escapeHtml(String(index + 1))}</span>
+                                <div class="workbench-feed-copy">
+                                    <strong>${escapeHtml(item.keyword || "-")}</strong>
+                                    <span>${escapeHtml(metaBuilder(item))}</span>
+                                </div>
+                            </div>
+                        `).join("")}
+                    </div>
+                `
+                : `<div class="collector-empty">${escapeHtml(emptyText)}</div>`}
+        </section>
+    `;
+}
+
+function getTopAnalyzedItems(items, valueSelector, limit = 8) {
+    return [...(items || [])]
+        .map((item) => ({
+            item,
+            value: Number(valueSelector(item) || 0),
+        }))
+        .filter((entry) => entry.value > 0)
+        .sort((left, right) => {
+            if (right.value !== left.value) {
+                return right.value - left.value;
+            }
+            return Number(right.item.score || 0) - Number(left.item.score || 0);
+        })
+        .slice(0, limit);
+}
+
+function summarizeAnalysisModes(items) {
+    return (items || []).reduce(
+        (summary, item) => {
+            if (isMeasuredItem(item)) {
+                summary.measured += 1;
+            } else {
+                summary.estimated += 1;
+            }
+            return summary;
+        },
+        { measured: 0, estimated: 0 },
+    );
 }
 
 function resultCard(title, items, renderer, options = {}) {
@@ -5130,21 +6483,34 @@ function createDefaultAnalyzedFilters() {
     return {
         query: "",
         minScore: "",
-        minVolume: "",
+        minPcSearch: "",
+        minMoSearch: "",
+        minTotalSearch: "1",
+        maxTotalSearch: "",
+        minBlog: "",
+        minPcClicks: "",
+        minMoClicks: "",
+        minTotalClicks: "",
         minCpc: "",
-        minBid: "",
+        minBid1: "",
+        minBid2: "",
+        minBid3: "",
         maxCompetition: "",
         priority: "all",
+        measured: "all",
     };
 }
 
 function getAnalyzedFilters() {
-    return state.analyzedFilters || createDefaultAnalyzedFilters();
+    return {
+        ...createDefaultAnalyzedFilters(),
+        ...(state.analyzedFilters || {}),
+    };
 }
 
 function hasActiveAnalyzedFilters(filters = getAnalyzedFilters()) {
     return Object.entries(filters).some(([key, value]) => {
-        if (key === "priority") {
+        if (key === "priority" || key === "measured") {
             return value && value !== "all";
         }
         return String(value || "").trim() !== "";
@@ -5152,21 +6518,42 @@ function hasActiveAnalyzedFilters(filters = getAnalyzedFilters()) {
 }
 
 function coerceFilterNumber(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    if (typeof value === "string" && value.trim() === "") {
+        return null;
+    }
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
 }
 
 function applyAnalyzedFilters(items) {
     const filters = getAnalyzedFilters();
+    const selectedGrades = new Set(getSelectedGradeFilters());
     const query = String(filters.query || "").trim().toLowerCase();
     const minScore = coerceFilterNumber(filters.minScore);
-    const minVolume = coerceFilterNumber(filters.minVolume);
+    const minPcSearch = coerceFilterNumber(filters.minPcSearch);
+    const minMoSearch = coerceFilterNumber(filters.minMoSearch);
+    const minTotalSearch = coerceFilterNumber(filters.minTotalSearch ?? filters.minVolume);
+    const maxTotalSearch = coerceFilterNumber(filters.maxTotalSearch);
+    const minBlog = coerceFilterNumber(filters.minBlog);
+    const minPcClicks = coerceFilterNumber(filters.minPcClicks);
+    const minMoClicks = coerceFilterNumber(filters.minMoClicks);
+    const minTotalClicks = coerceFilterNumber(filters.minTotalClicks);
     const minCpc = coerceFilterNumber(filters.minCpc);
-    const minBid = coerceFilterNumber(filters.minBid);
+    const minBid1 = coerceFilterNumber(filters.minBid1 ?? filters.minBid);
+    const minBid2 = coerceFilterNumber(filters.minBid2);
+    const minBid3 = coerceFilterNumber(filters.minBid3);
     const maxCompetition = coerceFilterNumber(filters.maxCompetition);
     const priority = String(filters.priority || "all");
+    const measured = String(filters.measured || "all");
 
     return (items || []).filter((item) => {
+        const itemGrade = resolveAnalysisGrade(item);
+        if (selectedGrades.size && !selectedGrades.has(itemGrade)) {
+            return false;
+        }
         const keyword = String(item.keyword || "");
         if (query && !keyword.toLowerCase().includes(query)) {
             return false;
@@ -5174,16 +6561,49 @@ function applyAnalyzedFilters(items) {
         if (priority !== "all" && String(item.priority || "") !== priority) {
             return false;
         }
+        if (measured === "measured" && !isMeasuredItem(item)) {
+            return false;
+        }
+        if (measured === "estimated" && isMeasuredItem(item)) {
+            return false;
+        }
         if (minScore !== null && Number(item.score || 0) < minScore) {
             return false;
         }
-        if (minVolume !== null && Number(item.metrics?.volume || 0) < minVolume) {
+        if (minPcSearch !== null && Number(item.metrics?.pc_searches || 0) < minPcSearch) {
+            return false;
+        }
+        if (minMoSearch !== null && Number(item.metrics?.mobile_searches || 0) < minMoSearch) {
+            return false;
+        }
+        if (minTotalSearch !== null && Number(item.metrics?.volume || 0) < minTotalSearch) {
+            return false;
+        }
+        if (maxTotalSearch !== null && Number(item.metrics?.volume || 0) > maxTotalSearch) {
+            return false;
+        }
+        if (minBlog !== null && Number(item.metrics?.blog_results || 0) < minBlog) {
+            return false;
+        }
+        if (minPcClicks !== null && Number(item.metrics?.pc_clicks || 0) < minPcClicks) {
+            return false;
+        }
+        if (minMoClicks !== null && Number(item.metrics?.mobile_clicks || 0) < minMoClicks) {
+            return false;
+        }
+        if (minTotalClicks !== null && Number(item.metrics?.total_clicks || 0) < minTotalClicks) {
             return false;
         }
         if (minCpc !== null && Number(item.metrics?.cpc || 0) < minCpc) {
             return false;
         }
-        if (minBid !== null && Number(item.metrics?.bid || 0) < minBid) {
+        if (minBid1 !== null && Number(item.metrics?.bid || 0) < minBid1) {
+            return false;
+        }
+        if (minBid2 !== null && Number(item.metrics?.bid_2 || 0) < minBid2) {
+            return false;
+        }
+        if (minBid3 !== null && Number(item.metrics?.bid_3 || 0) < minBid3) {
             return false;
         }
         if (maxCompetition !== null && Number(item.metrics?.competition || 0) > maxCompetition) {
@@ -5193,13 +6613,150 @@ function applyAnalyzedFilters(items) {
     });
 }
 
+function isMeasuredItem(item) {
+    return String(item?.analysis_mode || "") === "search_metrics";
+}
+
+function isGoldenCandidate(item) {
+    const volume = Number(item?.metrics?.volume || 0);
+    const blogResults = Number(item?.metrics?.blog_results || 0);
+    return volume >= 1000 && blogResults > 0 && blogResults <= 10000;
+}
+
+function getQuickCandidateLabel() {
+    return "샘플식 후보";
+}
+
+function summarizeGradeCounts(items) {
+    const counts = new Map(GRADE_ORDER.map((grade) => [grade, 0]));
+    (items || []).forEach((item) => {
+        const grade = resolveAnalysisGrade(item);
+        if (!grade) {
+            return;
+        }
+        counts.set(grade, (counts.get(grade) || 0) + 1);
+    });
+    return GRADE_ORDER.map((grade) => ({
+        grade,
+        count: counts.get(grade) || 0,
+    }));
+}
+
+function countItemsByGrades(items, grades) {
+    const allowedGrades = new Set(normalizeGradeList(grades));
+    if (!allowedGrades.size) {
+        return 0;
+    }
+    return (items || []).filter((item) => allowedGrades.has(resolveAnalysisGrade(item))).length;
+}
+
+function renderAnalyzedGradeBoard(items, visibleItems = null) {
+    const gradeCounts = summarizeGradeCounts(items);
+    const selectedGrades = getSelectedGradeFilters();
+    const selectedSet = new Set(selectedGrades);
+    const selectedCount = Array.isArray(visibleItems) ? countItems(visibleItems) : countItemsByGrades(items, selectedGrades);
+    const allSelected = selectedGrades.length === GRADE_ORDER.length;
+    const saSelected = ["S", "A"].every((grade) => selectedSet.has(grade)) && selectedGrades.length === 2;
+
+    return `
+        <div class="analysis-grade-board">
+            <div class="analysis-grade-head">
+                <strong>등급별 개수 및 즉시 필터</strong>
+                <span>${escapeHtml(
+                    allSelected
+                        ? `전체 등급 ${countItems(items)}건이 현재 테이블에 반영되고 있습니다.`
+                        : selectedGrades.length
+                            ? `선택 등급 ${selectedGrades.join(", ")} ${selectedCount}건이 현재 테이블에 바로 반영됩니다.`
+                            : "등급을 1개 이상 선택해 주세요.",
+                )}</span>
+            </div>
+            <div class="analysis-grade-strip">
+                ${gradeCounts.map(({ grade, count }) => `
+                    <button
+                        type="button"
+                        class="ghost-chip grade-toggle-chip analysis-grade-chip${selectedSet.has(grade) ? " active" : ""}"
+                        data-inline-action="toggle_analysis_grade"
+                        data-grade-toggle="${escapeHtml(grade)}"
+                        aria-pressed="${selectedSet.has(grade) ? "true" : "false"}"
+                    >
+                        ${renderGradeBadge(grade)}
+                        <span class="analysis-grade-chip-copy">
+                            <strong>${escapeHtml(grade)}</strong>
+                            <span>${escapeHtml(`${formatNumber(count)}건`)}</span>
+                        </span>
+                    </button>
+                `).join("")}
+            </div>
+            <div class="analysis-grade-actions">
+                <button
+                    type="button"
+                    class="ghost-chip${allSelected ? " active" : ""}"
+                    data-inline-action="apply_analysis_grade_preset"
+                    data-grade-preset="all"
+                >전체</button>
+                <button
+                    type="button"
+                    class="ghost-chip${saSelected ? " active" : ""}"
+                    data-inline-action="apply_analysis_grade_preset"
+                    data-grade-preset="sa"
+                >S·A</button>
+                <button
+                    type="button"
+                    class="inline-action-btn analysis-grade-run"
+                    data-inline-action="run_analysis_grade_select"
+                    ${selectedCount > 0 ? "" : "disabled"}
+                >선택 등급 선별 실행</button>
+            </div>
+        </div>
+    `;
+}
+
+function renderGradeBadge(grade) {
+    const safeGrade = String(grade || "-").trim().toUpperCase();
+    const tone = /^[SABCDF]$/.test(safeGrade) ? safeGrade.toLowerCase() : "unknown";
+    return `<span class="table-grade-badge grade-${escapeHtml(tone)}">${escapeHtml(safeGrade)}</span>`;
+}
+
+function renderAnalysisKeywordCell(item) {
+    const meta = [];
+    if (item.origin && item.origin !== item.keyword) {
+        meta.push(`원본 ${item.origin}`);
+    }
+    if (item.type) {
+        meta.push(formatExpandedType(item.type));
+    }
+    return `
+        <div class="analysis-keyword-cell">
+            <strong>${escapeHtml(item.keyword || "-")}</strong>
+            ${meta.length ? `<span>${escapeHtml(meta.join(" · "))}</span>` : ""}
+        </div>
+    `;
+}
+
+function renderAnalysisSourceCell(item) {
+    const badges = [
+        `<span class="analysis-source-pill ${isMeasuredItem(item) ? "measured" : "estimated"}">${escapeHtml(formatMeasuredState(item))}</span>`,
+    ];
+    if (item.type) {
+        badges.push(`<span class="analysis-source-pill type">${escapeHtml(formatExpandedType(item.type))}</span>`);
+    }
+    if (item.origin && item.origin !== item.keyword) {
+        badges.push(`<span class="analysis-source-pill origin">${escapeHtml(`원본 ${item.origin}`)}</span>`);
+    }
+    return `<div class="analysis-source-cell">${badges.join("")}</div>`;
+}
+
 function renderAnalyzedList(items) {
     const filters = getAnalyzedFilters();
     const filteredItems = applyAnalyzedFilters(items);
+    const measuredCount = filteredItems.filter(isMeasuredItem).length;
+    const goldenCount = filteredItems.filter(isGoldenCandidate).length;
+    const highBidCount = filteredItems.filter((item) => Number(item.metrics?.bid || 0) >= 500).length;
+    const typeCount = new Set(filteredItems.map((item) => String(item.type || "").trim()).filter(Boolean)).size;
     const rows = filteredItems.map((item) => `
-        <tr>
-            <td><strong>${escapeHtml(item.keyword || "-")}</strong></td>
-            <td>${escapeHtml(item.grade || "-")}</td>
+        <tr class="${isMeasuredItem(item) ? "measured-row" : "estimated-row"}">
+            <td>${renderAnalysisKeywordCell(item)}</td>
+            <td>${renderGradeBadge(resolveAnalysisGrade(item))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.score))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_searches))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_searches))}</td>
@@ -5207,29 +6764,83 @@ function renderAnalyzedList(items) {
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.blog_results))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_clicks))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_clicks))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.total_clicks))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.cpc))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid))}</td>
-            <td>${escapeHtml(formatMeasuredState(item))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid_2))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid_3))}</td>
+            <td>${renderAnalysisSourceCell(item)}</td>
         </tr>
     `).join("");
 
     return `
         <div class="analysis-console">
-            <div class="analysis-filter-bar">
-                <input class="analysis-filter-input" type="search" data-analyzed-filter="query" value="${escapeHtml(filters.query)}" placeholder="키워드 검색..." />
-                <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minScore" value="${escapeHtml(filters.minScore)}" placeholder="점수↑" />
-                <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minVolume" value="${escapeHtml(filters.minVolume)}" placeholder="조회↑" />
-                <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minCpc" value="${escapeHtml(filters.minCpc)}" placeholder="CPC↑" />
-                <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid" value="${escapeHtml(filters.minBid)}" placeholder="입찰↑" />
-                <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="maxCompetition" value="${escapeHtml(filters.maxCompetition)}" placeholder="경쟁↓" />
-                <select class="analysis-filter-select" data-analyzed-filter="priority">
-                    <option value="all"${filters.priority === "all" ? " selected" : ""}>등급 전체</option>
-                    <option value="high"${filters.priority === "high" ? " selected" : ""}>상</option>
-                    <option value="medium"${filters.priority === "medium" ? " selected" : ""}>중</option>
-                    <option value="low"${filters.priority === "low" ? " selected" : ""}>하</option>
-                </select>
-                <button type="button" class="ghost-chip" data-inline-action="reset_analyzed_filters">필터 초기화</button>
-                <span class="analysis-filter-summary">표시 ${filteredItems.length} / 전체 ${countItems(items)}건</span>
+            <div class="analysis-summary-strip">
+                <div class="collector-stat-card">
+                    <span>표시 키워드</span>
+                    <strong>${escapeHtml(String(filteredItems.length))}</strong>
+                </div>
+                <div class="collector-stat-card">
+                    <span>실측</span>
+                    <strong>${escapeHtml(String(measuredCount))}</strong>
+                </div>
+                <div class="collector-stat-card">
+                    <span>${escapeHtml(getQuickCandidateLabel())}</span>
+                    <strong>${escapeHtml(String(goldenCount))}</strong>
+                </div>
+                <div class="collector-stat-card">
+                    <span>입찰1 500+</span>
+                    <strong>${escapeHtml(String(highBidCount))}</strong>
+                </div>
+                <div class="collector-stat-card">
+                    <span>출처 유형</span>
+                    <strong>${escapeHtml(String(typeCount))}</strong>
+                </div>
+            </div>
+            <div class="analysis-filter-tip">
+                <strong>필터 팁</strong>
+                <span>합계↑에 1을 넣으면 검색량 0 키워드를 먼저 걸러낼 수 있고, 입찰1↑ 500은 광고 단가가 붙는 키워드만 빠르게 남깁니다.</span>
+            </div>
+            <div class="analysis-filter-tip">
+                <strong>참고</strong>
+                <span>\`${escapeHtml(getQuickCandidateLabel())}\`는 S등급이 아니라 샘플식 빠른 체크입니다. 기준은 총조회 1,000 이상 + 블로그 10,000 이하이고, 실제 다음 단계 전송은 아래 등급 선택을 기준으로 동작합니다.</span>
+            </div>
+            ${renderAnalyzedGradeBoard(items, filteredItems)}
+            <div class="analysis-filter-stack">
+                <div class="analysis-filter-row primary">
+                    <input class="analysis-filter-input" type="search" data-analyzed-filter="query" value="${escapeHtml(filters.query)}" placeholder="키워드 검색..." />
+                    <select class="analysis-filter-select" data-analyzed-filter="priority">
+                        <option value="all"${filters.priority === "all" ? " selected" : ""}>우선순위 전체</option>
+                        <option value="high"${filters.priority === "high" ? " selected" : ""}>상</option>
+                        <option value="medium"${filters.priority === "medium" ? " selected" : ""}>중</option>
+                        <option value="low"${filters.priority === "low" ? " selected" : ""}>하</option>
+                    </select>
+                    <select class="analysis-filter-select" data-analyzed-filter="measured">
+                        <option value="all"${filters.measured === "all" ? " selected" : ""}>측정 전체</option>
+                        <option value="measured"${filters.measured === "measured" ? " selected" : ""}>실측만</option>
+                        <option value="estimated"${filters.measured === "estimated" ? " selected" : ""}>추정만</option>
+                    </select>
+                    <button type="button" class="ghost-chip" data-inline-action="reset_analyzed_filters">필터 초기화</button>
+                    <span class="analysis-filter-summary">표시 ${filteredItems.length} / 전체 ${countItems(items)}건</span>
+                </div>
+                <div class="analysis-filter-row metrics">
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minPcSearch" value="${escapeHtml(filters.minPcSearch)}" placeholder="PC조회↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minMoSearch" value="${escapeHtml(filters.minMoSearch)}" placeholder="MO조회↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minTotalSearch" value="${escapeHtml(filters.minTotalSearch)}" placeholder="합계↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="maxTotalSearch" value="${escapeHtml(filters.maxTotalSearch)}" placeholder="합계↓" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBlog" value="${escapeHtml(filters.minBlog)}" placeholder="블로그↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minScore" value="${escapeHtml(filters.minScore)}" placeholder="점수↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minCpc" value="${escapeHtml(filters.minCpc)}" placeholder="CPC↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="maxCompetition" value="${escapeHtml(filters.maxCompetition)}" placeholder="경쟁↓" />
+                </div>
+                <div class="analysis-filter-row metrics">
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minPcClicks" value="${escapeHtml(filters.minPcClicks)}" placeholder="PC클릭↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minMoClicks" value="${escapeHtml(filters.minMoClicks)}" placeholder="MO클릭↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minTotalClicks" value="${escapeHtml(filters.minTotalClicks)}" placeholder="클릭합↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid1" value="${escapeHtml(filters.minBid1)}" placeholder="입찰1↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid2" value="${escapeHtml(filters.minBid2)}" placeholder="입찰2↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid3" value="${escapeHtml(filters.minBid3)}" placeholder="입찰3↑" />
+                </div>
             </div>
             <div class="expanded-table-wrap full">
                 <table class="expanded-table analyzed-table compact">
@@ -5244,12 +6855,15 @@ function renderAnalyzedList(items) {
                             <th>블로그</th>
                             <th>PC클릭</th>
                             <th>MO클릭</th>
+                            <th>클릭합</th>
                             <th>CPC</th>
                             <th>1위입찰</th>
+                            <th>2위입찰</th>
+                            <th>3위입찰</th>
                             <th>출처</th>
                         </tr>
                     </thead>
-                    <tbody>${rows || `<tr><td colspan="12">조건에 맞는 키워드가 없습니다.</td></tr>`}</tbody>
+                    <tbody>${rows || `<tr><td colspan="15">조건에 맞는 키워드가 없습니다.</td></tr>`}</tbody>
                 </table>
             </div>
         </div>
@@ -5260,7 +6874,8 @@ function renderSelectedList(items) {
     const rows = (items || []).map((item, index) => `
         <tr>
             <td class="num-cell">${escapeHtml(String(index + 1))}</td>
-            <td><strong>${escapeHtml(item.keyword || "-")}</strong></td>
+            <td>${renderAnalysisKeywordCell(item)}</td>
+            <td>${renderGradeBadge(resolveAnalysisGrade(item))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.score))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_searches))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_searches))}</td>
@@ -5268,7 +6883,7 @@ function renderSelectedList(items) {
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.blog_results))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.cpc))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid))}</td>
-            <td>${escapeHtml(formatMeasuredState(item))}</td>
+            <td>${renderAnalysisSourceCell(item)}</td>
         </tr>
     `).join("");
 
@@ -5280,6 +6895,7 @@ function renderSelectedList(items) {
                         <tr>
                             <th>#</th>
                             <th>키워드</th>
+                            <th>등급</th>
                             <th>점수</th>
                             <th>PC조회</th>
                             <th>MO조회</th>
@@ -5290,7 +6906,7 @@ function renderSelectedList(items) {
                             <th>출처</th>
                         </tr>
                     </thead>
-                    <tbody>${rows || `<tr><td colspan="10">선별 결과가 없습니다.</td></tr>`}</tbody>
+                    <tbody>${rows || `<tr><td colspan="11">선별 결과가 없습니다.</td></tr>`}</tbody>
                 </table>
             </div>
         </div>
@@ -5371,11 +6987,41 @@ function handleResultsGridClick(event) {
         return;
     }
 
+    const resultTabTrigger = event.target.closest("[data-result-tab]");
+    if (resultTabTrigger) {
+        setActiveResultView(resultTabTrigger.getAttribute("data-result-tab") || "");
+        renderResults();
+        return;
+    }
+
     const inlineTrigger = event.target.closest("[data-inline-action]");
     if (inlineTrigger) {
         const action = inlineTrigger.getAttribute("data-inline-action") || "";
+        if (action === "toggle_analysis_grade") {
+            toggleGradeFilter(inlineTrigger.getAttribute("data-grade-toggle") || "");
+            return;
+        }
+        if (action === "apply_analysis_grade_preset") {
+            applyGradePreset(inlineTrigger.getAttribute("data-grade-preset") || "");
+            return;
+        }
+        if (action === "run_analysis_grade_select") {
+            const grades = getSelectedGradeFilters();
+            if (!grades.length) {
+                return;
+            }
+            runWithGuard(
+                () => runThroughGradeSelect(grades),
+                `${buildGradeRunLabel(grades)} 선별 실행 중`,
+            );
+            return;
+        }
         if (action === "reset_analyzed_filters") {
             resetAnalyzedFilters();
+            return;
+        }
+        if (action === "stop_stage_run") {
+            cancelActiveStream();
             return;
         }
         if (action === "stop_expand_stream") {
@@ -5427,7 +7073,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("resultsGrid")?.addEventListener("input", handleResultsGridInput);
 });
 
-function resetAll() {
+function resetAllLegacy() {
     state.results = createEmptyResults();
     state.stageStatus = createInitialStageStatus();
     state.diagnostics = createEmptyDiagnostics();
@@ -5439,25 +7085,35 @@ function resetAll() {
     addLog("결과와 디버그 정보를 초기화했습니다.");
 }
 
-function renderInputState() {
+function renderInputStateLegacy() {
     const mode = getCollectorMode();
     const categoryMode = mode === "category";
     const selectedCount = getSelectedCollectedItems().length;
     const expandCount = parseKeywordText(elements.expandManualInput?.value || "").length;
     const analyzeCount = parseKeywordText(elements.analyzeManualInput?.value || "").length;
-    const expandUsesManual = elements.expandInputSource?.value === "manual_text";
-    const analyzeUsesManual = elements.analyzeInputSource?.value === "manual_text";
+    const expandSource = elements.expandInputSource?.value || "collector_all";
+    const analyzeSource = elements.analyzeInputSource?.value || "expanded_results";
+    const expandUsesManual = expandSource === "manual_text";
+    const analyzeUsesManual = analyzeSource === "manual_text";
     const usesTrendSource = categoryMode && elements.categorySourceInput?.value === "naver_trend";
 
     setBlocksVisibility(elements.modeVisibilityBlocks, mode, "modeVisibility");
+    setBlocksVisibility(elements.expandSourceVisibilityBlocks, expandSource, "expandSourceVisibility");
+    setBlocksVisibility(elements.analyzeSourceVisibilityBlocks, analyzeSource, "analyzeSourceVisibility");
 
     if (elements.selectedCollectedCount) {
-        elements.selectedCollectedCount.textContent = expandUsesManual
-            ? `직접 입력 ${expandCount}건`
-            : `선택 ${selectedCount}건`;
+        if (expandUsesManual) {
+            elements.selectedCollectedCount.textContent = `직접 입력 ${expandCount}건`;
+        } else if (expandSource === "collector_selected") {
+            elements.selectedCollectedCount.textContent = `선택 ${selectedCount}건`;
+        } else {
+            elements.selectedCollectedCount.textContent = "수집 결과 전체";
+        }
     }
     if (elements.manualAnalyzeCount) {
-        elements.manualAnalyzeCount.textContent = `직접 입력 ${analyzeCount}건`;
+        elements.manualAnalyzeCount.textContent = analyzeUsesManual
+            ? `직접 입력 ${analyzeCount}건`
+            : "확장 결과 사용";
     }
     if (elements.expandManualInput) {
         elements.expandManualInput.disabled = !expandUsesManual;

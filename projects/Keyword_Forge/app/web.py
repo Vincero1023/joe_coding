@@ -19,7 +19,7 @@ from app.expander.utils.tokenizer import normalize_key
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260319-guide-pages-v2"
+_ASSET_VERSION = "20260319-collect-compact-v27"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -344,7 +344,6 @@ def _render_guide_detail(guide_slug: str) -> str:
 
 def _render_home() -> str:
     category_options = _render_category_options()
-    guide_panel = _render_guide_panel()
     category_source_options = "".join(
         f'<option value="{source}"{" selected" if source == DEFAULT_CATEGORY_SOURCE else ""}>'
         f'{"네이버 트렌드" if source == "naver_trend" else "검색 preset fallback"}'
@@ -398,8 +397,6 @@ def _render_home() -> str:
             </div>
         </header>
 
-        {guide_panel}
-
         <main class="layout-grid">
             <section class="panel summary-panel">
                 <div class="panel-head">
@@ -424,6 +421,16 @@ def _render_home() -> str:
 
             </section>
 
+            <section class="panel insights-panel" id="resultsRailPanel" hidden>
+                <div class="panel-head">
+                    <div>
+                        <p class="panel-kicker">Insights</p>
+                        <h2>실시간 인사이트</h2>
+                    </div>
+                </div>
+                <div id="resultsRail" class="results-rail"></div>
+            </section>
+
             <section class="panel control-panel">
                 <div class="panel-head">
                     <div>
@@ -436,6 +443,16 @@ def _render_home() -> str:
                         <button type="button" class="ghost-chip" data-preset="food">맛집 예시</button>
                     </div>
                 </div>
+
+                <div class="control-stack" id="controlStack">
+                <section class="control-stage-block control-stage-collect" data-control-block="collect">
+                    <div class="control-stage-head">
+                        <div>
+                            <p class="panel-kicker">Collect Setup</p>
+                            <h3>수집 설정</h3>
+                        </div>
+                        <span class="badge">1단계</span>
+                    </div>
 
                 <div class="form-grid">
                     <div class="field-block mode-block">
@@ -456,19 +473,54 @@ def _render_home() -> str:
                         </label>
                     </div>
 
-                    <label class="field-block" data-mode-visibility="category">
-                        <span class="field-label">카테고리</span>
-                        <select id="categoryInput">
-                            {category_options}
-                        </select>
-                    </label>
+                    <div class="category-settings-grid" data-mode-visibility="category">
+                        <label class="field-block category-setting-card">
+                            <span class="field-label">카테고리</span>
+                            <select id="categoryInput">
+                                {category_options}
+                            </select>
+                        </label>
 
-                    <label class="field-block" data-mode-visibility="category">
-                        <span class="field-label">카테고리 수집 소스</span>
-                        <select id="categorySourceInput">
-                            {category_source_options}
-                        </select>
-                    </label>
+                        <label class="field-block category-setting-card">
+                            <span class="field-label">카테고리 수집 소스</span>
+                            <select id="categorySourceInput">
+                                {category_source_options}
+                            </select>
+                        </label>
+
+                        <label class="field-block category-setting-card">
+                            <span class="field-label">Creator Advisor 서비스</span>
+                            <select id="trendServiceInput">
+                                {trend_service_options}
+                            </select>
+                        </label>
+
+                        <label class="field-block category-setting-card">
+                            <span class="field-label">트렌드 날짜</span>
+                            <input id="trendDateInput" type="date" />
+                        </label>
+
+                        <label class="field-block category-setting-card">
+                            <span class="field-label">로컬 브라우저</span>
+                            <select id="trendBrowserInput">
+                                <option value="auto">자동 감지</option>
+                                <option value="edge">Microsoft Edge</option>
+                                <option value="chrome">Google Chrome</option>
+                                <option value="firefox">Mozilla Firefox</option>
+                            </select>
+                        </label>
+
+                        <div class="field-block category-setting-card session-helper-card">
+                            <span class="field-label">Creator Advisor 로그인</span>
+                            <input
+                                id="trendCookieInput"
+                                type="hidden"
+                                value=""
+                            />
+                            <button type="button" class="primary-btn session-helper-btn" id="launchLoginBrowserButton">전용 로그인 브라우저 열기</button>
+                            <p class="input-help compact-help">전용 프로필에서 로그인하면 세션을 자동 저장해 다음 수집에 바로 사용합니다.</p>
+                        </div>
+                    </div>
 
                     <label class="field-block" data-mode-visibility="seed" hidden>
                         <span class="field-label">시드 키워드</span>
@@ -478,46 +530,6 @@ def _render_home() -> str:
                     <div class="field-block field-block-wide collector-inline-actions" data-mode-visibility="seed" hidden>
                         <div class="action-row action-row-tight">
                             <button type="button" class="subtle-btn" data-run-action="collect">수집만 실행</button>
-                        </div>
-                    </div>
-
-                    <label class="field-block" data-mode-visibility="category">
-                        <span class="field-label">Creator Advisor 서비스</span>
-                        <select id="trendServiceInput">
-                            {trend_service_options}
-                        </select>
-                    </label>
-
-                    <label class="field-block" data-mode-visibility="category">
-                        <span class="field-label">트렌드 날짜</span>
-                        <input id="trendDateInput" type="date" />
-                    </label>
-
-                    <label class="field-block" data-mode-visibility="category">
-                        <span class="field-label">로컬 브라우저</span>
-                        <select id="trendBrowserInput">
-                            <option value="auto">자동 감지</option>
-                            <option value="edge">Microsoft Edge</option>
-                            <option value="chrome">Google Chrome</option>
-                            <option value="firefox">Mozilla Firefox</option>
-                        </select>
-                    </label>
-
-                    <label class="field-block field-block-wide" data-mode-visibility="category">
-                        <span class="field-label">Creator Advisor 쿠키</span>
-                        <input
-                            id="trendCookieInput"
-                            type="password"
-                            placeholder="NID_AUT=...; NID_SES=..."
-                        />
-                    </label>
-
-                    <div class="field-block field-block-wide local-action-block" data-mode-visibility="category">
-                        <span class="field-label">로컬 세션 도우미</span>
-                        <div class="local-action-row">
-                            <button type="button" class="primary-btn" id="launchLoginBrowserButton">전용 로그인 브라우저 열기</button>
-                            <button type="button" class="ghost-btn" id="loadLocalCookieButton">브라우저에서 쿠키 불러오기</button>
-                            <span id="localCookieStatus" class="input-help compact-help">아직 불러온 로컬 세션이 없습니다.</span>
                         </div>
                     </div>
 
@@ -541,6 +553,17 @@ def _render_home() -> str:
                     <label class="check-chip" data-mode-visibility="category"><input id="trendFallbackInput" type="checkbox" />트렌드 실패 시 preset fallback</label>
                 </div>
 
+                </section>
+
+                <section class="control-stage-block control-stage-pipeline" data-control-block="pipeline">
+                    <div class="control-stage-head">
+                        <div>
+                            <p class="panel-kicker">Pipeline</p>
+                            <h3>실행 버튼</h3>
+                        </div>
+                        <span class="badge">2-4단계</span>
+                    </div>
+
                 <div class="action-row pipeline-action-row">
                     <button type="button" class="subtle-btn" id="runExpandButton">확장까지 실행</button>
                     <button type="button" class="subtle-btn" id="runAnalyzeButton">분석까지 실행</button>
@@ -550,8 +573,36 @@ def _render_home() -> str:
                     <button type="button" class="ghost-btn" id="resetButton">결과 초기화</button>
                 </div>
 
-                <div class="launcher-grid">
-                    <section class="launcher-card">
+                <section class="grade-select-panel">
+                    <div class="grade-select-head">
+                        <div>
+                            <span class="field-label">등급별 선별</span>
+                            <p class="grade-select-summary" id="gradeSelectSummary">전체 등급 선별</p>
+                        </div>
+                        <p class="input-help compact-help">수집 → 확장 → 분석까지 자동 실행한 뒤, 선택한 등급만 선별합니다.</p>
+                    </div>
+                    <div class="grade-select-presets">
+                        <button type="button" class="ghost-chip" data-grade-preset="all">전체</button>
+                        <button type="button" class="ghost-chip" data-grade-preset="sa">S·A</button>
+                        <button type="button" class="ghost-chip" data-grade-preset="ab">A·B</button>
+                        <button type="button" class="ghost-chip" data-grade-preset="bc">B·C</button>
+                        <button type="button" class="ghost-chip" data-grade-preset="cd">C·D</button>
+                        <button type="button" class="ghost-chip" data-grade-preset="df">D·F</button>
+                    </div>
+                    <div class="grade-select-row">
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="S">S</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="A">A</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="B">B</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="C">C</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="D">D</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="F">F</button>
+                        <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">선택 등급 선별</button>
+                    </div>
+                </section>
+
+                </section>
+
+                    <section class="control-stage-block launcher-card control-stage-expand" data-control-block="expand" data-control-card="expand">
                         <div class="launcher-head">
                             <div>
                                 <p class="panel-kicker">Expand Entry</p>
@@ -567,35 +618,44 @@ def _render_home() -> str:
                                 <option value="manual_text">직접 붙여넣기</option>
                             </select>
                         </label>
-                        <label class="field-block">
-                            <span class="field-label">직접 붙여넣을 키워드</span>
-                            <textarea
-                                id="expandManualInput"
-                                rows="5"
-                                placeholder="예: 보험&#10;카드 비교&#10;대출 추천"
-                            ></textarea>
-                        </label>
-                        <div class="field-block field-block-wide">
-                            <span class="field-label">확장 옵션</span>
-                            <div class="option-row">
-                                <label class="check-chip"><input id="expandOptionRelated" type="checkbox" checked />연관확장</label>
-                                <label class="check-chip"><input id="expandOptionAutocomplete" type="checkbox" checked />자동완성</label>
-                                <label class="check-chip"><input id="expandOptionSeedFilter" type="checkbox" checked />원문포함</label>
+                        <div class="launcher-source-details" data-expand-source-visibility="collector_selected" hidden>
+                            <div class="launcher-note-card">
+                                수집 결과에서 체크한 키워드만 확장에 사용합니다. 아래 수집 결과 카드에서 원하는 항목만 선택하면 됩니다.
                             </div>
                         </div>
-                        <div class="field-block field-block-wide">
-                            <span class="field-label">개수 설정</span>
-                            <div class="option-row">
-                                <button type="button" class="ghost-chip" data-expand-limit="1000">1,000개</button>
-                                <button type="button" class="ghost-chip" data-expand-limit="10000">10,000개</button>
-                                <button type="button" class="ghost-chip" data-expand-limit="infinite">무제한</button>
-                            </div>
-                            <input id="expandMaxResultsInput" type="number" min="1" step="1" value="1000" placeholder="예: 1000" />
+                        <div class="launcher-source-details" data-expand-source-visibility="manual_text" hidden>
+                            <label class="field-block">
+                                <span class="field-label">직접 붙여넣을 키워드</span>
+                                <textarea
+                                    id="expandManualInput"
+                                    rows="5"
+                                    placeholder="예: 보험&#10;카드 비교&#10;대출 추천"
+                                ></textarea>
+                            </label>
+                            <p class="input-help compact-help">줄바꿈, 콤마, 세미콜론으로 여러 키워드를 나눌 수 있습니다.</p>
                         </div>
-                        <p class="input-help">줄바꿈, 콤마, 세미콜론으로 여러 키워드를 나눌 수 있습니다.</p>
+                        <div class="launcher-inline-grid">
+                            <div class="field-block">
+                                <span class="field-label">확장 옵션</span>
+                                <div class="option-row">
+                                    <label class="check-chip"><input id="expandOptionRelated" type="checkbox" checked />연관확장</label>
+                                    <label class="check-chip"><input id="expandOptionAutocomplete" type="checkbox" checked />자동완성</label>
+                                    <label class="check-chip"><input id="expandOptionSeedFilter" type="checkbox" checked />원문포함</label>
+                                </div>
+                            </div>
+                            <div class="field-block">
+                                <span class="field-label">개수 설정</span>
+                                <div class="option-row">
+                                    <button type="button" class="ghost-chip" data-expand-limit="1000">1,000개</button>
+                                    <button type="button" class="ghost-chip" data-expand-limit="10000">10,000개</button>
+                                    <button type="button" class="ghost-chip" data-expand-limit="infinite">무제한</button>
+                                </div>
+                                <input id="expandMaxResultsInput" type="number" min="1" step="1" value="1000" placeholder="예: 1000" />
+                            </div>
+                        </div>
                     </section>
 
-                    <section class="launcher-card">
+                    <section class="control-stage-block launcher-card control-stage-analyze" data-control-block="analyze" data-control-card="analyze">
                         <div class="launcher-head">
                             <div>
                                 <p class="panel-kicker">Analyze Entry</p>
@@ -610,34 +670,40 @@ def _render_home() -> str:
                                 <option value="manual_text">직접 붙여넣기</option>
                             </select>
                         </label>
-                        <label class="field-block">
-                            <span class="field-label">직접 붙여넣을 키워드</span>
-                            <textarea
-                                id="analyzeManualInput"
-                                rows="5"
-                                placeholder="예: 보험 추천, 카드 비교, 대출 금리"
-                            ></textarea>
-                        </label>
-                        <label class="field-block field-block-wide">
-                            <span class="field-label">실측 데이터 붙여넣기</span>
-                            <textarea
-                                id="analyzeKeywordStatsInput"
-                                rows="6"
-                                placeholder="분석 HTML 전체 또는 data-line 행을 그대로 붙여넣으세요."
-                            ></textarea>
-                        </label>
-                        <p class="input-help">분석 HTML 전체나 data-line 행을 붙여넣으면 PC/MO조회, 블로그수, 입찰가를 우선 사용합니다.</p>
-                        <div class="field-block field-block-wide">
-                            <span class="field-label">분석/출력</span>
-                            <div class="option-row">
-                                <button type="button" class="ghost-chip" id="exportCsvButton">분석 결과 CSV</button>
-                            </div>
+                        <div class="launcher-source-details" data-analyze-source-visibility="manual_text" hidden>
+                            <label class="field-block">
+                                <span class="field-label">직접 붙여넣을 키워드</span>
+                                <textarea
+                                    id="analyzeManualInput"
+                                    rows="5"
+                                    placeholder="예: 보험 추천, 카드 비교, 대출 금리"
+                                ></textarea>
+                            </label>
                         </div>
-                        <p class="input-help">확장 없이 분석만 실행하거나, 분석 결과를 내려받는 용도로 씁니다.</p>
+                        <details class="launcher-advanced">
+                            <summary>실측 데이터 / CSV</summary>
+                            <div class="launcher-advanced-body">
+                                <label class="field-block field-block-wide">
+                                    <span class="field-label">실측 데이터 붙여넣기</span>
+                                    <textarea
+                                        id="analyzeKeywordStatsInput"
+                                        rows="6"
+                                        placeholder="분석 HTML 전체 또는 data-line 행을 그대로 붙여넣으세요."
+                                    ></textarea>
+                                </label>
+                                <p class="input-help compact-help">분석 HTML 전체나 data-line 행을 붙여넣으면 PC/MO조회, 블로그수, 입찰가를 우선 사용합니다.</p>
+                                <div class="field-block field-block-wide">
+                                    <span class="field-label">분석/출력</span>
+                                    <div class="option-row">
+                                        <button type="button" class="ghost-chip" id="exportCsvButton">분석 결과 CSV</button>
+                                    </div>
+                                </div>
+                                <p class="input-help compact-help">확장 없이 분석만 실행하거나, 분석 결과를 내려받는 용도로 씁니다.</p>
+                            </div>
+                        </details>
                     </section>
-                </div>
 
-                <section class="title-settings-card">
+                <section class="title-settings-card" data-control-block="title">
                     <div class="launcher-head">
                         <div>
                             <p class="panel-kicker">Title AI</p>
@@ -707,14 +773,15 @@ def _render_home() -> str:
                         API 키는 서버에 저장하지 않고 현재 브라우저 localStorage 에만 보관합니다.
                     </p>
                 </section>
+                </div>
 
             </section>
 
             <section class="panel results-panel">
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">Results</p>
-                        <h2>단계별 결과</h2>
+                        <p class="panel-kicker">Workbench</p>
+                        <h2>키워드 작업대</h2>
                     </div>
                 </div>
                 <div id="resultsGrid" class="results-grid"></div>

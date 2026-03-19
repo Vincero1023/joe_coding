@@ -42,6 +42,20 @@ def is_golden_keyword(item: dict[str, Any]) -> bool:
 class SelectorService:
     def run(self, input_data: Any) -> Any:
         items = _coerce_input_items(input_data)
+        select_options = _coerce_select_options(input_data)
+        allowed_grades = _normalize_allowed_grades(select_options.get("allowed_grades"))
+        mode = str(select_options.get("mode") or "").strip().lower()
+
+        if mode == "grade_filter" and allowed_grades:
+            selected = [
+                _decorate_grade_selected_item(item)
+                for item in items
+                if _resolve_grade(item) in allowed_grades
+            ]
+            if isinstance(input_data, list):
+                return selected
+            return {"selected_keywords": selected}
+
         selected = [item for item in items if is_golden_keyword(item)]
         if not selected:
             selected = _select_fallback_candidates(items)
@@ -62,6 +76,47 @@ def _coerce_input_items(input_data: Any) -> list[dict[str, Any]]:
             return [item for item in input_data["selected_keywords"] if isinstance(item, dict)]
 
     return []
+
+
+def _coerce_select_options(input_data: Any) -> dict[str, Any]:
+    if isinstance(input_data, dict) and isinstance(input_data.get("select_options"), dict):
+        return input_data["select_options"]
+    return {}
+
+
+def _normalize_grade(value: Any) -> str:
+    grade = str(value or "").strip().upper()
+    return grade if grade in {"S", "A", "B", "C", "D", "F"} else ""
+
+
+def _resolve_grade(item: dict[str, Any]) -> str:
+    direct_grade = _normalize_grade(item.get("grade"))
+    if direct_grade:
+        return direct_grade
+
+    score = item.get("score")
+    try:
+        score_value = float(score or 0.0)
+    except (TypeError, ValueError):
+        return ""
+
+    if score_value >= 85.0:
+        return "S"
+    if score_value >= 70.0:
+        return "A"
+    if score_value >= 55.0:
+        return "B"
+    if score_value >= 40.0:
+        return "C"
+    if score_value >= 25.0:
+        return "D"
+    return "F"
+
+
+def _normalize_allowed_grades(grades: Any) -> set[str]:
+    if not isinstance(grades, list):
+        return set()
+    return {_normalize_grade(grade) for grade in grades if _normalize_grade(grade)}
 
 
 def _select_fallback_candidates(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -107,4 +162,12 @@ def _decorate_fallback_item(item: dict[str, Any]) -> dict[str, Any]:
         **item,
         "selection_mode": "fallback",
         "selection_reason": "top_scored_candidate",
+    }
+
+
+def _decorate_grade_selected_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **item,
+        "selection_mode": "grade_filter",
+        "selection_reason": "allowed_grade",
     }

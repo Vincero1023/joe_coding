@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from queue import Empty, Queue
 from threading import Event, Thread
 from typing import Any, Callable
@@ -16,6 +17,7 @@ from app.expander.main import expander_module, run_with_analysis_progress, run_w
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_STREAM_HEARTBEAT_SECONDS = 5.0
 
 
 @router.post("/expand", response_model=ModuleResponse)
@@ -65,6 +67,7 @@ def _stream_expand_response(
 
     async def stream_lines():
         event_queue: Queue[dict[str, Any] | None] = Queue()
+        next_heartbeat_at = time.monotonic() + _STREAM_HEARTBEAT_SECONDS
 
         def publish(envelope: dict[str, Any]) -> None:
             if not stop_event.is_set():
@@ -98,23 +101,56 @@ def _stream_expand_response(
 
         try:
             while True:
-                if await request.is_disconnected():
+                try:
+                    disconnected = await request.is_disconnected()
+                except Exception:  # pragma: no cover - runtime guard
+                    logger.exception("Failed to inspect stream disconnect state")
+                    disconnected = False
+
+                if disconnected:
                     stop_event.set()
                     break
+
                 try:
                     item = await asyncio.to_thread(event_queue.get, True, 0.1)
                 except Empty:
+                    now = time.monotonic()
+                    if now >= next_heartbeat_at:
+                        yield json.dumps({"event": "heartbeat", "request_id": request_id}, ensure_ascii=False) + "\n"
+                        next_heartbeat_at = now + _STREAM_HEARTBEAT_SECONDS
                     await asyncio.sleep(0.05)
                     continue
+
                 if item is None:
                     break
+
+                next_heartbeat_at = time.monotonic() + _STREAM_HEARTBEAT_SECONDS
                 yield json.dumps(item, ensure_ascii=False) + "\n"
+        except Exception as exc:  # pragma: no cover - runtime guard
+            stop_event.set()
+            logger.exception("Streaming response generator failed")
+            error_payload = {
+                "event": "error",
+                "error": {
+                    "code": "stream_generator_error",
+                    "message": str(exc) or "Streaming response failed.",
+                    "detail": {"type": exc.__class__.__name__},
+                    "request_id": request_id,
+                    "path": request.url.path,
+                },
+            }
+            try:
+                yield json.dumps(error_payload, ensure_ascii=False) + "\n"
+            except Exception:
+                logger.exception("Failed to emit stream generator error payload")
         finally:
             stop_event.set()
 
     response = StreamingResponse(stream_lines(), media_type="application/x-ndjson")
     if request_id:
         response.headers["X-Request-ID"] = request_id
+    response.headers["Cache-Control"] = "no-cache, no-transform"
+    response.headers["X-Accel-Buffering"] = "no"
     return response
 
 

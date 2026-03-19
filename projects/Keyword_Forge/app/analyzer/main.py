@@ -9,6 +9,7 @@ if __package__ in {None, ""}:
 
 from app.analyzer.config import DEFAULT_CONFIG
 from app.analyzer.keyword_stats import build_stats_index, merge_keyword_stats
+from app.analyzer.keywordmaster_benchmark import build_keywordmaster_benchmark_index
 from app.analyzer.naver_open_search import build_blog_search_index
 from app.analyzer.naver_searchad import build_searchad_bid_index, build_searchad_keyword_tool_index
 from app.analyzer.scorer import analyze_items
@@ -75,6 +76,15 @@ def _merge_measured_stats_index(
 ) -> None:
     if not isinstance(input_data, dict):
         return
+
+    _merge_stats_index(
+        stats_index,
+        build_keywordmaster_benchmark_index(
+            input_data,
+            keywords,
+            stats_index=stats_index,
+        ),
+    )
 
     measured_indexes = [
         build_searchad_keyword_tool_index(

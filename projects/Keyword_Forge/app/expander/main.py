@@ -12,7 +12,6 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.analyzer.main import analyze_keywords
-from app.analyzer.scorer import analyze_items
 from app.core.keyword_inputs import coerce_collected_keyword_items
 from app.core.interfaces import ModuleRunner
 from app.expander.engines.autocomplete_engine import expand_autocomplete_engine
@@ -235,7 +234,7 @@ def run_with_analysis_progress(
         if event.get("type") not in {"keyword_results", "depth_completed"}:
             return
 
-        analyzed_items = _analyze_progress_items(event.get("items"), analyzed_seen)
+        analyzed_items = _analyze_progress_items(input_data, event.get("items"), analyzed_seen)
         if not analyzed_items:
             return
 
@@ -512,11 +511,29 @@ def _collect_string_values(raw_items: Any) -> list[str]:
     return [text for text in (normalize_text(item) for item in raw_items) if text]
 
 
-def _analyze_progress_items(items: Any, analyzed_seen: set[str]) -> list[dict[str, Any]]:
+def _analyze_progress_items(
+    input_data: dict[str, Any],
+    items: Any,
+    analyzed_seen: set[str],
+) -> list[dict[str, Any]]:
     if not isinstance(items, list):
         return []
 
-    analyzed_items = analyze_items([item for item in items if isinstance(item, dict)])
+    pending_items: list[dict[str, Any]] = []
+    pending_keys: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        keyword = normalize_key(item.get("keyword"))
+        if not keyword or keyword in analyzed_seen or keyword in pending_keys:
+            continue
+        pending_keys.add(keyword)
+        pending_items.append(item)
+
+    if not pending_items:
+        return []
+
+    analyzed_items = analyze_keywords(_build_analyzer_input(input_data, pending_items))
     fresh_items: list[dict[str, Any]] = []
     for item in analyzed_items:
         keyword = normalize_key(item.get("keyword"))
@@ -533,6 +550,8 @@ def _build_analyzer_input(input_data: dict[str, Any], expanded_keywords: list[di
         "keyword_stats_path": input_data.get("keyword_stats_path", ""),
         "keyword_stats_text": input_data.get("keyword_stats_text", ""),
         "keyword_stats_items": input_data.get("keyword_stats_items", []),
+        "keywordmaster_benchmark": input_data.get("keywordmaster_benchmark", {}),
+        "keywordmaster_benchmark_enabled": input_data.get("keywordmaster_benchmark_enabled", None),
         "searchad": input_data.get("searchad", {}),
         "naver_ads_api_key": input_data.get("naver_ads_api_key", ""),
         "naver_ads_customer_id": input_data.get("naver_ads_customer_id", ""),
