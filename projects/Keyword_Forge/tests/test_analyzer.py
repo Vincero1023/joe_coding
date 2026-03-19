@@ -1,52 +1,179 @@
-﻿from app.analyzer.main import analyze_keywords, run
-from app.analyzer.metrics import (
-    get_bid_score,
-    get_competition_score,
-    get_cpc_score,
-    get_volume_score,
-)
-from app.analyzer.scorer import (
-    calculate_final_score,
-    calculate_opportunity,
-    calculate_profit,
-)
+from unittest.mock import patch
+
+from app.analyzer.main import analyze_keywords, run
+from app.analyzer.scorer import calculate_final_score, calculate_opportunity, calculate_profit
 
 
-def test_metrics_follow_profit_driven_rules() -> None:
-    assert get_cpc_score("보험 추천") == 1.0
-    assert get_bid_score("보험 추천") == 1.0
-    assert get_volume_score("보험 추천") == 1.0
-    assert get_competition_score("보험 추천") == 1.0
+def test_profit_and_opportunity_helpers_return_scaled_values() -> None:
+    profit = calculate_profit(500.0, 12.0)
+    opportunity = calculate_opportunity(1000.0, 250.0)
+    final_score = calculate_final_score(80.0, 60.0, 40.0)
+
+    assert profit == 6.0
+    assert opportunity == 4.0
+    assert final_score == 63.0
 
 
-def test_dual_layer_score_uses_profit_and_opportunity() -> None:
-    profit = calculate_profit(1.0, 1.0)
-    opportunity = calculate_opportunity(1.0, 1.0)
-    final_score = calculate_final_score(profit, opportunity)
+def test_analyzer_heuristic_scores_are_not_collapsed_to_ones() -> None:
+    with patch("app.analyzer.main.build_searchad_keyword_tool_index", return_value={}), patch(
+        "app.analyzer.main.build_searchad_bid_index",
+        return_value={},
+    ), patch(
+        "app.analyzer.main.build_blog_search_index",
+        return_value={},
+    ):
+        result = analyze_keywords(
+            [
+                {"keyword": "loan compare", "root_origin": "loan"},
+                {"keyword": "government registration notice", "root_origin": "government"},
+            ]
+        )
 
-    assert profit == 1.0
-    assert opportunity == 1.0
-    assert final_score == 1.0
+    assert len(result) == 2
+    assert result[0]["keyword"] == "loan compare"
+    assert result[0]["score"] > result[1]["score"]
+    assert result[0]["metrics"]["volume"] > result[1]["metrics"]["volume"]
+    assert result[0]["analysis_mode"] == "heuristic"
+    assert result[0]["confidence"] < 0.5
 
 
-def test_analyzer_prioritizes_transactional_keywords() -> None:
-    result = analyze_keywords(
-        [
-            {"keyword": "보험 추천", "root_origin": "보험"},
-            {"keyword": "뜻 정리", "root_origin": "뜻"},
-        ]
+def test_analyzer_uses_keyword_stats_text_when_available() -> None:
+    result = run(
+        {
+            "keywords_text": "butter ricecake\nseoul butter ricecake",
+            "keyword_stats_text": (
+                "butter ricecake\t149800\t733000\t882800\t14202\t69.1\t522.7\t591.8\t500\t190\t130\n"
+                "seoul butter ricecake\t3180\t24300\t27480\t99539\t2.9\t20\t22.9\t240\t70\t70"
+            ),
+        }
     )
 
-    assert result[0]["keyword"] == "보험 추천"
-    assert result[0]["priority"] == "high"
-    assert result[0]["metrics"]["profit"] > result[-1]["metrics"]["profit"]
-    assert result[0]["score"] > result[-1]["score"]
+    analyzed = result["analyzed_keywords"]
+    assert len(analyzed) == 2
+    assert analyzed[0]["keyword"] == "butter ricecake"
+    assert analyzed[0]["analysis_mode"] == "search_metrics"
+    assert analyzed[0]["metrics"]["volume"] == 882800.0
+    assert analyzed[0]["metrics"]["cpc"] == 273.3333
+    assert analyzed[0]["metrics"]["bid"] == 500.0
+    assert analyzed[0]["confidence"] >= 0.8
+
+
+def test_analyzer_uses_sample_style_score_tiers_for_measured_stats() -> None:
+    result = run(
+        {
+            "keywords_text": "samchuly bike price",
+            "keyword_stats_items": [
+                {
+                    "keyword": "samchuly bike price",
+                    "pc_searches": 150,
+                    "mobile_searches": 1490,
+                    "blog_results": 30741,
+                    "pc_clicks": 3.9,
+                    "mobile_clicks": 82.5,
+                    "bid_1": 440,
+                    "bid_2": 420,
+                    "bid_3": 210,
+                }
+            ],
+        }
+    )
+
+    analyzed = result["analyzed_keywords"]
+    assert len(analyzed) == 1
+    assert analyzed[0]["score"] == 29.0
+    assert analyzed[0]["grade"] == "D"
+    assert analyzed[0]["metrics"]["cpc_score"] == 10.0
+    assert analyzed[0]["metrics"]["search_volume_score"] == 60.0
+    assert analyzed[0]["metrics"]["rarity_score"] == 15.0
+
+
+def test_analyzer_matches_sample_detail_for_moderate_blog_counts() -> None:
+    result = run(
+        {
+            "keywords_text": "kim gilli medal count",
+            "keyword_stats_items": [
+                {
+                    "keyword": "kim gilli medal count",
+                    "pc_searches": 40,
+                    "mobile_searches": 480,
+                    "blog_results": 4659,
+                    "pc_clicks": 0,
+                    "mobile_clicks": 0,
+                    "bid_1": 70,
+                    "bid_2": 70,
+                    "bid_3": 70,
+                }
+            ],
+        }
+    )
+
+    analyzed = result["analyzed_keywords"]
+    assert len(analyzed) == 1
+    assert analyzed[0]["score"] == 22.0
+    assert analyzed[0]["grade"] == "F"
+    assert analyzed[0]["metrics"]["cpc_score"] == 10.0
+    assert analyzed[0]["metrics"]["search_volume_score"] == 25.0
+    assert analyzed[0]["metrics"]["rarity_score"] == 35.0
+
+
+def test_measured_low_score_keywords_are_kept_in_analysis_results() -> None:
+    result = run(
+        {
+            "keywords_text": "face blackhead",
+            "keyword_stats_items": [
+                {
+                    "keyword": "face blackhead",
+                    "pc_searches": 20,
+                    "mobile_searches": 140,
+                    "blog_results": 390097,
+                    "pc_clicks": 0,
+                    "mobile_clicks": 2.5,
+                    "bid_1": 1570,
+                    "bid_2": 1560,
+                    "bid_3": 1470,
+                }
+            ],
+        }
+    )
+
+    analyzed = result["analyzed_keywords"]
+    assert len(analyzed) == 1
+    assert analyzed[0]["score"] == 17.0
+    assert analyzed[0]["grade"] == "F"
+    assert analyzed[0]["analysis_mode"] == "search_metrics"
+
+
+def test_measured_metrics_do_not_backfill_missing_values_from_heuristics() -> None:
+    result = run(
+        {
+            "keywords_text": "partial measured keyword",
+            "searchad": {"enabled": False},
+            "naver_search_api": {"enabled": False},
+            "keyword_stats_items": [
+                {
+                    "keyword": "partial measured keyword",
+                    "blog_results": 19,
+                }
+            ],
+        }
+    )
+
+    analyzed = result["analyzed_keywords"]
+    assert len(analyzed) == 1
+    assert analyzed[0]["analysis_mode"] == "search_metrics"
+    assert analyzed[0]["metrics"]["volume"] == 0.0
+    assert analyzed[0]["metrics"]["cpc"] == 0.0
+    assert analyzed[0]["metrics"]["bid"] == 0.0
+    assert analyzed[0]["metrics"]["total_clicks"] == 0.0
 
 
 def test_analyzer_filters_out_extremely_long_keywords() -> None:
     result = run(
         [
-            {"keyword": "서울 강남 맛집 추천 비교 후기 가격 정리", "root_origin": "서울 강남 맛집"},
+            {
+                "keyword": "seoul gangnam restaurant recommendation comparison review price summary side effects types",
+                "root_origin": "seoul gangnam restaurant",
+            },
         ]
     )
 

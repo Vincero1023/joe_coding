@@ -5,11 +5,14 @@ import sys
 from dataclasses import dataclass
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 from typing import Any, Callable
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from app.analyzer.main import analyze_keywords
+from app.analyzer.scorer import analyze_items
 from app.core.keyword_inputs import coerce_collected_keyword_items
 from app.core.interfaces import ModuleRunner
 from app.expander.engines.autocomplete_engine import expand_autocomplete_engine
@@ -36,10 +39,15 @@ class ExpansionRequest:
     collected_keywords: tuple[dict[str, Any], ...]
     analysis_json_path: Path | None
     enable_combinator: bool
+    enable_related: bool
+    enable_autocomplete: bool
+    enable_seed_filter: bool
+    max_results: int | None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ExpansionRequest":
         collected_keywords = tuple(coerce_collected_keyword_items(raw))
+        raw_options = raw.get("expand_options") if isinstance(raw.get("expand_options"), dict) else {}
 
         raw_path = raw.get("analysis_json_path")
         analysis_json_path = Path(raw_path.strip()) if isinstance(raw_path, str) and raw_path.strip() else None
@@ -47,6 +55,18 @@ class ExpansionRequest:
             collected_keywords=collected_keywords,
             analysis_json_path=analysis_json_path,
             enable_combinator=bool(raw.get("enable_combinator", False)),
+            enable_related=_coerce_bool(raw.get("enable_related"), raw_options.get("enable_related"), default=True),
+            enable_autocomplete=_coerce_bool(
+                raw.get("enable_autocomplete"),
+                raw_options.get("enable_autocomplete"),
+                default=True,
+            ),
+            enable_seed_filter=_coerce_bool(
+                raw.get("enable_seed_filter"),
+                raw_options.get("enable_seed_filter"),
+                default=True,
+            ),
+            max_results=_coerce_positive_int(raw.get("max_results"), raw_options.get("max_results")),
         )
 
 
@@ -185,20 +205,89 @@ def run_expander(input_data: dict, analysis_data: dict[str, Any]) -> dict:
 def run_with_progress(
     input_data: dict,
     progress_callback: ExpansionProgressCallback | None = None,
+    stop_event: Event | None = None,
 ) -> dict:
     analysis_data = load_analysis_data(input_data.get("analysis_json_path"))
-    return _run_expander_internal(input_data, analysis_data, progress_callback=progress_callback)
+    return _run_expander_internal(
+        input_data,
+        analysis_data,
+        progress_callback=progress_callback,
+        stop_event=stop_event,
+    )
+
+
+def run_with_analysis_progress(
+    input_data: dict,
+    *,
+    progress_callback: ExpansionProgressCallback | None = None,
+    analysis_callback: ExpansionProgressCallback | None = None,
+    stop_event: Event | None = None,
+) -> dict:
+    analyzed_seen: set[str] = set()
+
+    def forward_progress(event: dict[str, Any]) -> None:
+        if progress_callback is not None:
+            progress_callback(event)
+
+        if analysis_callback is None:
+            return
+
+        if event.get("type") not in {"keyword_results", "depth_completed"}:
+            return
+
+        analyzed_items = _analyze_progress_items(event.get("items"), analyzed_seen)
+        if not analyzed_items:
+            return
+
+        analysis_callback(
+            {
+                "type": "analyzed_items",
+                "depth": event.get("depth"),
+                "keyword": event.get("keyword"),
+                "origin": event.get("origin"),
+                "items": analyzed_items,
+                "total_analyzed": len(analyzed_seen),
+            }
+        )
+
+    expanded_result = run_with_progress(
+        input_data,
+        progress_callback=forward_progress,
+        stop_event=stop_event,
+    )
+    expanded_keywords = [
+        item
+        for item in expanded_result.get("expanded_keywords", [])
+        if isinstance(item, dict)
+    ]
+    if _is_stop_requested(stop_event):
+        return {
+            "expanded_keywords": expanded_keywords,
+            "analyzed_keywords": [],
+            "stopped": True,
+        }
+    analyzed_keywords = analyze_keywords(_build_analyzer_input(input_data, expanded_keywords))
+    return {
+        "expanded_keywords": expanded_keywords,
+        "analyzed_keywords": analyzed_keywords,
+        "stopped": False,
+    }
 
 
 def _run_expander_internal(
     input_data: dict,
     analysis_data: dict[str, Any],
     progress_callback: ExpansionProgressCallback | None = None,
+    stop_event: Event | None = None,
 ) -> dict:
     request = ExpansionRequest.from_dict(input_data)
     strategy = ExpansionStrategy.from_analysis(analysis_data)
-    if not request.enable_combinator and strategy.use_combinator:
-        strategy = replace(strategy, use_combinator=False)
+    strategy = replace(
+        strategy,
+        use_autocomplete=request.enable_autocomplete,
+        use_related=request.enable_related,
+        use_combinator=request.enable_combinator and strategy.use_combinator,
+    )
     engine_payload = strategy.to_engine_payload()
     queue = _build_initial_queue(request.collected_keywords)
     results: list[dict[str, str]] = []
@@ -218,6 +307,8 @@ def _run_expander_internal(
         )
 
     for depth_index in range(_MAX_DEPTH):
+        if _is_stop_requested(stop_event):
+            break
         if not queue:
             break
 
@@ -234,6 +325,8 @@ def _run_expander_internal(
 
         depth_expanded: list[dict[str, str]] = []
         for node_index, node in enumerate(queue, start=1):
+            if _is_stop_requested(stop_event):
+                break
             if progress_callback is not None:
                 progress_callback(
                     {
@@ -246,7 +339,12 @@ def _run_expander_internal(
                     }
                 )
 
-            node_results = _expand_all_engines(node, strategy, engine_payload)
+            node_results = _expand_all_engines(
+                node,
+                strategy,
+                engine_payload,
+                enable_seed_filter=request.enable_seed_filter,
+            )
             if progress_callback is not None:
                 preview_results = deduplicate_expansions(filter_expansions(node_results))
                 if preview_results:
@@ -274,6 +372,12 @@ def _run_expander_internal(
             totals=total_counts,
             max_total_per_origin=_MAX_TOTAL_PER_ORIGIN,
         )
+        if request.max_results is not None:
+            remaining_slots = request.max_results - len(results)
+            if remaining_slots <= 0:
+                accepted_results = []
+            elif len(accepted_results) > remaining_slots:
+                accepted_results = accepted_results[:remaining_slots]
 
         results.extend(accepted_results)
         queue = _build_next_queue(accepted_results, request.collected_keywords, seen_queue)
@@ -288,10 +392,19 @@ def _run_expander_internal(
                     "items": accepted_results,
                 }
             )
+        if _is_stop_requested(stop_event):
+            break
+        if request.max_results is not None and len(results) >= request.max_results:
+            break
 
     final_results = deduplicate_expansions(results)
     final_results = limit_expansions_per_origin(final_results, max_per_origin=_MAX_TOTAL_PER_ORIGIN)
-    return {"expanded_keywords": final_results}
+    if request.max_results is not None:
+        final_results = final_results[: request.max_results]
+    return {
+        "expanded_keywords": final_results,
+        "stopped": _is_stop_requested(stop_event),
+    }
 
 
 def load_analysis_data(analysis_json_path: Any) -> dict[str, Any]:
@@ -333,6 +446,8 @@ def _expand_all_engines(
     node: ExpansionNode,
     strategy: ExpansionStrategy,
     engine_payload: dict[str, Any],
+    *,
+    enable_seed_filter: bool,
 ) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
 
@@ -355,7 +470,9 @@ def _expand_all_engines(
             }
         )
 
-    return apply_seed_filter(normalized_results, node.root_origin)
+    if enable_seed_filter:
+        return apply_seed_filter(normalized_results, node.root_origin)
+    return normalized_results
 
 
 def _build_next_queue(
@@ -393,6 +510,63 @@ def _collect_string_values(raw_items: Any) -> list[str]:
     if not isinstance(raw_items, list):
         return []
     return [text for text in (normalize_text(item) for item in raw_items) if text]
+
+
+def _analyze_progress_items(items: Any, analyzed_seen: set[str]) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+
+    analyzed_items = analyze_items([item for item in items if isinstance(item, dict)])
+    fresh_items: list[dict[str, Any]] = []
+    for item in analyzed_items:
+        keyword = normalize_key(item.get("keyword"))
+        if not keyword or keyword in analyzed_seen:
+            continue
+        analyzed_seen.add(keyword)
+        fresh_items.append(item)
+    return fresh_items
+
+
+def _build_analyzer_input(input_data: dict[str, Any], expanded_keywords: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "expanded_keywords": expanded_keywords,
+        "keyword_stats_path": input_data.get("keyword_stats_path", ""),
+        "keyword_stats_text": input_data.get("keyword_stats_text", ""),
+        "keyword_stats_items": input_data.get("keyword_stats_items", []),
+        "searchad": input_data.get("searchad", {}),
+        "naver_ads_api_key": input_data.get("naver_ads_api_key", ""),
+        "naver_ads_customer_id": input_data.get("naver_ads_customer_id", ""),
+        "naver_ads_access_license": input_data.get("naver_ads_access_license", ""),
+        "naver_ads_secret_key": input_data.get("naver_ads_secret_key", ""),
+        "naver_search_api": input_data.get("naver_search_api", {}),
+        "naver_search_client_id": input_data.get("naver_search_client_id", ""),
+        "naver_search_client_secret": input_data.get("naver_search_client_secret", ""),
+    }
+
+
+def _coerce_bool(*values: Any, default: bool) -> bool:
+    for value in values:
+        if value is None:
+            continue
+        return bool(value)
+    return default
+
+
+def _is_stop_requested(stop_event: Event | None) -> bool:
+    return bool(stop_event is not None and stop_event.is_set())
+
+
+def _coerce_positive_int(*values: Any) -> int | None:
+    for value in values:
+        if value is None or value == "":
+            continue
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    return None
 
 
 if __name__ == "__main__":

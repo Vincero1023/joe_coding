@@ -98,6 +98,33 @@ def test_expand_stream_endpoint_emits_progress_and_result() -> None:
     assert any('"event": "completed"' in line for line in lines)
 
 
+def test_expand_analyze_stream_endpoint_emits_analysis_and_result() -> None:
+    with patch(
+        "app.expander.engines.autocomplete_engine.get_naver_autocomplete",
+        side_effect=_fake_autocomplete,
+    ), patch(
+        "app.expander.engines.related_engine.get_naver_related_queries",
+        return_value=[],
+    ):
+        with client.stream(
+            "POST",
+            "/expand/analyze/stream",
+            json={
+                "input_data": {
+                    "keywords_text": "보험\n카드",
+                    "analysis_json_path": str(expander_sample_dir / "site_analysis.json"),
+                    "max_results": 2,
+                }
+            },
+        ) as response:
+            lines = [line for line in response.iter_lines() if line]
+
+    assert response.status_code == 200
+    assert any('"event": "progress"' in line for line in lines)
+    assert any('"event": "analysis"' in line for line in lines)
+    assert any('"event": "completed"' in line for line in lines)
+
+
 def test_analyze_endpoint_accepts_manual_keywords() -> None:
     response = client.post(
         "/analyze",

@@ -1,3 +1,2 @@
-2026/03/18-18:38:54.609 13c4 Reusing MANIFEST D:\joe_coding\projects\Keyword_Forge\.local\naver_playwright\msedge\Default\Local Storage\leveldb/MANIFEST-000001
-2026/03/18-18:38:54.617 13c4 Recovering log #3
-2026/03/18-18:38:54.621 13c4 Reusing old log D:\joe_coding\projects\Keyword_Forge\.local\naver_playwright\msedge\Default\Local Storage\leveldb/000003.log 
+2026/03/18-23:07:21.380 7f88 Creating DB F:\Joe_Coding\projects\Keyword_Forge\.local\naver_playwright\msedge\Default\Local Storage\leveldb since it was missing.
+2026/03/18-23:07:21.401 7f88 Reusing MANIFEST F:\Joe_Coding\projects\Keyword_Forge\.local\naver_playwright\msedge\Default\Local Storage\leveldb/MANIFEST-000001

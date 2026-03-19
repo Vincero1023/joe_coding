@@ -852,9 +852,9 @@ function buildAnalyzeInput() {
             throw new Error("분석할 키워드를 직접 입력해 주세요.");
         }
 
-        return {
+        return withAnalyzeKeywordStats({
             keywords_text: keywordsText,
-        };
+        });
     }
 
     const expandedKeywords = state.results.expanded?.expanded_keywords || [];
@@ -862,8 +862,20 @@ function buildAnalyzeInput() {
         throw new Error("확장 결과가 없습니다. 먼저 확장을 실행하거나 직접 입력으로 전환해 주세요.");
     }
 
-    return {
+    return withAnalyzeKeywordStats({
         expanded_keywords: expandedKeywords,
+    });
+}
+
+function withAnalyzeKeywordStats(inputData) {
+    const keywordStatsText = elements.analyzeKeywordStatsInput?.value.trim();
+    if (!keywordStatsText) {
+        return inputData;
+    }
+
+    return {
+        ...inputData,
+        keyword_stats_text: keywordStatsText,
     };
 }
 
@@ -1284,6 +1296,7 @@ function renderAll() {
     renderInputState();
     renderTrendSettingsState();
     renderTitleSettingsState();
+    renderGuideTabs();
     renderResults();
     renderDiagnostics();
 }
@@ -2508,6 +2521,771 @@ function compareKoreanText(left, right) {
     return String(left || "").localeCompare(String(right || ""), "ko");
 }
 
+STAGES.splice(
+    0,
+    STAGES.length,
+    {
+        key: "collected",
+        label: "1단계 수집",
+        shortLabel: "수집",
+        description: "시드 또는 카테고리 기준으로 시작 키워드를 수집합니다.",
+        resultKey: "collected_keywords",
+    },
+    {
+        key: "expanded",
+        label: "2단계 확장",
+        shortLabel: "확장",
+        description: "연관확장과 자동완성으로 키워드를 넓힙니다.",
+        resultKey: "expanded_keywords",
+    },
+    {
+        key: "analyzed",
+        label: "3단계 분석",
+        shortLabel: "분석",
+        description: "점수와 우선순위를 계산해 후보를 평가합니다.",
+        resultKey: "analyzed_keywords",
+    },
+    {
+        key: "selected",
+        label: "4단계 선별",
+        shortLabel: "선별",
+        description: "조건에 맞는 골든 키워드만 추립니다.",
+        resultKey: "selected_keywords",
+    },
+    {
+        key: "titled",
+        label: "5단계 제목",
+        shortLabel: "제목",
+        description: "선택한 키워드로 제목을 생성합니다.",
+        resultKey: "generated_titles",
+    },
+);
+
+function bindElements() {
+    elements.categoryInput = document.getElementById("categoryInput");
+    elements.categorySourceInput = document.getElementById("categorySourceInput");
+    elements.seedInput = document.getElementById("seedInput");
+    elements.trendServiceInput = document.getElementById("trendServiceInput");
+    elements.trendDateInput = document.getElementById("trendDateInput");
+    elements.trendBrowserInput = document.getElementById("trendBrowserInput");
+    elements.trendCookieInput = document.getElementById("trendCookieInput");
+    elements.trendFallbackInput = document.getElementById("trendFallbackInput");
+    elements.trendSourceHelp = document.getElementById("trendSourceHelp");
+    elements.launchLoginBrowserButton = document.getElementById("launchLoginBrowserButton");
+    elements.loadLocalCookieButton = document.getElementById("loadLocalCookieButton");
+    elements.localCookieStatus = document.getElementById("localCookieStatus");
+    elements.expanderAnalysisPath = document.getElementById("expanderAnalysisPath");
+    elements.optionRelated = document.getElementById("optionRelated");
+    elements.optionAutocomplete = document.getElementById("optionAutocomplete");
+    elements.optionBulk = document.getElementById("optionBulk");
+    elements.optionDebug = document.getElementById("optionDebug");
+    elements.expandInputSource = document.getElementById("expandInputSource");
+    elements.expandManualInput = document.getElementById("expandManualInput");
+    elements.expandOptionRelated = document.getElementById("expandOptionRelated");
+    elements.expandOptionAutocomplete = document.getElementById("expandOptionAutocomplete");
+    elements.expandOptionSeedFilter = document.getElementById("expandOptionSeedFilter");
+    elements.expandMaxResultsInput = document.getElementById("expandMaxResultsInput");
+    elements.expandLimitButtons = Array.from(document.querySelectorAll("[data-expand-limit]"));
+    elements.analyzeInputSource = document.getElementById("analyzeInputSource");
+    elements.analyzeManualInput = document.getElementById("analyzeManualInput");
+    elements.analyzeKeywordStatsInput = document.getElementById("analyzeKeywordStatsInput");
+    elements.exportCsvButton = document.getElementById("exportCsvButton");
+    elements.selectedCollectedCount = document.getElementById("selectedCollectedCount");
+    elements.manualAnalyzeCount = document.getElementById("manualAnalyzeCount");
+    elements.titleMode = document.getElementById("titleMode");
+    elements.titleProvider = document.getElementById("titleProvider");
+    elements.titleModel = document.getElementById("titleModel");
+    elements.titleApiKey = document.getElementById("titleApiKey");
+    elements.titleTemperature = document.getElementById("titleTemperature");
+    elements.titleFallback = document.getElementById("titleFallback");
+    elements.titleModeBadge = document.getElementById("titleModeBadge");
+    elements.titleModeRadios = Array.from(document.querySelectorAll("input[name='titleModeOption']"));
+    elements.titleModeVisibilityBlocks = Array.from(document.querySelectorAll("[data-title-mode-visibility]"));
+    elements.statusList = document.getElementById("statusList");
+    elements.resultsGrid = document.getElementById("resultsGrid");
+    elements.activityLog = document.getElementById("activityLog");
+    elements.pipelineStatus = document.getElementById("pipelineStatus");
+    elements.progressBar = document.getElementById("progressBar");
+    elements.progressText = document.getElementById("progressText");
+    elements.progressDetail = document.getElementById("progressDetail");
+    elements.errorConsole = document.getElementById("errorConsole");
+    elements.debugPanels = document.getElementById("debugPanels");
+    elements.actionButtons = Array.from(document.querySelectorAll("button"));
+}
+
+function bindEvents() {
+    document.querySelectorAll("input[name='collectorMode']").forEach((element) => {
+        element.addEventListener("change", renderInputState);
+    });
+    document.getElementById("runCollectButton").addEventListener("click", () => {
+        runWithGuard(runCollectStage, "수집 단계 실행 중");
+    });
+    document.getElementById("runExpandButton").addEventListener("click", () => {
+        runWithGuard(runThroughExpand, "확장 단계 실행 중");
+    });
+    document.getElementById("runAnalyzeButton").addEventListener("click", () => {
+        runWithGuard(runThroughAnalyze, "분석 단계 실행 중");
+    });
+    document.getElementById("runSelectButton").addEventListener("click", () => {
+        runWithGuard(runThroughSelect, "선별 단계 실행 중");
+    });
+    document.getElementById("runTitleButton").addEventListener("click", () => {
+        runWithGuard(runThroughTitle, "제목 생성 단계 실행 중");
+    });
+    document.getElementById("runFullButton").addEventListener("click", () => {
+        runWithGuard(runFullFlow, "전체 파이프라인 실행 중");
+    });
+    document.getElementById("resetButton").addEventListener("click", resetAll);
+    document.getElementById("clearDebugButton").addEventListener("click", clearDiagnostics);
+    elements.resultsGrid.addEventListener("click", handleResultsGridClick);
+    elements.resultsGrid.addEventListener("change", handleResultsGridChange);
+    elements.expandManualInput.addEventListener("input", renderInputState);
+    elements.expandInputSource.addEventListener("change", renderInputState);
+    elements.analyzeManualInput.addEventListener("input", renderInputState);
+    elements.analyzeInputSource.addEventListener("change", renderInputState);
+    elements.analyzeKeywordStatsInput?.addEventListener("input", renderInputState);
+    elements.expandMaxResultsInput?.addEventListener("input", () => {
+        elements.expandLimitButtons.forEach((button) => button.classList.remove("active"));
+    });
+    [
+        elements.categorySourceInput,
+        elements.trendServiceInput,
+        elements.trendDateInput,
+        elements.trendBrowserInput,
+        elements.trendCookieInput,
+        elements.trendFallbackInput,
+    ].forEach((element) => {
+        element.addEventListener("input", handleTrendSettingsChange);
+        element.addEventListener("change", handleTrendSettingsChange);
+    });
+    elements.loadLocalCookieButton.addEventListener("click", () => {
+        runWithGuard(importLocalNaverCookie, "로컬 네이버 세션 불러오는 중");
+    });
+    elements.launchLoginBrowserButton.addEventListener("click", () => {
+        runWithGuard(openDedicatedLoginBrowser, "전용 로그인 브라우저 여는 중");
+    });
+    [
+        elements.titleProvider,
+        elements.titleModel,
+        elements.titleApiKey,
+        elements.titleTemperature,
+        elements.titleFallback,
+    ].forEach((element) => {
+        element.addEventListener("input", handleTitleSettingsChange);
+        element.addEventListener("change", handleTitleSettingsChange);
+    });
+    elements.titleModeRadios.forEach((element) => {
+        element.addEventListener("change", handleTitleSettingsChange);
+    });
+    document.querySelectorAll("[data-preset]").forEach((button) => {
+        button.addEventListener("click", () => applyPreset(button.dataset.preset || "finance"));
+    });
+    elements.guideTabButtons.forEach((button) => {
+        button.addEventListener("click", () => setGuideTab(button.dataset.guideTab || ""));
+    });
+    elements.expandLimitButtons.forEach((button) => {
+        button.addEventListener("click", () => setExpandLimitPreset(button.dataset.expandLimit || "1000"));
+    });
+    elements.exportCsvButton?.addEventListener("click", downloadAnalyzedCsv);
+    setExpandLimitPreset(elements.expandMaxResultsInput?.value || "1000");
+}
+
+function setExpandLimitPreset(limit) {
+    elements.expandLimitButtons.forEach((button) => {
+        button.classList.toggle("active", button.dataset.expandLimit === limit);
+    });
+
+    if (!elements.expandMaxResultsInput) {
+        return;
+    }
+
+    if (limit === "infinite") {
+        elements.expandMaxResultsInput.value = "";
+        elements.expandMaxResultsInput.placeholder = "무제한";
+        return;
+    }
+
+    elements.expandMaxResultsInput.value = limit;
+    elements.expandMaxResultsInput.placeholder = "예: 1000";
+}
+
+async function runAnalyzeStage() {
+    const source = elements.analyzeInputSource.value;
+    const expandSource = elements.expandInputSource?.value || "collector_all";
+
+    if (source === "manual_text") {
+        const inputData = buildAnalyzeInput();
+        addLog(`분석 시작: ${describeAnalyzeSource(inputData)}`);
+        clearStageAndDownstream("analyzed");
+        const result = await executeStage({
+            stageKey: "analyzed",
+            endpoint: "/analyze",
+            inputData,
+        });
+        state.results.analyzed = result;
+        addLog(`분석 완료: ${countItems(result.analyzed_keywords)}건`, "success");
+        renderAll();
+        return result;
+    }
+
+    if (
+        !state.results.expanded?.expanded_keywords?.length
+        && expandSource !== "manual_text"
+        && !state.results.collected?.collected_keywords?.length
+    ) {
+        await runCollectStage();
+    }
+
+    if (state.results.expanded?.expanded_keywords?.length) {
+        const inputData = buildAnalyzeInput();
+        addLog(`분석 시작: ${describeAnalyzeSource(inputData)}`);
+        clearStageAndDownstream("analyzed");
+        const result = await executeStage({
+            stageKey: "analyzed",
+            endpoint: "/analyze",
+            inputData,
+        });
+        state.results.analyzed = result;
+        addLog(`분석 완료: ${countItems(result.analyzed_keywords)}건`, "success");
+        renderAll();
+        return result;
+    }
+
+    const inputData = buildExpandInput();
+    addLog(`확장 및 분석 시작: ${describeExpandSource(inputData)}`);
+    clearStageAndDownstream("expanded");
+    const result = await executeExpandAnalyzeStageStream(inputData);
+    state.results.expanded = {
+        ...(state.results.expanded || {}),
+        expanded_keywords: result.expanded_keywords || [],
+    };
+    state.results.analyzed = {
+        analyzed_keywords: result.analyzed_keywords || [],
+    };
+    addLog(
+        `확장 ${countItems(result.expanded_keywords)}건 · 분석 ${countItems(result.analyzed_keywords)}건 완료`,
+        "success",
+    );
+    renderAll();
+    return result;
+}
+
+function buildExpandInput() {
+    const source = elements.expandInputSource.value;
+    const analysisPath = elements.expanderAnalysisPath.value.trim();
+    const category = elements.categoryInput.value.trim();
+    const expandOptions = {
+        enable_related: elements.expandOptionRelated?.checked ?? true,
+        enable_autocomplete: elements.expandOptionAutocomplete?.checked ?? true,
+        enable_seed_filter: elements.expandOptionSeedFilter?.checked ?? true,
+        max_results: coerceExpandLimitValue(elements.expandMaxResultsInput?.value),
+    };
+
+    if (source === "manual_text") {
+        const keywordsText = elements.expandManualInput.value.trim();
+        const keywords = parseKeywordText(keywordsText);
+        if (keywords.length === 0) {
+            throw new Error("확장할 키워드를 직접 입력해 주세요.");
+        }
+
+        return {
+            keywords_text: keywordsText,
+            category,
+            source: "manual_input",
+            analysis_json_path: analysisPath,
+            expand_options: expandOptions,
+        };
+    }
+
+    const collectedKeywords = source === "collector_selected"
+        ? getSelectedCollectedItems()
+        : state.results.collected?.collected_keywords || [];
+
+    if (collectedKeywords.length === 0) {
+        throw new Error(
+            source === "collector_selected"
+                ? "확장에 사용할 수집 키워드를 최소 1개 선택해 주세요."
+                : "수집 결과가 없습니다. 먼저 수집을 실행해 주세요.",
+        );
+    }
+
+    return {
+        collected_keywords: collectedKeywords,
+        analysis_json_path: analysisPath,
+        expand_options: expandOptions,
+    };
+}
+
+async function executeExpandAnalyzeStageStream(inputData) {
+    const expandedStartedAt = Date.now();
+    const analyzedStartedAt = expandedStartedAt;
+    const startedAtLabel = new Date(expandedStartedAt).toISOString();
+
+    state.stageStatus.expanded = {
+        state: "running",
+        message: "실시간 확장 중",
+        startedAt: expandedStartedAt,
+        finishedAt: null,
+        durationMs: null,
+    };
+    state.stageStatus.analyzed = {
+        state: "running",
+        message: "실시간 분석 중",
+        startedAt: analyzedStartedAt,
+        finishedAt: null,
+        durationMs: null,
+    };
+    state.results.expanded = {
+        expanded_keywords: [],
+        stream_meta: {
+            phase: "starting",
+            currentKeyword: "",
+            depth: 0,
+            totalResults: 0,
+            queueSize: 0,
+            totalOrigins: 0,
+            maxDepth: 0,
+        },
+    };
+    state.results.analyzed = {
+        analyzed_keywords: [],
+    };
+    renderAll();
+
+    try {
+        const response = await postModuleStream("/expand/analyze/stream", inputData, (eventPayload) => {
+            if (eventPayload?.event === "progress") {
+                applyExpandStreamEvent(eventPayload, expandedStartedAt);
+            }
+            if (eventPayload?.event === "analysis") {
+                applyAnalyzeStreamEvent(eventPayload, analyzedStartedAt);
+            }
+        });
+
+        const result = response.result || {};
+        result.expanded_keywords = mergeExpandedKeywords(
+            state.results.expanded?.expanded_keywords || [],
+            result.expanded_keywords || [],
+        );
+        result.analyzed_keywords = mergeAnalyzedKeywords(
+            state.results.analyzed?.analyzed_keywords || [],
+            result.analyzed_keywords || [],
+        );
+
+        const expandedDurationMs = Date.now() - expandedStartedAt;
+        const analyzedDurationMs = Date.now() - analyzedStartedAt;
+        state.stageStatus.expanded = {
+            state: "success",
+            message: `${result.expanded_keywords.length}건 완료`,
+            startedAt: expandedStartedAt,
+            finishedAt: Date.now(),
+            durationMs: expandedDurationMs,
+        };
+        state.stageStatus.analyzed = {
+            state: "success",
+            message: `${result.analyzed_keywords.length}건 완료`,
+            startedAt: analyzedStartedAt,
+            finishedAt: Date.now(),
+            durationMs: analyzedDurationMs,
+        };
+        state.diagnostics.expanded = {
+            stageKey: "expanded",
+            stageLabel: getStage("expanded").label,
+            status: "success",
+            endpoint: "/expand/analyze/stream",
+            requestId: response.requestId,
+            startedAt: startedAtLabel,
+            durationMs: expandedDurationMs,
+            request: sanitizeSensitiveData(inputData),
+            responseSummary: buildResponseSummary("expanded", result),
+            backendDebug: result.debug || null,
+        };
+        state.diagnostics.analyzed = {
+            stageKey: "analyzed",
+            stageLabel: getStage("analyzed").label,
+            status: "success",
+            endpoint: "/expand/analyze/stream",
+            requestId: response.requestId,
+            startedAt: startedAtLabel,
+            durationMs: analyzedDurationMs,
+            request: sanitizeSensitiveData(inputData),
+            responseSummary: buildResponseSummary("analyzed", result),
+            backendDebug: result.debug || null,
+        };
+        return result;
+    } catch (error) {
+        const normalizedError = normalizeError(error, {
+            stageKey: "analyzed",
+            endpoint: "/expand/analyze/stream",
+            request: inputData,
+            startedAt: startedAtLabel,
+            durationMs: Date.now() - analyzedStartedAt,
+        });
+        state.stageStatus.expanded = {
+            state: "error",
+            message: normalizedError.message,
+            startedAt: expandedStartedAt,
+            finishedAt: Date.now(),
+            durationMs: normalizedError.durationMs,
+        };
+        state.stageStatus.analyzed = {
+            state: "error",
+            message: normalizedError.message,
+            startedAt: analyzedStartedAt,
+            finishedAt: Date.now(),
+            durationMs: normalizedError.durationMs,
+        };
+        state.diagnostics.expanded = {
+            stageKey: "expanded",
+            stageLabel: getStage("expanded").label,
+            status: "error",
+            endpoint: "/expand/analyze/stream",
+            requestId: normalizedError.requestId,
+            startedAt: startedAtLabel,
+            durationMs: normalizedError.durationMs,
+            request: sanitizeSensitiveData(inputData),
+            error: normalizedError,
+        };
+        state.diagnostics.analyzed = {
+            stageKey: "analyzed",
+            stageLabel: getStage("analyzed").label,
+            status: "error",
+            endpoint: "/expand/analyze/stream",
+            requestId: normalizedError.requestId,
+            startedAt: startedAtLabel,
+            durationMs: normalizedError.durationMs,
+            request: sanitizeSensitiveData(inputData),
+            error: normalizedError,
+        };
+        renderAll();
+        throw normalizedError;
+    }
+}
+
+function applyAnalyzeStreamEvent(eventPayload, startedAt) {
+    if (!eventPayload || eventPayload.event !== "analysis") {
+        return;
+    }
+
+    const data = eventPayload.data || {};
+    const currentResult = state.results.analyzed || { analyzed_keywords: [] };
+    currentResult.analyzed_keywords = mergeAnalyzedKeywords(
+        currentResult.analyzed_keywords || [],
+        data.items || [],
+    );
+    state.results.analyzed = currentResult;
+
+    state.stageStatus.analyzed = {
+        state: "running",
+        message: `${currentResult.analyzed_keywords.length}건 평가 완료`,
+        startedAt,
+        finishedAt: null,
+        durationMs: Date.now() - startedAt,
+    };
+    renderAll();
+}
+
+function mergeAnalyzedKeywords(existingItems, incomingItems) {
+    const merged = new Map();
+    [...(existingItems || []), ...(incomingItems || [])].forEach((item) => {
+        if (!item || typeof item !== "object") {
+            return;
+        }
+        const keyword = String(item.keyword || "").trim();
+        if (!keyword) {
+            return;
+        }
+        merged.set(keyword, item);
+    });
+    return [...merged.values()].sort((left, right) => Number(right.score || 0) - Number(left.score || 0));
+}
+
+function renderStageList() {
+    elements.statusList.innerHTML = STAGES.map((stage) => {
+        const status = state.stageStatus[stage.key];
+        const icon = getStageStatusIcon(status.state);
+        const tooltip = getStageTooltipText(stage, status);
+
+        return `
+            <button type="button" class="status-button ${escapeHtml(status.state)}" aria-label="${escapeHtml(stage.label)}">
+                <span class="status-icon" aria-hidden="true">${icon}</span>
+                <span class="status-label">${escapeHtml(stage.shortLabel || stage.label)}</span>
+                <span class="status-badge">${escapeHtml(formatStageBadge(status))}</span>
+                <span class="status-tooltip">${escapeHtml(tooltip)}</span>
+            </button>
+        `;
+    }).join("");
+}
+
+function renderResults() {
+    const cards = [];
+
+    if (state.results.collected?.collected_keywords) {
+        cards.push(resultCard("수집 키워드", state.results.collected.collected_keywords, renderCollectedList));
+    }
+    if (state.results.expanded?.expanded_keywords) {
+        cards.push(
+            resultCard("확장 키워드", state.results.expanded.expanded_keywords, renderExpandedList, {
+                className: "expanded-result-card",
+            }),
+        );
+    }
+    if (state.results.analyzed?.analyzed_keywords) {
+        cards.push(resultCard("분석 결과", state.results.analyzed.analyzed_keywords, renderAnalyzedList));
+    }
+    if (state.results.selected?.selected_keywords) {
+        cards.push(resultCard("골든 키워드", state.results.selected.selected_keywords, renderSelectedList));
+    }
+    if (state.results.titled?.generated_titles) {
+        cards.push(resultCard("생성된 제목", state.results.titled.generated_titles, renderTitleList));
+    }
+
+    elements.resultsGrid.innerHTML = cards.length > 0
+        ? cards.join("")
+        : `
+            <div class="placeholder">
+                상단 설정을 고른 뒤 실행 버튼을 누르면 결과가 이 영역에 표시됩니다.<br />
+                키워드 발굴과 분석을 먼저 확인한 뒤, 마지막에 제목 생성으로 넘어가면 됩니다.
+            </div>
+        `;
+}
+
+function resultCard(title, items, renderer, options = {}) {
+    return `
+        <article class="result-card ${escapeHtml(options.className || "")}">
+            <div class="result-head">
+                <h3>${escapeHtml(title)}</h3>
+                <span class="result-count">총 ${countItems(items)}건</span>
+            </div>
+            ${options.subtitle ? `<p class="result-subtitle">${escapeHtml(options.subtitle)}</p>` : ""}
+            ${renderer(items)}
+        </article>
+    `;
+}
+
+function renderCollectedList(items) {
+    return `<div class="keyword-list">${items.slice(0, 20).map((item) => `
+        <div class="keyword-item">
+            <div class="keyword-main">
+                <strong>${escapeHtml(item.keyword || "-")}</strong>
+                <span class="score-line">${escapeHtml(item.source || "source 없음")}</span>
+            </div>
+            <div class="keyword-meta">
+                <span class="badge">카테고리 ${escapeHtml(item.category || "미분류")}</span>
+                <span class="badge">원문 ${escapeHtml(item.raw || "-")}</span>
+            </div>
+            <label class="keyword-select">
+                <input
+                    type="checkbox"
+                    data-collected-key="${escapeHtml(createCollectedIdentity(item))}"
+                    ${state.selectedCollectedKeys.includes(createCollectedIdentity(item)) ? "checked" : ""}
+                />
+                <span>확장 입력에 사용</span>
+            </label>
+        </div>
+    `).join("")}</div>`;
+}
+
+function renderAnalyzedList(items) {
+    const rows = (items || []).slice(0, 50).map((item) => `
+        <tr>
+            <td><strong>${escapeHtml(item.keyword || "-")}</strong></td>
+            <td>${escapeHtml(formatPriority(item.priority))}</td>
+            <td>${escapeHtml(formatNumber(item.score))}</td>
+            <td>${escapeHtml(formatNumber(item.metrics?.volume))}</td>
+            <td>${escapeHtml(formatNumber(item.metrics?.competition))}</td>
+            <td>${escapeHtml(formatNumber(item.metrics?.cpc))}</td>
+            <td>${escapeHtml(formatNumber(item.metrics?.bid))}</td>
+            <td>${escapeHtml(formatNumber(item.metrics?.profit))}</td>
+        </tr>
+    `).join("");
+
+    return `
+        <div class="expanded-table-wrap full">
+            <table class="expanded-table analyzed-table">
+                <thead>
+                    <tr>
+                        <th>키워드</th>
+                        <th>등급</th>
+                        <th>점수</th>
+                        <th>조회량</th>
+                        <th>경쟁도</th>
+                        <th>CPC</th>
+                        <th>입찰가</th>
+                        <th>수익성</th>
+                    </tr>
+                </thead>
+                <tbody>${rows || `<tr><td colspan="8">분석 결과가 없습니다.</td></tr>`}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderSelectedList(items) {
+    return `<div class="keyword-list">${items.map((item) => `
+        <div class="keyword-item">
+            <div class="keyword-main">
+                <strong>${escapeHtml(item.keyword || "-")}</strong>
+                <span class="score-line">수익 점수 ${escapeHtml(formatNumber(item.score))}</span>
+            </div>
+            <div class="keyword-meta">
+                <span class="badge">CPC ${escapeHtml(formatNumber(item.metrics?.cpc))}</span>
+                <span class="badge">입찰 ${escapeHtml(formatNumber(item.metrics?.bid))}</span>
+                <span class="badge">경쟁 ${escapeHtml(formatNumber(item.metrics?.competition))}</span>
+            </div>
+        </div>
+    `).join("")}</div>`;
+}
+
+function renderTitleList(items) {
+    return `<div class="title-list">${items.map((item) => `
+        <div class="title-item">
+            <div class="title-keyword">
+                <strong>${escapeHtml(item.keyword || "-")}</strong>
+                <span class="badge">제목 ${escapeHtml(String((item.titles?.naver_home || []).length + (item.titles?.blog || []).length))}개</span>
+            </div>
+            <div class="title-columns">
+                <div class="title-column">
+                    <h4>네이버 홈형</h4>
+                    <ul>${(item.titles?.naver_home || []).map((title) => `<li>${escapeHtml(title)}</li>`).join("") || "<li>결과 없음</li>"}</ul>
+                </div>
+                <div class="title-column">
+                    <h4>블로그형</h4>
+                    <ul>${(item.titles?.blog || []).map((title) => `<li>${escapeHtml(title)}</li>`).join("") || "<li>결과 없음</li>"}</ul>
+                </div>
+            </div>
+        </div>
+    `).join("")}</div>`;
+}
+
+function buildStageDetail(status) {
+    if (status.state === "running") {
+        return `${status.message} · ${formatElapsed(status)}`;
+    }
+    if (status.state === "success") {
+        return `${status.message} · ${formatDuration(status.durationMs)}`;
+    }
+    if (status.state === "error") {
+        return `${status.message} · ${formatDuration(status.durationMs)}`;
+    }
+    return "아직 실행하지 않았습니다.";
+}
+
+function formatStageBadge(status) {
+    if (status.state === "running") return "실행중";
+    if (status.state === "success") return "완료";
+    if (status.state === "error") return "오류";
+    return "대기";
+}
+
+function formatPriority(priority) {
+    if (priority === "high") return "상";
+    if (priority === "medium") return "중";
+    return "하";
+}
+
+function getStageStatusIcon(stateValue) {
+    if (stateValue === "running") return "◔";
+    if (stateValue === "success") return "●";
+    if (stateValue === "error") return "▲";
+    return "○";
+}
+
+function getStageTooltipText(stage, status) {
+    return `${stage.description} ${buildStageDetail(status)}`;
+}
+
+function coerceExpandLimitValue(rawValue) {
+    const value = String(rawValue || "").trim();
+    if (!value) {
+        return null;
+    }
+    const number = Number(value);
+    if (!Number.isFinite(number) || number <= 0) {
+        return null;
+    }
+    return Math.floor(number);
+}
+
+function downloadAnalyzedCsv() {
+    const items = state.results.analyzed?.analyzed_keywords || [];
+    if (!items.length) {
+        addLog("내보낼 분석 결과가 없습니다.", "error");
+        return;
+    }
+
+    const header = [
+        "keyword",
+        "grade",
+        "priority",
+        "analysis_mode",
+        "confidence",
+        "score",
+        "cpc_score",
+        "search_volume_score",
+        "rarity_score",
+        "pc_searches",
+        "mobile_searches",
+        "volume",
+        "blog_results",
+        "pc_clicks",
+        "mobile_clicks",
+        "cpc",
+        "bid",
+        "bid_1",
+        "bid_2",
+        "bid_3",
+        "mobile_bid_1",
+        "mobile_bid_2",
+        "mobile_bid_3",
+        "profit",
+        "competition",
+        "opportunity",
+    ];
+    const rows = items.map((item) => [
+        item.keyword || "",
+        item.grade || "",
+        item.priority || "",
+        item.analysis_mode || "",
+        item.confidence ?? item.metrics?.confidence ?? "",
+        item.score ?? "",
+        item.metrics?.cpc_score ?? item.metrics?.monetization_score ?? "",
+        item.metrics?.search_volume_score ?? item.metrics?.volume_score ?? "",
+        item.metrics?.rarity_score ?? "",
+        item.metrics?.pc_searches ?? "",
+        item.metrics?.mobile_searches ?? "",
+        item.metrics?.volume ?? "",
+        item.metrics?.blog_results ?? "",
+        item.metrics?.pc_clicks ?? "",
+        item.metrics?.mobile_clicks ?? "",
+        item.metrics?.cpc ?? "",
+        item.metrics?.bid ?? "",
+        item.metrics?.bid_1 ?? "",
+        item.metrics?.bid_2 ?? "",
+        item.metrics?.bid_3 ?? "",
+        item.metrics?.mobile_bid_1 ?? "",
+        item.metrics?.mobile_bid_2 ?? "",
+        item.metrics?.mobile_bid_3 ?? "",
+        item.metrics?.profit ?? "",
+        item.metrics?.competition ?? "",
+        item.metrics?.opportunity ?? "",
+    ]);
+    const csvText = [header, ...rows]
+        .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
+        .join("\n");
+
+    const blob = new Blob(["\ufeff" + csvText], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `keyword-analysis-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    addLog(`분석 결과 ${items.length}건을 CSV로 내보냈습니다.`, "success");
+}
+
 function getCollectorSourcePriority(source) {
     const priorityMap = {
         naver_trend: 0,
@@ -2655,13 +3433,22 @@ function renderExpandedList(items) {
     const originCount = new Set(entries.map((item) => String(item.origin || "").trim()).filter(Boolean)).size;
     const isStreaming = state.stageStatus.expanded.state === "running";
     const streamMeta = state.results.expanded?.stream_meta || null;
+    const stopLabel = state.streamAbortRequested ? "중지 요청됨..." : "중지";
 
     return `
         <div class="expanded-board">
             ${isStreaming ? `
                 <div class="expanded-live-note">
-                    <strong>\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911</strong>
-                    <span>${escapeHtml(buildExpandedLiveSubtitle())}</span>
+                    <div class="expanded-live-copy">
+                        <strong>\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911</strong>
+                        <span>${escapeHtml(buildExpandedLiveSubtitle())}</span>
+                    </div>
+                    <button
+                        type="button"
+                        class="inline-action-btn ${state.streamAbortRequested ? "requested" : ""}"
+                        data-inline-action="stop_expand_stream"
+                        ${state.streamAbortRequested ? "disabled" : ""}
+                    >${stopLabel}</button>
                 </div>
             ` : ""}
             <div class="expanded-stat-strip">
@@ -3024,4 +3811,1699 @@ function buildExpandStreamStatusMessage(streamMeta) {
         return `${streamMeta.depth}\ub2e8\uacc4 \ud655\uc7a5 \uc911`;
     }
     return "\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911\uc785\ub2c8\ub2e4.";
+}
+
+state.streamAbortController = null;
+state.streamAbortEndpoint = "";
+state.streamAbortRequested = false;
+
+function bindElements() {
+    elements.categoryInput = document.getElementById("categoryInput");
+    elements.categorySourceInput = document.getElementById("categorySourceInput");
+    elements.seedInput = document.getElementById("seedInput");
+    elements.trendServiceInput = document.getElementById("trendServiceInput");
+    elements.trendDateInput = document.getElementById("trendDateInput");
+    elements.trendBrowserInput = document.getElementById("trendBrowserInput");
+    elements.trendCookieInput = document.getElementById("trendCookieInput");
+    elements.trendFallbackInput = document.getElementById("trendFallbackInput");
+    elements.trendSourceHelp = document.getElementById("trendSourceHelp");
+    elements.launchLoginBrowserButton = document.getElementById("launchLoginBrowserButton");
+    elements.loadLocalCookieButton = document.getElementById("loadLocalCookieButton");
+    elements.localCookieStatus = document.getElementById("localCookieStatus");
+    elements.optionRelated = document.getElementById("optionRelated");
+    elements.optionAutocomplete = document.getElementById("optionAutocomplete");
+    elements.optionBulk = document.getElementById("optionBulk");
+    elements.optionDebug = document.getElementById("optionDebug");
+    elements.expandInputSource = document.getElementById("expandInputSource");
+    elements.expandManualInput = document.getElementById("expandManualInput");
+    elements.expandOptionRelated = document.getElementById("expandOptionRelated");
+    elements.expandOptionAutocomplete = document.getElementById("expandOptionAutocomplete");
+    elements.expandOptionSeedFilter = document.getElementById("expandOptionSeedFilter");
+    elements.expandMaxResultsInput = document.getElementById("expandMaxResultsInput");
+    elements.expandLimitButtons = Array.from(document.querySelectorAll("[data-expand-limit]"));
+    elements.analyzeInputSource = document.getElementById("analyzeInputSource");
+    elements.analyzeManualInput = document.getElementById("analyzeManualInput");
+    elements.analyzeKeywordStatsInput = document.getElementById("analyzeKeywordStatsInput");
+    elements.exportCsvButton = document.getElementById("exportCsvButton");
+    elements.selectedCollectedCount = document.getElementById("selectedCollectedCount");
+    elements.manualAnalyzeCount = document.getElementById("manualAnalyzeCount");
+    elements.titleMode = document.getElementById("titleMode");
+    elements.titleProvider = document.getElementById("titleProvider");
+    elements.titleModel = document.getElementById("titleModel");
+    elements.titleApiKey = document.getElementById("titleApiKey");
+    elements.titleTemperature = document.getElementById("titleTemperature");
+    elements.titleFallback = document.getElementById("titleFallback");
+    elements.titleModeBadge = document.getElementById("titleModeBadge");
+    elements.titleModeRadios = Array.from(document.querySelectorAll("input[name='titleModeOption']"));
+    elements.titleModeVisibilityBlocks = Array.from(document.querySelectorAll("[data-title-mode-visibility]"));
+    elements.statusList = document.getElementById("statusList");
+    elements.resultsGrid = document.getElementById("resultsGrid");
+    elements.activityLog = document.getElementById("activityLog");
+    elements.pipelineStatus = document.getElementById("pipelineStatus");
+    elements.progressBar = document.getElementById("progressBar");
+    elements.progressText = document.getElementById("progressText");
+    elements.progressDetail = document.getElementById("progressDetail");
+    elements.errorConsole = document.getElementById("errorConsole");
+    elements.debugPanels = document.getElementById("debugPanels");
+    elements.stopStreamButton = document.getElementById("stopStreamButton");
+    elements.modeVisibilityBlocks = Array.from(document.querySelectorAll("[data-mode-visibility]"));
+    elements.guideTabButtons = Array.from(document.querySelectorAll("[data-guide-tab]"));
+    elements.guideTabPanels = Array.from(document.querySelectorAll("[data-guide-panel]"));
+    elements.actionButtons = Array.from(document.querySelectorAll("button"));
+}
+
+function bindEvents() {
+    document.querySelectorAll("input[name='collectorMode']").forEach((element) => {
+        element.addEventListener("change", renderInputState);
+    });
+    document.querySelectorAll("[data-run-action='collect']").forEach((button) => {
+        button.addEventListener("click", () => {
+            runWithGuard(runCollectStage, "\uc218\uc9d1 \ub2e8\uacc4 \uc2e4\ud589 \uc911");
+        });
+    });
+    document.getElementById("runExpandButton").addEventListener("click", () => {
+        runWithGuard(runThroughExpand, "\ud655\uc7a5 \ub2e8\uacc4 \uc2e4\ud589 \uc911");
+    });
+    document.getElementById("runAnalyzeButton").addEventListener("click", () => {
+        runWithGuard(runThroughAnalyze, "\ubd84\uc11d \ub2e8\uacc4 \uc2e4\ud589 \uc911");
+    });
+    document.getElementById("runSelectButton").addEventListener("click", () => {
+        runWithGuard(runThroughSelect, "\uc120\ubcc4 \ub2e8\uacc4 \uc2e4\ud589 \uc911");
+    });
+    document.getElementById("runTitleButton").addEventListener("click", () => {
+        runWithGuard(runThroughTitle, "\uc81c\ubaa9 \uc0dd\uc131 \ub2e8\uacc4 \uc2e4\ud589 \uc911");
+    });
+    document.getElementById("runFullButton").addEventListener("click", () => {
+        runWithGuard(runFullFlow, "\uc804\uccb4 \ud30c\uc774\ud504\ub77c\uc778 \uc2e4\ud589 \uc911");
+    });
+    document.getElementById("resetButton").addEventListener("click", resetAll);
+    document.getElementById("clearDebugButton").addEventListener("click", clearDiagnostics);
+    elements.stopStreamButton?.addEventListener("click", cancelActiveStream);
+    elements.resultsGrid.addEventListener("click", handleResultsGridClick);
+    elements.resultsGrid.addEventListener("change", handleResultsGridChange);
+    elements.expandManualInput.addEventListener("input", renderInputState);
+    elements.expandInputSource.addEventListener("change", renderInputState);
+    elements.analyzeManualInput.addEventListener("input", renderInputState);
+    elements.analyzeInputSource.addEventListener("change", renderInputState);
+    elements.analyzeKeywordStatsInput?.addEventListener("input", renderInputState);
+    elements.expandMaxResultsInput?.addEventListener("input", () => {
+        elements.expandLimitButtons.forEach((button) => button.classList.remove("active"));
+    });
+    [
+        elements.categorySourceInput,
+        elements.trendServiceInput,
+        elements.trendDateInput,
+        elements.trendBrowserInput,
+        elements.trendCookieInput,
+        elements.trendFallbackInput,
+    ].forEach((element) => {
+        element?.addEventListener("input", handleTrendSettingsChange);
+        element?.addEventListener("change", handleTrendSettingsChange);
+    });
+    elements.loadLocalCookieButton.addEventListener("click", () => {
+        runWithGuard(importLocalNaverCookie, "\ub85c\uceec \ub124\uc774\ubc84 \uc138\uc158 \ubd88\ub7ec\uc624\ub294 \uc911");
+    });
+    elements.launchLoginBrowserButton.addEventListener("click", () => {
+        runWithGuard(openDedicatedLoginBrowser, "\uc804\uc6a9 \ub85c\uadf8\uc778 \ube0c\ub77c\uc6b0\uc800 \uc5ec\ub294 \uc911");
+    });
+    [
+        elements.titleMode,
+        elements.titleProvider,
+        elements.titleModel,
+        elements.titleApiKey,
+        elements.titleTemperature,
+        elements.titleFallback,
+    ].forEach((element) => {
+        element.addEventListener("input", handleTitleSettingsChange);
+        element.addEventListener("change", handleTitleSettingsChange);
+    });
+    elements.titleModeRadios.forEach((radio) => {
+        radio.addEventListener("change", handleTitleSettingsChange);
+        radio.addEventListener("input", handleTitleSettingsChange);
+    });
+    document.querySelectorAll("[data-preset]").forEach((button) => {
+        button.addEventListener("click", () => applyPreset(button.dataset.preset || "finance"));
+    });
+    elements.expandLimitButtons.forEach((button) => {
+        button.addEventListener("click", () => setExpandLimitPreset(button.dataset.expandLimit || "1000"));
+    });
+    elements.exportCsvButton?.addEventListener("click", downloadAnalyzedCsv);
+    setExpandLimitPreset(elements.expandMaxResultsInput?.value || "1000");
+}
+
+function buildCollectInput() {
+    const trendSettings = getTrendSettingsFormState();
+    const mode = getCollectorMode();
+    const categoryMode = mode === "category";
+
+    return {
+        mode,
+        category: categoryMode ? elements.categoryInput.value.trim() : "",
+        category_source: categoryMode ? (elements.categorySourceInput.value.trim() || "naver_trend") : "preset_search",
+        seed_input: categoryMode ? "" : elements.seedInput.value.trim(),
+        options: {
+            collect_related: elements.optionRelated.checked,
+            collect_autocomplete: elements.optionAutocomplete.checked,
+            collect_bulk: categoryMode ? elements.optionBulk.checked : false,
+        },
+        trend_options: {
+            service: trendSettings.service,
+            content_type: "text",
+            date: trendSettings.date,
+            auth_cookie: categoryMode ? trendSettings.auth_cookie : "",
+            fallback_to_preset_search: categoryMode ? trendSettings.fallback_to_preset_search : false,
+        },
+        debug: elements.optionDebug.checked,
+    };
+}
+
+function buildExpandInput() {
+    const source = elements.expandInputSource.value;
+    const category = getCollectorMode() === "category" ? elements.categoryInput.value.trim() : "";
+    const expandOptions = {
+        enable_related: elements.expandOptionRelated?.checked ?? true,
+        enable_autocomplete: elements.expandOptionAutocomplete?.checked ?? true,
+        enable_seed_filter: elements.expandOptionSeedFilter?.checked ?? true,
+        max_results: coerceExpandLimitValue(elements.expandMaxResultsInput?.value),
+    };
+
+    if (source === "manual_text") {
+        const keywordsText = elements.expandManualInput.value.trim();
+        const keywords = parseKeywordText(keywordsText);
+        if (keywords.length === 0) {
+            throw new Error("\ud655\uc7a5\ud560 \ud0a4\uc6cc\ub4dc\ub97c \uc9c1\uc811 \uc785\ub825\ud574 \uc8fc\uc138\uc694.");
+        }
+
+        return withAnalyzeKeywordStats({
+            keywords_text: keywordsText,
+            category,
+            source: "manual_input",
+            expand_options: expandOptions,
+        });
+    }
+
+    const collectedKeywords = source === "collector_selected"
+        ? getSelectedCollectedItems()
+        : state.results.collected?.collected_keywords || [];
+
+    if (collectedKeywords.length === 0) {
+        throw new Error(
+            source === "collector_selected"
+                ? "\ud655\uc7a5\uc5d0 \uc0ac\uc6a9\ud560 \uc218\uc9d1 \ud0a4\uc6cc\ub4dc\ub97c \ucd5c\uc18c 1\uac1c \uc120\ud0dd\ud574 \uc8fc\uc138\uc694."
+                : "\uc218\uc9d1 \uacb0\uacfc\uac00 \uc5c6\uc2b5\ub2c8\ub2e4. \uba3c\uc800 \uc218\uc9d1\uc744 \uc2e4\ud589\ud574 \uc8fc\uc138\uc694.",
+        );
+    }
+
+    return withAnalyzeKeywordStats({
+        collected_keywords: collectedKeywords,
+        category,
+        expand_options: expandOptions,
+    });
+}
+
+function renderInputState() {
+    const mode = getCollectorMode();
+    const categoryMode = mode === "category";
+    const selectedCount = getSelectedCollectedItems().length;
+    const expandCount = parseKeywordText(elements.expandManualInput?.value || "").length;
+    const analyzeCount = parseKeywordText(elements.analyzeManualInput?.value || "").length;
+    const expandUsesManual = elements.expandInputSource?.value === "manual_text";
+    const analyzeUsesManual = elements.analyzeInputSource?.value === "manual_text";
+    const usesTrendSource = categoryMode && elements.categorySourceInput?.value === "naver_trend";
+
+    elements.modeVisibilityBlocks.forEach((element) => {
+        element.hidden = element.dataset.modeVisibility !== mode;
+    });
+
+    if (elements.selectedCollectedCount) {
+        elements.selectedCollectedCount.textContent = expandUsesManual
+            ? `\uc9c1\uc811 \uc785\ub825 ${expandCount}\uac74`
+            : `\uc120\ud0dd ${selectedCount}\uac74`;
+    }
+    if (elements.manualAnalyzeCount) {
+        elements.manualAnalyzeCount.textContent = `\uc9c1\uc811 \uc785\ub825 ${analyzeCount}\uac74`;
+    }
+    if (elements.expandManualInput) {
+        elements.expandManualInput.disabled = !expandUsesManual;
+    }
+    if (elements.analyzeManualInput) {
+        elements.analyzeManualInput.disabled = !analyzeUsesManual;
+    }
+    if (elements.seedInput) {
+        elements.seedInput.disabled = categoryMode;
+        elements.seedInput.title = categoryMode ? "\uce74\ud14c\uace0\ub9ac \ubaa8\ub4dc\uc5d0\uc11c\ub294 \uc2dc\ub4dc \ud0a4\uc6cc\ub4dc\ub97c \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4." : "";
+    }
+    if (elements.categoryInput) {
+        elements.categoryInput.disabled = !categoryMode;
+        elements.categoryInput.title = categoryMode ? "" : "\uc2dc\ub4dc \ubaa8\ub4dc\uc5d0\uc11c\ub294 \uce74\ud14c\uace0\ub9ac\ub97c \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.";
+    }
+    if (elements.categorySourceInput) {
+        elements.categorySourceInput.disabled = !categoryMode;
+    }
+    if (elements.optionRelated) {
+        elements.optionRelated.title = usesTrendSource ? "\ud2b8\ub80c\ub4dc \uc2e4\ud328 \ud6c4 preset fallback\uc5d0\uc11c\ub9cc \uc801\uc6a9\ub429\ub2c8\ub2e4." : "";
+    }
+    if (elements.optionAutocomplete) {
+        elements.optionAutocomplete.title = usesTrendSource ? "\ud2b8\ub80c\ub4dc \uc2e4\ud328 \ud6c4 preset fallback\uc5d0\uc11c\ub9cc \uc801\uc6a9\ub429\ub2c8\ub2e4." : "";
+    }
+    if (elements.optionBulk) {
+        elements.optionBulk.title = usesTrendSource ? "\ud2b8\ub80c\ub4dc \uc2e4\ud328 \ud6c4 preset fallback\uc5d0\uc11c\ub9cc \uc801\uc6a9\ub429\ub2c8\ub2e4." : "";
+    }
+    if (elements.stopStreamButton) {
+        elements.stopStreamButton.title = state.streamAbortController
+            ? "\uc2e4\uc2dc\uac04 \ud655\uc7a5/\ubd84\uc11d \uc2a4\ud2b8\ub9bc\uc744 \uc911\uc9c0\ud569\ub2c8\ub2e4."
+            : "";
+    }
+
+    renderTrendSettingsState();
+}
+
+function renderTrendSettingsState() {
+    const categoryMode = getCollectorMode() === "category";
+    const usesTrendSource = categoryMode && elements.categorySourceInput.value === "naver_trend";
+
+    elements.trendServiceInput.disabled = !usesTrendSource;
+    elements.trendDateInput.disabled = !usesTrendSource;
+    elements.trendBrowserInput.disabled = !usesTrendSource;
+    elements.trendCookieInput.disabled = !usesTrendSource;
+    elements.trendFallbackInput.disabled = !categoryMode;
+    elements.launchLoginBrowserButton.disabled = !usesTrendSource;
+    elements.loadLocalCookieButton.disabled = !usesTrendSource;
+
+    if (elements.trendSourceHelp) {
+        if (usesTrendSource) {
+            const hasCookie = Boolean(elements.trendCookieInput.value.trim());
+            const service = elements.trendServiceInput.value || "naver_blog";
+            const browser = elements.trendBrowserInput.value || "auto";
+            const fallbackLabel = elements.trendFallbackInput.checked ? "\ucf1c\uc9d0" : "\uaebc\uc9d0";
+            elements.trendSourceHelp.textContent = hasCookie
+                ? `\ud604\uc7ac Creator Advisor ${service} \ud2b8\ub80c\ub4dc\ub97c \uc9c1\uc811 \uc870\ud68c\ud569\ub2c8\ub2e4. \ub85c\uceec \ube0c\ub77c\uc6b0\uc800\ub294 ${browser}, fallback\uc740 ${fallbackLabel} \uc0c1\ud0dc\uc785\ub2c8\ub2e4.`
+                : `\ud604\uc7ac Creator Advisor ${service} \ucfe0\ud0a4\uac00 \ube44\uc5b4 \uc788\uc2b5\ub2c8\ub2e4. '\uc804\uc6a9 \ub85c\uadf8\uc778 \ube0c\ub77c\uc6b0\uc800 \uc5f4\uae30'\ub85c \ub85c\uceec \uc138\uc158\uc744 \ub9cc\ub4e4\uac70\ub098 \ucfe0\ud0a4\ub97c \ubd99\uc5ec\ub123\uc5b4 \uc8fc\uc138\uc694.`;
+        } else {
+            elements.trendSourceHelp.textContent = "\uce74\ud14c\uace0\ub9ac \uc218\uc9d1 \uc18c\uc2a4\uac00 preset fallback\uc774\uba74 \uae30\uc874 \uacf5\uac1c \uac80\uc0c9 \uacbd\ub85c\ub85c \ud0a4\uc6cc\ub4dc\ub97c \uc218\uc9d1\ud569\ub2c8\ub2e4.";
+        }
+    }
+
+    if (elements.localCookieStatus && !elements.localCookieStatus.dataset.locked) {
+        elements.localCookieStatus.textContent = elements.trendCookieInput.value.trim()
+            ? "\ube0c\ub77c\uc6b0\uc800\uc5d0\uc11c \ubd88\ub7ec\uc624\uac70\ub098 \uc9c1\uc811 \ubd99\uc5ec\ub123\uc744 \ub85c\uceec \uc138\uc158\uc774 \uc900\ube44\ub418\uc5b4 \uc788\uc2b5\ub2c8\ub2e4."
+            : "\uc544\uc9c1 \ubd88\ub7ec\uc628 \ub85c\uceec \uc138\uc158\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.";
+    }
+}
+
+function syncBusyButtons() {
+    elements.actionButtons.forEach((button) => {
+        if (button === elements.stopStreamButton) {
+            button.disabled = !(state.isBusy && state.streamAbortController && !state.streamAbortRequested);
+            return;
+        }
+        button.disabled = state.isBusy;
+    });
+}
+
+async function runWithGuard(task, runningMessage) {
+    if (state.isBusy) {
+        addLog("\uc774\ubbf8 \ub2e4\ub978 \uc791\uc5c5\uc744 \uc2e4\ud589 \uc911\uc785\ub2c8\ub2e4. \ud604\uc7ac \ub2e8\uacc4\uac00 \ub05d\ub09c \ub4a4 \ub2e4\uc2dc \uc2dc\ub3c4\ud574 \uc8fc\uc138\uc694.", "error");
+        return;
+    }
+
+    state.isBusy = true;
+    state.lastError = null;
+    setGlobalStatus(runningMessage, "running");
+    syncBusyButtons();
+    renderAll();
+
+    try {
+        await task();
+        setGlobalStatus("\uc2e4\ud589 \uc644\ub8cc", "success");
+    } catch (error) {
+        if (isAbortLikeError(error)) {
+            state.lastError = null;
+            setGlobalStatus("\uc911\uc9c0\ub428", "idle");
+            addLog(error.message || "\uc2e4\uc2dc\uac04 \uc791\uc5c5\uc744 \uc911\uc9c0\ud588\uc2b5\ub2c8\ub2e4.", "info");
+        } else {
+            const normalizedError = normalizeError(error);
+            state.lastError = normalizedError;
+            setGlobalStatus("\uc624\ub958 \ubc1c\uc0dd", "error");
+            addLog(buildErrorHeadline(normalizedError), "error");
+        }
+    } finally {
+        state.isBusy = false;
+        syncBusyButtons();
+        renderAll();
+    }
+}
+
+function beginStreamRequest(endpoint) {
+    const controller = new AbortController();
+    state.streamAbortController = controller;
+    state.streamAbortEndpoint = endpoint;
+    state.streamAbortRequested = false;
+    syncBusyButtons();
+    renderAll();
+    return controller;
+}
+
+function completeStreamRequest(controller) {
+    if (state.streamAbortController === controller) {
+        state.streamAbortController = null;
+        state.streamAbortEndpoint = "";
+        state.streamAbortRequested = false;
+    }
+    syncBusyButtons();
+}
+
+function cancelActiveStream() {
+    if (!state.streamAbortController || state.streamAbortRequested) {
+        return;
+    }
+    state.streamAbortRequested = true;
+    addLog("\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911\uc9c0\ub97c \uc694\uccad\ud588\uc2b5\ub2c8\ub2e4.", "info");
+    state.streamAbortController.abort("user_cancelled");
+    syncBusyButtons();
+    renderAll();
+}
+
+async function executeExpandStageStream(inputData) {
+    const stageKey = "expanded";
+    const stage = getStage(stageKey);
+    const startedAt = Date.now();
+    const startedAtLabel = new Date(startedAt).toISOString();
+    const streamController = beginStreamRequest("/expand/stream");
+
+    state.stageStatus[stageKey] = {
+        state: "running",
+        message: `${stage.label} \uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911`,
+        startedAt,
+        finishedAt: null,
+        durationMs: null,
+    };
+    state.results.expanded = {
+        expanded_keywords: [],
+        stream_meta: {
+            phase: "starting",
+            currentKeyword: "",
+            depth: 0,
+            totalResults: 0,
+            queueSize: 0,
+            totalOrigins: 0,
+            maxDepth: 0,
+        },
+    };
+    renderAll();
+
+    try {
+        const response = await postModuleStream(
+            "/expand/stream",
+            inputData,
+            (eventPayload) => {
+                applyExpandStreamEvent(eventPayload, startedAt);
+            },
+            { signal: streamController.signal },
+        );
+        const result = response.result || {};
+        result.expanded_keywords = mergeExpandedKeywords(
+            state.results.expanded?.expanded_keywords || [],
+            result.expanded_keywords || [],
+        );
+
+        const durationMs = Date.now() - startedAt;
+        state.stageStatus[stageKey] = {
+            state: "success",
+            message: `${result.expanded_keywords.length}\uac74 \uc644\ub8cc`,
+            startedAt,
+            finishedAt: Date.now(),
+            durationMs,
+        };
+        state.diagnostics[stageKey] = {
+            stageKey,
+            stageLabel: stage.label,
+            status: "success",
+            endpoint: "/expand/stream",
+            requestId: response.requestId,
+            startedAt: startedAtLabel,
+            durationMs,
+            request: sanitizeSensitiveData(inputData),
+            responseSummary: buildResponseSummary(stageKey, result),
+            backendDebug: result.debug || null,
+        };
+
+        return result;
+    } catch (error) {
+        const durationMs = Date.now() - startedAt;
+        if (isAbortLikeError(error)) {
+            state.stageStatus[stageKey] = {
+                state: "cancelled",
+                message: "\uc0ac\uc6a9\uc790 \uc911\uc9c0",
+                startedAt,
+                finishedAt: Date.now(),
+                durationMs,
+            };
+            state.diagnostics[stageKey] = {
+                stageKey,
+                stageLabel: stage.label,
+                status: "cancelled",
+                endpoint: "/expand/stream",
+                requestId: "",
+                startedAt: startedAtLabel,
+                durationMs,
+                request: sanitizeSensitiveData(inputData),
+            };
+            renderAll();
+            throw error;
+        }
+
+        const normalizedError = normalizeError(error, {
+            stageKey,
+            endpoint: "/expand/stream",
+            request: inputData,
+            startedAt: startedAtLabel,
+            durationMs,
+        });
+
+        state.stageStatus[stageKey] = {
+            state: "error",
+            message: normalizedError.message,
+            startedAt,
+            finishedAt: Date.now(),
+            durationMs: normalizedError.durationMs,
+        };
+        state.diagnostics[stageKey] = {
+            stageKey,
+            stageLabel: stage.label,
+            status: "error",
+            endpoint: "/expand/stream",
+            requestId: normalizedError.requestId,
+            startedAt: startedAtLabel,
+            durationMs: normalizedError.durationMs,
+            request: sanitizeSensitiveData(inputData),
+            error: normalizedError,
+        };
+        renderAll();
+        throw normalizedError;
+    } finally {
+        completeStreamRequest(streamController);
+    }
+}
+
+async function executeExpandAnalyzeStageStream(inputData) {
+    const expandedStartedAt = Date.now();
+    const analyzedStartedAt = expandedStartedAt;
+    const startedAtLabel = new Date(expandedStartedAt).toISOString();
+    const streamController = beginStreamRequest("/expand/analyze/stream");
+
+    state.stageStatus.expanded = {
+        state: "running",
+        message: "\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911",
+        startedAt: expandedStartedAt,
+        finishedAt: null,
+        durationMs: null,
+    };
+    state.stageStatus.analyzed = {
+        state: "running",
+        message: "\uc2e4\uc2dc\uac04 \ubd84\uc11d \uc911",
+        startedAt: analyzedStartedAt,
+        finishedAt: null,
+        durationMs: null,
+    };
+    state.results.expanded = {
+        expanded_keywords: [],
+        stream_meta: {
+            phase: "starting",
+            currentKeyword: "",
+            depth: 0,
+            totalResults: 0,
+            queueSize: 0,
+            totalOrigins: 0,
+            maxDepth: 0,
+        },
+    };
+    state.results.analyzed = {
+        analyzed_keywords: [],
+    };
+    renderAll();
+
+    try {
+        const response = await postModuleStream(
+            "/expand/analyze/stream",
+            inputData,
+            (eventPayload) => {
+                if (eventPayload?.event === "progress") {
+                    applyExpandStreamEvent(eventPayload, expandedStartedAt);
+                }
+                if (eventPayload?.event === "analysis") {
+                    applyAnalyzeStreamEvent(eventPayload, analyzedStartedAt);
+                }
+            },
+            { signal: streamController.signal },
+        );
+
+        const result = response.result || {};
+        result.expanded_keywords = mergeExpandedKeywords(
+            state.results.expanded?.expanded_keywords || [],
+            result.expanded_keywords || [],
+        );
+        result.analyzed_keywords = mergeAnalyzedKeywords(
+            state.results.analyzed?.analyzed_keywords || [],
+            result.analyzed_keywords || [],
+        );
+
+        const expandedDurationMs = Date.now() - expandedStartedAt;
+        const analyzedDurationMs = Date.now() - analyzedStartedAt;
+        state.stageStatus.expanded = {
+            state: "success",
+            message: `${result.expanded_keywords.length}\uac74 \uc644\ub8cc`,
+            startedAt: expandedStartedAt,
+            finishedAt: Date.now(),
+            durationMs: expandedDurationMs,
+        };
+        state.stageStatus.analyzed = {
+            state: "success",
+            message: `${result.analyzed_keywords.length}\uac74 \uc644\ub8cc`,
+            startedAt: analyzedStartedAt,
+            finishedAt: Date.now(),
+            durationMs: analyzedDurationMs,
+        };
+        state.diagnostics.expanded = {
+            stageKey: "expanded",
+            stageLabel: getStage("expanded").label,
+            status: "success",
+            endpoint: "/expand/analyze/stream",
+            requestId: response.requestId,
+            startedAt: startedAtLabel,
+            durationMs: expandedDurationMs,
+            request: sanitizeSensitiveData(inputData),
+            responseSummary: buildResponseSummary("expanded", result),
+            backendDebug: result.debug || null,
+        };
+        state.diagnostics.analyzed = {
+            stageKey: "analyzed",
+            stageLabel: getStage("analyzed").label,
+            status: "success",
+            endpoint: "/expand/analyze/stream",
+            requestId: response.requestId,
+            startedAt: startedAtLabel,
+            durationMs: analyzedDurationMs,
+            request: sanitizeSensitiveData(inputData),
+            responseSummary: buildResponseSummary("analyzed", result),
+            backendDebug: result.debug || null,
+        };
+        return result;
+    } catch (error) {
+        const durationMs = Date.now() - analyzedStartedAt;
+        if (isAbortLikeError(error)) {
+            const finishedAt = Date.now();
+            state.stageStatus.expanded = {
+                state: "cancelled",
+                message: "\uc0ac\uc6a9\uc790 \uc911\uc9c0",
+                startedAt: expandedStartedAt,
+                finishedAt,
+                durationMs,
+            };
+            state.stageStatus.analyzed = {
+                state: "cancelled",
+                message: "\uc0ac\uc6a9\uc790 \uc911\uc9c0",
+                startedAt: analyzedStartedAt,
+                finishedAt,
+                durationMs,
+            };
+            state.diagnostics.expanded = {
+                stageKey: "expanded",
+                stageLabel: getStage("expanded").label,
+                status: "cancelled",
+                endpoint: "/expand/analyze/stream",
+                requestId: "",
+                startedAt: startedAtLabel,
+                durationMs,
+                request: sanitizeSensitiveData(inputData),
+            };
+            state.diagnostics.analyzed = {
+                stageKey: "analyzed",
+                stageLabel: getStage("analyzed").label,
+                status: "cancelled",
+                endpoint: "/expand/analyze/stream",
+                requestId: "",
+                startedAt: startedAtLabel,
+                durationMs,
+                request: sanitizeSensitiveData(inputData),
+            };
+            renderAll();
+            throw error;
+        }
+
+        const normalizedError = normalizeError(error, {
+            stageKey: "analyzed",
+            endpoint: "/expand/analyze/stream",
+            request: inputData,
+            startedAt: startedAtLabel,
+            durationMs,
+        });
+        state.stageStatus.expanded = {
+            state: "error",
+            message: normalizedError.message,
+            startedAt: expandedStartedAt,
+            finishedAt: Date.now(),
+            durationMs: normalizedError.durationMs,
+        };
+        state.stageStatus.analyzed = {
+            state: "error",
+            message: normalizedError.message,
+            startedAt: analyzedStartedAt,
+            finishedAt: Date.now(),
+            durationMs: normalizedError.durationMs,
+        };
+        state.diagnostics.expanded = {
+            stageKey: "expanded",
+            stageLabel: getStage("expanded").label,
+            status: "error",
+            endpoint: "/expand/analyze/stream",
+            requestId: normalizedError.requestId,
+            startedAt: startedAtLabel,
+            durationMs: normalizedError.durationMs,
+            request: sanitizeSensitiveData(inputData),
+            error: normalizedError,
+        };
+        state.diagnostics.analyzed = {
+            stageKey: "analyzed",
+            stageLabel: getStage("analyzed").label,
+            status: "error",
+            endpoint: "/expand/analyze/stream",
+            requestId: normalizedError.requestId,
+            startedAt: startedAtLabel,
+            durationMs: normalizedError.durationMs,
+            request: sanitizeSensitiveData(inputData),
+            error: normalizedError,
+        };
+        renderAll();
+        throw normalizedError;
+    } finally {
+        completeStreamRequest(streamController);
+    }
+}
+
+async function postModuleStream(endpoint, inputData, onEvent, options = {}) {
+    const startedAt = Date.now();
+    const signal = options?.signal;
+    let response;
+
+    try {
+        response = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ input_data: inputData }),
+            signal,
+        });
+    } catch (error) {
+        if (isAbortLikeError(error)) {
+            throw createStreamAbortError(endpoint, startedAt);
+        }
+        const networkError = new Error("\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc694\uccad\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4. \ub124\ud2b8\uc6cc\ud06c\uc640 \uc11c\ubc84 \uc0c1\ud0dc\ub97c \ud655\uc778\ud574 \uc8fc\uc138\uc694.");
+        networkError.code = "network_error";
+        networkError.endpoint = endpoint;
+        networkError.detail = error instanceof Error ? error.message : String(error);
+        networkError.durationMs = Date.now() - startedAt;
+        throw networkError;
+    }
+
+    const requestId = response.headers.get("X-Request-ID") || "";
+    if (!response.ok) {
+        const rawText = await response.text();
+        const payload = tryParseJson(rawText);
+        throw createApiError({
+            endpoint,
+            requestId,
+            statusCode: response.status,
+            payload,
+            rawText,
+            durationMs: Date.now() - startedAt,
+        });
+    }
+
+    if (!response.body) {
+        return {
+            requestId,
+            result: {},
+            durationMs: Date.now() - startedAt,
+        };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResult = {};
+
+    try {
+        while (true) {
+            const { value, done } = await reader.read();
+            buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+            let newlineIndex = buffer.indexOf("\n");
+            while (newlineIndex !== -1) {
+                const line = buffer.slice(0, newlineIndex).trim();
+                buffer = buffer.slice(newlineIndex + 1);
+
+                if (line) {
+                    const payload = tryParseJson(line);
+                    if (payload?.event === "error") {
+                        throw createApiError({
+                            endpoint,
+                            requestId,
+                            statusCode: 500,
+                            payload: { error: payload.error || {} },
+                            rawText: line,
+                            durationMs: Date.now() - startedAt,
+                        });
+                    }
+                    if (payload?.event === "completed") {
+                        finalResult = payload.result || {};
+                    }
+                    if (payload && typeof onEvent === "function") {
+                        onEvent(payload);
+                    }
+                }
+
+                newlineIndex = buffer.indexOf("\n");
+            }
+
+            if (done) {
+                break;
+            }
+        }
+    } catch (error) {
+        if (isAbortLikeError(error)) {
+            throw createStreamAbortError(endpoint, startedAt);
+        }
+        throw error;
+    } finally {
+        try {
+            reader.releaseLock();
+        } catch (error) {
+            // noop
+        }
+    }
+
+    const trailingLine = buffer.trim();
+    if (trailingLine) {
+        const payload = tryParseJson(trailingLine);
+        if (payload?.event === "error") {
+            throw createApiError({
+                endpoint,
+                requestId,
+                statusCode: 500,
+                payload: { error: payload.error || {} },
+                rawText: trailingLine,
+                durationMs: Date.now() - startedAt,
+            });
+        }
+        if (payload?.event === "completed") {
+            finalResult = payload.result || {};
+        }
+        if (payload && typeof onEvent === "function") {
+            onEvent(payload);
+        }
+    }
+
+    return {
+        requestId,
+        result: finalResult,
+        durationMs: Date.now() - startedAt,
+    };
+}
+
+function buildStageDetail(status) {
+    if (status.state === "running") {
+        return `${status.message} \u00b7 ${formatElapsed(status)}`;
+    }
+    if (status.state === "success" || status.state === "error" || status.state === "cancelled") {
+        return `${status.message} \u00b7 ${formatDuration(status.durationMs)}`;
+    }
+    return "\uc544\uc9c1 \uc2e4\ud589\ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4.";
+}
+
+function formatStageBadge(status) {
+    if (status.state === "running") return "\uc2e4\ud589\uc911";
+    if (status.state === "success") return "\uc644\ub8cc";
+    if (status.state === "error") return "\uc624\ub958";
+    if (status.state === "cancelled") return "\uc911\uc9c0\ub428";
+    return "\ub300\uae30";
+}
+
+function getStageStatusIcon(stateValue) {
+    if (stateValue === "running") return "\u25d4";
+    if (stateValue === "success") return "\u25cf";
+    if (stateValue === "error") return "\u25b2";
+    if (stateValue === "cancelled") return "\u25a0";
+    return "\u25cb";
+}
+
+function isAbortLikeError(error) {
+    return error?.name === "AbortError"
+        || error?.code === "abort_error"
+        || error?.code === "stream_aborted"
+        || error?.code === "cancelled";
+}
+
+function createStreamAbortError(endpoint, startedAt) {
+    const error = new Error("\uc2e4\uc2dc\uac04 \ud655\uc7a5\uc744 \uc911\uc9c0\ud588\uc2b5\ub2c8\ub2e4.");
+    error.name = "AbortError";
+    error.code = "abort_error";
+    error.endpoint = endpoint;
+    error.durationMs = Date.now() - startedAt;
+    return error;
+}
+
+function setBlocksVisibility(blocks, activeValue, datasetKey) {
+    (blocks || []).forEach((block) => {
+        const shouldShow = block?.dataset?.[datasetKey] === activeValue;
+        block.hidden = !shouldShow;
+        block.style.display = shouldShow ? "" : "none";
+    });
+}
+
+function syncTitleModeInputFromRadios() {
+    const selectedMode = (elements.titleModeRadios || []).find((radio) => radio.checked)?.value
+        || elements.titleMode?.value
+        || "template";
+    if (elements.titleMode) {
+        elements.titleMode.value = selectedMode;
+    }
+    return selectedMode;
+}
+
+function applyTitleModeSelection(mode) {
+    const normalized = mode === "ai" ? "ai" : "template";
+    if (elements.titleMode) {
+        elements.titleMode.value = normalized;
+    }
+    (elements.titleModeRadios || []).forEach((radio) => {
+        radio.checked = radio.value === normalized;
+    });
+    return normalized;
+}
+
+function loadTitleSettings() {
+    const defaults = {
+        mode: "template",
+        provider: "openai",
+        model: TITLE_PROVIDER_DEFAULT_MODELS.openai,
+        api_key: "",
+        temperature: "0.7",
+        fallback_to_template: true,
+    };
+
+    const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY);
+    const settings = { ...defaults, ...(storedSettings || {}) };
+
+    applyTitleModeSelection(settings.mode);
+    elements.titleProvider.value = settings.provider;
+    elements.titleModel.value = settings.model;
+    elements.titleApiKey.value = settings.api_key;
+    elements.titleTemperature.value = String(settings.temperature || "0.7");
+    elements.titleFallback.checked = Boolean(settings.fallback_to_template);
+
+    renderTitleSettingsState();
+}
+
+function handleTitleSettingsChange(event) {
+    if (event?.target?.matches?.("input[name='titleModeOption']")) {
+        syncTitleModeInputFromRadios();
+    }
+
+    if (event?.target === elements.titleProvider && !elements.titleModel.value.trim()) {
+        elements.titleModel.value = TITLE_PROVIDER_DEFAULT_MODELS[elements.titleProvider.value] || "gpt-4o-mini";
+    }
+
+    if (event?.target === elements.titleProvider) {
+        const providerModel = TITLE_PROVIDER_DEFAULT_MODELS[elements.titleProvider.value] || "gpt-4o-mini";
+        const currentModel = elements.titleModel.value.trim();
+        const knownModels = Object.values(TITLE_PROVIDER_DEFAULT_MODELS);
+        if (!currentModel || knownModels.includes(currentModel)) {
+            elements.titleModel.value = providerModel;
+        }
+    }
+
+    persistTitleSettings();
+    renderTitleSettingsState();
+}
+
+function renderTitleSettingsState() {
+    const mode = syncTitleModeInputFromRadios();
+    const isAiMode = mode === "ai";
+
+    elements.titleModeVisibilityBlocks.forEach((block) => {
+        block.hidden = block.dataset.titleModeVisibility !== mode;
+    });
+
+    elements.titleProvider.disabled = !isAiMode;
+    elements.titleModel.disabled = !isAiMode;
+    elements.titleApiKey.disabled = !isAiMode;
+    elements.titleTemperature.disabled = !isAiMode;
+    elements.titleFallback.disabled = !isAiMode;
+    elements.titleModeBadge.textContent = isAiMode ? `ai:${elements.titleProvider.value}` : "template";
+}
+
+function getActiveGuideTab() {
+    if (state.activeGuideTab) {
+        return state.activeGuideTab;
+    }
+    return elements.guideTabButtons?.[0]?.dataset.guideTab || "";
+}
+
+function setGuideTab(tabKey) {
+    if (!tabKey) {
+        return;
+    }
+    state.activeGuideTab = tabKey;
+    renderGuideTabs();
+}
+
+function renderGuideTabs() {
+    const activeTab = getActiveGuideTab();
+    elements.guideTabButtons?.forEach((button) => {
+        const isActive = (button.dataset.guideTab || "") === activeTab;
+        button.classList.toggle("active", isActive);
+    });
+    elements.guideTabPanels?.forEach((panel) => {
+        const isActive = (panel.dataset.guidePanel || "") === activeTab;
+        panel.hidden = !isActive;
+        panel.classList.toggle("active", isActive);
+    });
+}
+
+function getTitleSettingsFormState() {
+    const mode = syncTitleModeInputFromRadios();
+    const provider = elements.titleProvider.value;
+    return {
+        mode,
+        provider,
+        model: elements.titleModel.value.trim() || TITLE_PROVIDER_DEFAULT_MODELS[provider] || "gpt-4o-mini",
+        api_key: elements.titleApiKey.value.trim(),
+        temperature: elements.titleTemperature.value.trim() || "0.7",
+        fallback_to_template: elements.titleFallback.checked,
+    };
+}
+
+function setGlobalStatus(message, kind) {
+    elements.pipelineStatus.textContent = message;
+    elements.pipelineStatus.classList.remove("running", "error", "cancelled");
+    if (kind === "running") {
+        elements.pipelineStatus.classList.add("running");
+    }
+    if (kind === "error") {
+        elements.pipelineStatus.classList.add("error");
+    }
+    if (kind === "cancelled") {
+        elements.pipelineStatus.classList.add("cancelled");
+    }
+}
+
+function renderProgress() {
+    const completedCount = STAGES.filter((stage) => state.stageStatus[stage.key].state === "success").length;
+    const runningStage = STAGES.find((stage) => state.stageStatus[stage.key].state === "running");
+    const cancelledStages = STAGES.filter((stage) => state.stageStatus[stage.key].state === "cancelled");
+    const progressUnits = completedCount + (runningStage ? 0.45 : 0);
+    const progressPercent = Math.min(100, Math.round((progressUnits / STAGES.length) * 100));
+
+    elements.progressBar.style.width = `${progressPercent}%`;
+    elements.progressText.textContent = `${completedCount} / ${STAGES.length} 단계 완료`;
+
+    if (runningStage) {
+        elements.progressDetail.textContent = `${runningStage.label} 진행 중 · ${formatElapsed(state.stageStatus[runningStage.key])}`;
+        return;
+    }
+    if (cancelledStages.length > 0) {
+        const lastCancelled = cancelledStages[cancelledStages.length - 1];
+        elements.progressDetail.textContent = `${lastCancelled.label} 단계에서 중지되었습니다. 현재까지 수집된 결과는 유지됩니다.`;
+        return;
+    }
+    elements.progressDetail.textContent = completedCount === 0
+        ? "아직 실행되지 않았습니다."
+        : `${completedCount}개 단계가 완료되었습니다.`;
+}
+
+function updateStopButtonState() {
+    if (!elements.stopStreamButton) {
+        return;
+    }
+
+    const isActive = Boolean(state.isBusy && state.streamAbortController);
+    const isRequested = Boolean(state.streamAbortRequested);
+    elements.stopStreamButton.disabled = !isActive || isRequested;
+    elements.stopStreamButton.classList.toggle("requested", isRequested);
+    elements.stopStreamButton.textContent = isRequested ? "중지 요청됨..." : "중지";
+}
+
+function syncBusyButtons() {
+    elements.actionButtons.forEach((button) => {
+        if (button === elements.stopStreamButton) {
+            return;
+        }
+        button.disabled = state.isBusy;
+    });
+    updateStopButtonState();
+}
+
+async function runWithGuard(task, runningMessage) {
+    if (state.isBusy) {
+        addLog("\uc774\ubbf8 \ub2e4\ub978 \uc791\uc5c5\uc744 \uc2e4\ud589 \uc911\uc785\ub2c8\ub2e4. \ud604\uc7ac \ub2e8\uacc4\uac00 \ub05d\ub09c \ub4a4 \ub2e4\uc2dc \uc2dc\ub3c4\ud574 \uc8fc\uc138\uc694.", "error");
+        return;
+    }
+
+    state.isBusy = true;
+    state.lastError = null;
+    setGlobalStatus(runningMessage, "running");
+    syncBusyButtons();
+    renderAll();
+
+    try {
+        await task();
+        setGlobalStatus("\uc2e4\ud589 \uc644\ub8cc", "success");
+    } catch (error) {
+        if (isAbortLikeError(error)) {
+            state.lastError = null;
+            setGlobalStatus("\uc911\uc9c0\ub428", "cancelled");
+            addLog(error.message || "\uc2e4\uc2dc\uac04 \uc791\uc5c5\uc744 \uc911\uc9c0\ud588\uc2b5\ub2c8\ub2e4.", "info");
+        } else {
+            const normalizedError = normalizeError(error);
+            state.lastError = normalizedError;
+            setGlobalStatus("\uc624\ub958 \ubc1c\uc0dd", "error");
+            addLog(buildErrorHeadline(normalizedError), "error");
+        }
+    } finally {
+        state.isBusy = false;
+        syncBusyButtons();
+        renderAll();
+    }
+}
+
+function cancelActiveStream() {
+    if (!state.streamAbortController || state.streamAbortRequested) {
+        return;
+    }
+    state.streamAbortRequested = true;
+    addLog("\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911\uc9c0\ub97c \uc694\uccad\ud588\uc2b5\ub2c8\ub2e4. \ub9c8\uc9c0\ub9c9 \uc218\uc2e0 \ub370\uc774\ud130\uae4c\uc9c0 \ubcf4\uc874\ud569\ub2c8\ub2e4.", "info");
+    updateStopButtonState();
+    state.streamAbortController.abort("user_cancelled");
+    renderAll();
+}
+
+function buildExpandedLiveSubtitle() {
+    const streamMeta = state.results.expanded?.stream_meta;
+    if (!streamMeta) {
+        return "\uc2e4\uc2dc\uac04\uc73c\ub85c \ud655\uc7a5 \ud0a4\uc6cc\ub4dc\ub97c \ubcf4\uc5ec\uc8fc\uace0 \uc788\uc2b5\ub2c8\ub2e4.";
+    }
+
+    const parts = [];
+    if (streamMeta.depth) {
+        parts.push(`${streamMeta.depth}\ub2e8\uacc4`);
+    }
+    if (streamMeta.currentKeyword) {
+        parts.push(streamMeta.currentKeyword);
+    }
+    if (streamMeta.queueSize) {
+        parts.push(`\ub300\uae30 ${streamMeta.queueSize}\uac1c`);
+    }
+    if (state.streamAbortRequested) {
+        parts.push("\uc911\uc9c0 \uc694\uccad\ub428");
+    }
+
+    return parts.length > 0
+        ? `${parts.join(" \u00b7 ")} \uc0c1\ud0dc\uc785\ub2c8\ub2e4.`
+        : "\uc2e4\uc2dc\uac04\uc73c\ub85c \ud655\uc7a5 \ud0a4\uc6cc\ub4dc\ub97c \ubcf4\uc5ec\uc8fc\uace0 \uc788\uc2b5\ub2c8\ub2e4.";
+}
+
+async function runSelectStage() {
+    if (!state.results.analyzed?.analyzed_keywords?.length) {
+        await runAnalyzeStage();
+    } else if (state.stageStatus.analyzed.state === "cancelled") {
+        addLog(`중지 전까지 분석된 ${countItems(state.results.analyzed.analyzed_keywords)}건으로 선별을 이어갑니다.`);
+    }
+
+    addLog("선별 시작: 골든 키워드 기준을 적용합니다.");
+    clearStageAndDownstream("selected");
+    const result = await executeStage({
+        stageKey: "selected",
+        endpoint: "/select",
+        inputData: {
+            analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
+        },
+    });
+
+    state.results.selected = result;
+    addLog(`선별 완료: ${countItems(result.selected_keywords)}건`, "success");
+    renderAll();
+    return result;
+}
+
+async function runTitleStage() {
+    if (!state.results.selected?.selected_keywords?.length) {
+        await runSelectStage();
+    }
+
+    const titleOptions = buildTitleOptions();
+    if (state.stageStatus.selected.state === "cancelled") {
+        addLog(`중지 전까지 선별된 ${countItems(state.results.selected?.selected_keywords)}건으로 제목 생성을 이어갑니다.`);
+    }
+    addLog(
+        titleOptions.mode === "ai"
+            ? `제목 생성 시작: ${titleOptions.provider} / ${titleOptions.model} 모델을 사용합니다.`
+            : "제목 생성 시작: template 규칙 기반 제목을 생성합니다.",
+    );
+    clearStageAndDownstream("titled");
+    const result = await executeStage({
+        stageKey: "titled",
+        endpoint: "/generate-title",
+        inputData: {
+            selected_keywords: state.results.selected?.selected_keywords || [],
+            title_options: titleOptions,
+        },
+    });
+
+    state.results.titled = result;
+    addLog(`제목 생성 완료: ${countItems(result.generated_titles)}세트`, "success");
+    renderAll();
+    return result;
+}
+
+function handleResultsGridClick(event) {
+    if (!(event.target instanceof Element)) {
+        return;
+    }
+
+    const inlineTrigger = event.target.closest("[data-inline-action]");
+    if (inlineTrigger) {
+        const action = inlineTrigger.getAttribute("data-inline-action") || "";
+        if (action === "stop_expand_stream") {
+            cancelActiveStream();
+            return;
+        }
+        if (action === "continue_analyze") {
+            runWithGuard(runThroughAnalyze, "부분 확장 결과로 분석 이어가는 중");
+            return;
+        }
+        if (action === "continue_select") {
+            runWithGuard(runThroughSelect, "부분 분석 결과로 선별 이어가는 중");
+            return;
+        }
+        if (action === "continue_title") {
+            runWithGuard(runThroughTitle, "선별 결과로 제목 생성 이어가는 중");
+            return;
+        }
+    }
+
+    const trigger = event.target.closest("[data-collector-action]");
+    if (!trigger) {
+        return;
+    }
+
+    const action = trigger.getAttribute("data-collector-action") || "";
+    const collectedItems = state.results.collected?.collected_keywords || [];
+
+    if (action === "select_all") {
+        applyCollectedSelection(collectedItems, true);
+        return;
+    }
+
+    if (action === "clear_all") {
+        applyCollectedSelection(collectedItems, false);
+        return;
+    }
+
+    const groupKey = trigger.getAttribute("data-collector-group") || "";
+    if (!groupKey) {
+        return;
+    }
+
+    const groupItems = collectedItems.filter((item) => (item.raw || item.keyword || "") === groupKey);
+    applyCollectedSelection(groupItems, action === "select_group");
+}
+
+function renderResults() {
+    const cards = [];
+    const expandedItems = state.results.expanded?.expanded_keywords || [];
+    const analyzedItems = state.results.analyzed?.analyzed_keywords || [];
+    const selectedItems = state.results.selected?.selected_keywords || [];
+    const expandedCancelled = state.stageStatus.expanded.state === "cancelled";
+    const analyzedCancelled = state.stageStatus.analyzed.state === "cancelled";
+
+    if (state.results.collected?.collected_keywords) {
+        cards.push(
+            resultCard("수집 키워드", state.results.collected.collected_keywords, renderCollectedList, {
+                subtitle: "원본 쿼리별로 묶어서 바로 선택할 수 있습니다.",
+                className: "collector-result-card",
+            }),
+        );
+    }
+    if (expandedItems.length) {
+        cards.push(
+            resultCard("확장 키워드", expandedItems, renderExpandedList, {
+                subtitle: state.stageStatus.expanded.state === "running"
+                    ? buildExpandedLiveSubtitle()
+                    : expandedCancelled
+                        ? `중지 전까지 누적된 ${countItems(expandedItems)}건입니다. 이 결과로 바로 분석을 이어갈 수 있습니다.`
+                        : "기본 12건만 먼저 보여주고, 필요하면 전체를 펼쳐 볼 수 있습니다.",
+                subtitleClassName: expandedCancelled ? "partial" : "",
+                className: "expanded-result-card",
+                actionsHtml: !analyzedItems.length
+                    ? `<button type="button" class="inline-action-btn" data-inline-action="continue_analyze">이 결과로 분석 계속</button>`
+                    : "",
+            }),
+        );
+    }
+    if (analyzedItems.length) {
+        cards.push(
+            resultCard("분석 결과", analyzedItems, renderAnalyzedList, {
+                subtitle: analyzedCancelled
+                    ? `중지 전까지 평가된 ${countItems(analyzedItems)}건입니다. 이 결과로 선별을 이어갈 수 있습니다.`
+                    : "",
+                subtitleClassName: analyzedCancelled ? "partial" : "",
+                actionsHtml: !selectedItems.length
+                    ? `<button type="button" class="inline-action-btn" data-inline-action="continue_select">이 결과로 선별 계속</button>`
+                    : "",
+            }),
+        );
+    }
+    if (selectedItems.length) {
+        cards.push(
+            resultCard("골든 키워드", selectedItems, renderSelectedList, {
+                actionsHtml: !state.results.titled?.generated_titles?.length
+                    ? `<button type="button" class="inline-action-btn" data-inline-action="continue_title">이 결과로 제목 생성</button>`
+                    : "",
+            }),
+        );
+    }
+    if (state.results.titled?.generated_titles) {
+        cards.push(resultCard("생성된 제목", state.results.titled.generated_titles, renderTitleList));
+    }
+
+    elements.resultsGrid.innerHTML = cards.length > 0
+        ? cards.join("")
+        : `
+            <div class="placeholder">
+                실행 버튼을 누르면 단계별 결과와 진단 정보가 이 영역에 표시됩니다.<br />
+                수집 결과는 쿼리별로 묶어 보여주고, collector 진단은 코드 대신 읽기 쉬운 요약 카드로 정리됩니다.
+            </div>
+        `;
+}
+
+function resultCard(title, items, renderer, options = {}) {
+    const subtitleClassName = options.subtitleClassName ? `result-subtitle ${options.subtitleClassName}` : "result-subtitle";
+
+    return `
+        <article class="result-card ${escapeHtml(options.className || "")}">
+            <div class="result-head">
+                <h3>${escapeHtml(title)}</h3>
+                <div class="result-actions">
+                    <span class="result-count">총 ${countItems(items)}건</span>
+                    ${options.actionsHtml || ""}
+                </div>
+            </div>
+            ${options.subtitle ? `<p class="${escapeHtml(subtitleClassName)}">${escapeHtml(options.subtitle)}</p>` : ""}
+            ${renderer(items)}
+        </article>
+    `;
+}
+
+state.analyzedFilters = state.analyzedFilters || createDefaultAnalyzedFilters();
+
+function createDefaultAnalyzedFilters() {
+    return {
+        query: "",
+        minScore: "",
+        minVolume: "",
+        minCpc: "",
+        minBid: "",
+        maxCompetition: "",
+        priority: "all",
+    };
+}
+
+function getAnalyzedFilters() {
+    return state.analyzedFilters || createDefaultAnalyzedFilters();
+}
+
+function hasActiveAnalyzedFilters(filters = getAnalyzedFilters()) {
+    return Object.entries(filters).some(([key, value]) => {
+        if (key === "priority") {
+            return value && value !== "all";
+        }
+        return String(value || "").trim() !== "";
+    });
+}
+
+function coerceFilterNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+}
+
+function applyAnalyzedFilters(items) {
+    const filters = getAnalyzedFilters();
+    const query = String(filters.query || "").trim().toLowerCase();
+    const minScore = coerceFilterNumber(filters.minScore);
+    const minVolume = coerceFilterNumber(filters.minVolume);
+    const minCpc = coerceFilterNumber(filters.minCpc);
+    const minBid = coerceFilterNumber(filters.minBid);
+    const maxCompetition = coerceFilterNumber(filters.maxCompetition);
+    const priority = String(filters.priority || "all");
+
+    return (items || []).filter((item) => {
+        const keyword = String(item.keyword || "");
+        if (query && !keyword.toLowerCase().includes(query)) {
+            return false;
+        }
+        if (priority !== "all" && String(item.priority || "") !== priority) {
+            return false;
+        }
+        if (minScore !== null && Number(item.score || 0) < minScore) {
+            return false;
+        }
+        if (minVolume !== null && Number(item.metrics?.volume || 0) < minVolume) {
+            return false;
+        }
+        if (minCpc !== null && Number(item.metrics?.cpc || 0) < minCpc) {
+            return false;
+        }
+        if (minBid !== null && Number(item.metrics?.bid || 0) < minBid) {
+            return false;
+        }
+        if (maxCompetition !== null && Number(item.metrics?.competition || 0) > maxCompetition) {
+            return false;
+        }
+        return true;
+    });
+}
+
+function renderAnalyzedList(items) {
+    const filters = getAnalyzedFilters();
+    const filteredItems = applyAnalyzedFilters(items);
+    const rows = filteredItems.map((item) => `
+        <tr>
+            <td><strong>${escapeHtml(item.keyword || "-")}</strong></td>
+            <td>${escapeHtml(item.grade || "-")}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.score))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_searches))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_searches))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.volume))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.blog_results))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_clicks))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_clicks))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.cpc))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid))}</td>
+            <td>${escapeHtml(formatMeasuredState(item))}</td>
+        </tr>
+    `).join("");
+
+    return `
+        <div class="analysis-console">
+            <div class="analysis-filter-bar">
+                <input class="analysis-filter-input" type="search" data-analyzed-filter="query" value="${escapeHtml(filters.query)}" placeholder="키워드 검색..." />
+                <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minScore" value="${escapeHtml(filters.minScore)}" placeholder="점수↑" />
+                <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minVolume" value="${escapeHtml(filters.minVolume)}" placeholder="조회↑" />
+                <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minCpc" value="${escapeHtml(filters.minCpc)}" placeholder="CPC↑" />
+                <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid" value="${escapeHtml(filters.minBid)}" placeholder="입찰↑" />
+                <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="maxCompetition" value="${escapeHtml(filters.maxCompetition)}" placeholder="경쟁↓" />
+                <select class="analysis-filter-select" data-analyzed-filter="priority">
+                    <option value="all"${filters.priority === "all" ? " selected" : ""}>등급 전체</option>
+                    <option value="high"${filters.priority === "high" ? " selected" : ""}>상</option>
+                    <option value="medium"${filters.priority === "medium" ? " selected" : ""}>중</option>
+                    <option value="low"${filters.priority === "low" ? " selected" : ""}>하</option>
+                </select>
+                <button type="button" class="ghost-chip" data-inline-action="reset_analyzed_filters">필터 초기화</button>
+                <span class="analysis-filter-summary">표시 ${filteredItems.length} / 전체 ${countItems(items)}건</span>
+            </div>
+            <div class="expanded-table-wrap full">
+                <table class="expanded-table analyzed-table compact">
+                    <thead>
+                        <tr>
+                            <th>키워드</th>
+                            <th>등급</th>
+                            <th>점수</th>
+                            <th>PC조회</th>
+                            <th>MO조회</th>
+                            <th>총조회</th>
+                            <th>블로그</th>
+                            <th>PC클릭</th>
+                            <th>MO클릭</th>
+                            <th>CPC</th>
+                            <th>1위입찰</th>
+                            <th>출처</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows || `<tr><td colspan="12">조건에 맞는 키워드가 없습니다.</td></tr>`}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function renderSelectedList(items) {
+    const rows = (items || []).map((item, index) => `
+        <tr>
+            <td class="num-cell">${escapeHtml(String(index + 1))}</td>
+            <td><strong>${escapeHtml(item.keyword || "-")}</strong></td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.score))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_searches))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_searches))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.volume))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.blog_results))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.cpc))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid))}</td>
+            <td>${escapeHtml(formatMeasuredState(item))}</td>
+        </tr>
+    `).join("");
+
+    return `
+        <div class="analysis-console">
+            <div class="expanded-table-wrap">
+                <table class="expanded-table selected-table compact">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>키워드</th>
+                            <th>점수</th>
+                            <th>PC조회</th>
+                            <th>MO조회</th>
+                            <th>총조회</th>
+                            <th>블로그</th>
+                            <th>CPC</th>
+                            <th>1위입찰</th>
+                            <th>출처</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows || `<tr><td colspan="10">선별 결과가 없습니다.</td></tr>`}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function formatMeasuredState(item) {
+    const mode = String(item.analysis_mode || "");
+    const confidence = Number(item.confidence ?? item.metrics?.confidence ?? 0);
+    if (mode === "search_metrics") {
+        return `실측 ${formatNumber(confidence)}`;
+    }
+    return `추정 ${formatNumber(confidence)}`;
+}
+
+function updateAnalyzedFilter(name, value) {
+    state.analyzedFilters = {
+        ...getAnalyzedFilters(),
+        [name]: value,
+    };
+    renderResults();
+}
+
+function resetAnalyzedFilters() {
+    state.analyzedFilters = createDefaultAnalyzedFilters();
+    renderResults();
+}
+
+function handleResultsGridInput(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
+        return;
+    }
+
+    const filterName = target.dataset.analyzedFilter || "";
+    if (!filterName) {
+        return;
+    }
+
+    updateAnalyzedFilter(filterName, target.value);
+}
+
+function handleResultsGridChange(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
+        return;
+    }
+
+    const filterName = target.dataset.analyzedFilter || "";
+    if (filterName) {
+        updateAnalyzedFilter(filterName, target.value);
+        return;
+    }
+
+    if (!(target instanceof HTMLInputElement) || !target.matches("[data-collected-key]")) {
+        return;
+    }
+
+    const identity = target.dataset.collectedKey || "";
+    if (!identity) {
+        return;
+    }
+
+    if (target.checked) {
+        if (!state.selectedCollectedKeys.includes(identity)) {
+            state.selectedCollectedKeys = [...state.selectedCollectedKeys, identity];
+        }
+    } else {
+        state.selectedCollectedKeys = state.selectedCollectedKeys.filter((item) => item !== identity);
+    }
+
+    renderInputState();
+    renderResults();
+}
+
+function handleResultsGridClick(event) {
+    if (!(event.target instanceof Element)) {
+        return;
+    }
+
+    const inlineTrigger = event.target.closest("[data-inline-action]");
+    if (inlineTrigger) {
+        const action = inlineTrigger.getAttribute("data-inline-action") || "";
+        if (action === "reset_analyzed_filters") {
+            resetAnalyzedFilters();
+            return;
+        }
+        if (action === "stop_expand_stream") {
+            cancelActiveStream();
+            return;
+        }
+        if (action === "continue_analyze") {
+            runWithGuard(runThroughAnalyze, "부분 확장 결과로 분석 이어가는 중");
+            return;
+        }
+        if (action === "continue_select") {
+            runWithGuard(runThroughSelect, "부분 분석 결과로 선별 이어가는 중");
+            return;
+        }
+        if (action === "continue_title") {
+            runWithGuard(runThroughTitle, "선별 결과로 제목 생성 이어가는 중");
+            return;
+        }
+    }
+
+    const trigger = event.target.closest("[data-collector-action]");
+    if (!trigger) {
+        return;
+    }
+
+    const action = trigger.getAttribute("data-collector-action") || "";
+    const collectedItems = state.results.collected?.collected_keywords || [];
+
+    if (action === "select_all") {
+        applyCollectedSelection(collectedItems, true);
+        return;
+    }
+
+    if (action === "clear_all") {
+        applyCollectedSelection(collectedItems, false);
+        return;
+    }
+
+    const groupKey = trigger.getAttribute("data-collector-group") || "";
+    if (!groupKey) {
+        return;
+    }
+
+    const groupItems = collectedItems.filter((item) => (item.raw || item.keyword || "") === groupKey);
+    applyCollectedSelection(groupItems, action === "select_group");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("resultsGrid")?.addEventListener("input", handleResultsGridInput);
+});
+
+function resetAll() {
+    state.results = createEmptyResults();
+    state.stageStatus = createInitialStageStatus();
+    state.diagnostics = createEmptyDiagnostics();
+    state.selectedCollectedKeys = [];
+    state.lastError = null;
+    state.analyzedFilters = createDefaultAnalyzedFilters();
+    setGlobalStatus("대기 중", "idle");
+    renderAll();
+    addLog("결과와 디버그 정보를 초기화했습니다.");
+}
+
+function renderInputState() {
+    const mode = getCollectorMode();
+    const categoryMode = mode === "category";
+    const selectedCount = getSelectedCollectedItems().length;
+    const expandCount = parseKeywordText(elements.expandManualInput?.value || "").length;
+    const analyzeCount = parseKeywordText(elements.analyzeManualInput?.value || "").length;
+    const expandUsesManual = elements.expandInputSource?.value === "manual_text";
+    const analyzeUsesManual = elements.analyzeInputSource?.value === "manual_text";
+    const usesTrendSource = categoryMode && elements.categorySourceInput?.value === "naver_trend";
+
+    setBlocksVisibility(elements.modeVisibilityBlocks, mode, "modeVisibility");
+
+    if (elements.selectedCollectedCount) {
+        elements.selectedCollectedCount.textContent = expandUsesManual
+            ? `직접 입력 ${expandCount}건`
+            : `선택 ${selectedCount}건`;
+    }
+    if (elements.manualAnalyzeCount) {
+        elements.manualAnalyzeCount.textContent = `직접 입력 ${analyzeCount}건`;
+    }
+    if (elements.expandManualInput) {
+        elements.expandManualInput.disabled = !expandUsesManual;
+    }
+    if (elements.analyzeManualInput) {
+        elements.analyzeManualInput.disabled = !analyzeUsesManual;
+    }
+    if (elements.seedInput) {
+        elements.seedInput.disabled = categoryMode;
+        elements.seedInput.title = categoryMode ? "카테고리 모드에서는 시드 키워드를 사용하지 않습니다." : "";
+    }
+    if (elements.categoryInput) {
+        elements.categoryInput.disabled = !categoryMode;
+        elements.categoryInput.title = categoryMode ? "" : "시드 모드에서는 카테고리를 사용하지 않습니다.";
+    }
+    if (elements.categorySourceInput) {
+        elements.categorySourceInput.disabled = !categoryMode;
+    }
+    if (elements.optionRelated) {
+        elements.optionRelated.title = usesTrendSource ? "트렌드 실패 후 preset fallback에서만 적용됩니다." : "";
+    }
+    if (elements.optionAutocomplete) {
+        elements.optionAutocomplete.title = usesTrendSource ? "트렌드 실패 후 preset fallback에서만 적용됩니다." : "";
+    }
+    if (elements.optionBulk) {
+        elements.optionBulk.title = usesTrendSource ? "트렌드 실패 후 preset fallback에서만 적용됩니다." : "";
+    }
+    if (elements.stopStreamButton) {
+        elements.stopStreamButton.title = state.streamAbortController
+            ? "실시간 확장/분석 스트림을 중지합니다."
+            : "";
+    }
+
+    renderTrendSettingsState();
+}
+
+function renderTitleSettingsState() {
+    const mode = syncTitleModeInputFromRadios();
+    const isAiMode = mode === "ai";
+
+    setBlocksVisibility(elements.titleModeVisibilityBlocks, mode, "titleModeVisibility");
+
+    elements.titleProvider.disabled = !isAiMode;
+    elements.titleModel.disabled = !isAiMode;
+    elements.titleApiKey.disabled = !isAiMode;
+    elements.titleTemperature.disabled = !isAiMode;
+    elements.titleFallback.disabled = !isAiMode;
+    elements.titleModeBadge.textContent = isAiMode ? `ai:${elements.titleProvider.value}` : "template";
 }

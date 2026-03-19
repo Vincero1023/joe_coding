@@ -1,7 +1,9 @@
 from pathlib import Path
+from threading import Event
 from unittest.mock import patch
 
 from app.expander.main import run as expand_run
+from app.expander.main import run_with_progress
 from app.expander.sources.naver_related import (
     _extract_qra_api_url,
     _extract_related_queries,
@@ -128,3 +130,59 @@ def test_expander_defaults_to_real_related_and_skips_combinator() -> None:
         {"keyword": "insurance comparison", "origin": "insurance", "type": "related"},
         {"keyword": "auto insurance recommendation", "origin": "insurance", "type": "related"},
     ]
+
+
+def test_expander_can_disable_seed_filter_and_limit_result_count() -> None:
+    with patch(
+        "app.expander.engines.autocomplete_engine.get_naver_autocomplete",
+        return_value=["insurance premium", "insurance deductible"],
+    ), patch(
+        "app.expander.engines.related_engine.get_naver_related_queries",
+        return_value=["coverage options", "policy rider"],
+    ):
+        result = expand_run(
+            {
+                "keywords_text": "insurance",
+                "analysis_json_path": str(expander_sample_dir / "site_analysis.json"),
+                "enable_seed_filter": False,
+                "max_results": 2,
+            }
+        )
+
+    assert result["expanded_keywords"] == [
+        {"keyword": "insurance premium", "origin": "insurance", "type": "autocomplete"},
+        {"keyword": "insurance deductible", "origin": "insurance", "type": "autocomplete"},
+    ]
+
+
+def test_expander_stop_event_returns_partial_results() -> None:
+    stop_event = Event()
+    progress_types: list[str] = []
+
+    def on_progress(payload: dict[str, object]) -> None:
+        progress_type = str(payload.get("type") or "")
+        if progress_type:
+            progress_types.append(progress_type)
+        if progress_type == "keyword_results":
+            stop_event.set()
+
+    with patch(
+        "app.expander.engines.autocomplete_engine.get_naver_autocomplete",
+        return_value=["insurance premium", "insurance deductible"],
+    ), patch(
+        "app.expander.engines.related_engine.get_naver_related_queries",
+        return_value=["insurance comparison"],
+    ):
+        result = run_with_progress(
+            {
+                "keywords_text": "insurance",
+                "analysis_json_path": str(expander_sample_dir / "site_analysis.json"),
+                "enable_seed_filter": False,
+            },
+            progress_callback=on_progress,
+            stop_event=stop_event,
+        )
+
+    assert result["stopped"] is True
+    assert result["expanded_keywords"]
+    assert "keyword_results" in progress_types

@@ -33,12 +33,11 @@ class PipelineService:
             runner=lambda: expander_module.run(expander_input),
         )
 
+        analyzer_input = _build_analyzer_input(input_data, expanded_result, collected_result)
         analyzed_result = _run_stage(
             pipeline_debug,
             stage_name="analyzer",
-            runner=lambda: analyzer_module.run(
-                {"expanded_keywords": _get_list(expanded_result, "expanded_keywords")}
-            ),
+            runner=lambda: analyzer_module.run(analyzer_input),
         )
         selected_result = _run_stage(
             pipeline_debug,
@@ -107,6 +106,32 @@ def _build_title_input(
         "title_options": input_data.get("title_options", {}),
     }
     return _merge_stage_config(title_defaults, input_data.get("title"))
+
+
+def _build_analyzer_input(
+    input_data: dict[str, Any],
+    expanded_result: dict[str, Any],
+    collected_result: dict[str, Any],
+) -> dict[str, Any]:
+    expanded_keywords = _get_list(expanded_result, "expanded_keywords")
+    if not expanded_keywords:
+        expanded_keywords = _get_list(collected_result, "collected_keywords")
+
+    analyzer_defaults = {
+        "expanded_keywords": expanded_keywords,
+        "keyword_stats_path": input_data.get("keyword_stats_path", ""),
+        "keyword_stats_text": input_data.get("keyword_stats_text", ""),
+        "keyword_stats_items": input_data.get("keyword_stats_items", []),
+        "searchad": input_data.get("searchad", {}),
+        "naver_ads_api_key": input_data.get("naver_ads_api_key", ""),
+        "naver_ads_customer_id": input_data.get("naver_ads_customer_id", ""),
+        "naver_ads_access_license": input_data.get("naver_ads_access_license", ""),
+        "naver_ads_secret_key": input_data.get("naver_ads_secret_key", ""),
+        "naver_search_api": input_data.get("naver_search_api", {}),
+        "naver_search_client_id": input_data.get("naver_search_client_id", ""),
+        "naver_search_client_secret": input_data.get("naver_search_client_secret", ""),
+    }
+    return _merge_stage_config(analyzer_defaults, input_data.get("analyzer"))
 
 
 def _merge_stage_config(defaults: dict[str, Any], overrides: Any) -> dict[str, Any]:

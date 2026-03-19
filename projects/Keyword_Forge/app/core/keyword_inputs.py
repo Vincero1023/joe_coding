@@ -135,13 +135,11 @@ def _normalize_existing_expanded_items(raw_items: Any) -> list[dict[str, Any]]:
         if not keyword:
             continue
 
-        normalized_items.append(
-            {
-                "keyword": keyword,
-                "origin": normalize_text(item.get("origin")) or normalize_text(item.get("root_origin")) or keyword,
-                "type": normalize_text(item.get("type")) or "manual_input",
-            }
-        )
+        normalized_item = dict(item)
+        normalized_item["keyword"] = keyword
+        normalized_item["origin"] = normalize_text(item.get("origin")) or normalize_text(item.get("root_origin")) or keyword
+        normalized_item["type"] = normalize_text(item.get("type")) or "manual_input"
+        normalized_items.append(normalized_item)
 
     return normalized_items
 
