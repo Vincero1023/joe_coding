@@ -166,6 +166,62 @@ def test_title_generation_options_keep_custom_system_prompt() -> None:
     assert "avoid repeating the same headline skeleton" in options.effective_system_prompt.lower()
 
 
+def test_title_generation_options_apply_preset_defaults() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "preset_key": "openai_strict",
+                "system_prompt": "숫자형 제목을 우선한다.",
+            }
+        }
+    )
+
+    assert options.preset_key == "openai_strict"
+    assert options.preset_label == "안정형 규칙 우선"
+    assert options.provider == "openai"
+    assert options.model == "gpt-4.1-mini"
+    assert options.temperature == 0.2
+    assert "Preset guidance" in options.effective_system_prompt
+    assert "Additional guidance" in options.effective_system_prompt
+
+
+def test_title_generator_reports_preset_metadata() -> None:
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        return_value=[
+            {
+                "keyword": "보험 추천",
+                "titles": {
+                    "naver_home": ["보험 추천 비교 포인트 2가지", "보험 추천 선택 기준 달라졌다"],
+                    "blog": ["보험 추천 핵심 가이드", "보험 추천 체크 포인트 정리"],
+                },
+            }
+        ],
+    ):
+        result = run(
+            {
+                "selected_keywords": [
+                    {
+                        "keyword": "보험 추천",
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "mode": "ai",
+                    "preset_key": "openai_balanced",
+                    "api_key": "test-key",
+                },
+            }
+        )
+
+    assert result["generation_meta"]["preset_key"] == "openai_balanced"
+    assert result["generation_meta"]["preset_label"] == "추천 균형형"
+    assert result["generation_meta"]["provider"] == "openai"
+    assert result["generation_meta"]["model"] == "gpt-4o-mini"
+    assert result["generation_meta"]["temperature"] == 0.7
+
+
 def test_title_generator_auto_retries_low_quality_ai_titles() -> None:
     with patch(
         "app.title.title_generator.request_ai_titles",
@@ -212,3 +268,136 @@ def test_title_generator_auto_retries_low_quality_ai_titles() -> None:
     assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
     assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is False
     assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 80
+
+
+def _build_longtail_title_input() -> dict:
+    insurance = "\ubcf4\ud5d8 \ucd94\ucc9c"
+    car_insurance = "\uc790\ub3d9\ucc28 \ubcf4\ud5d8"
+    return {
+        "selected_keywords": [
+            {
+                "keyword": insurance,
+                "profitability_grade": "A",
+                "attackability_grade": "2",
+                "score": 76.0,
+                "metrics": {"volume": 1200.0, "cpc": 210.0},
+            },
+            {
+                "keyword": car_insurance,
+                "profitability_grade": "B",
+                "attackability_grade": "2",
+                "score": 62.0,
+                "metrics": {"volume": 900.0, "cpc": 180.0},
+            },
+        ],
+        "keyword_clusters": [
+            {
+                "cluster_id": "cluster-01",
+                "representative_keyword": insurance,
+                "topic_terms": ["\ubcf4\ud5d8", "\ucd94\ucc9c", "\uac00\uc785"],
+                "all_keywords": [insurance],
+            },
+            {
+                "cluster_id": "cluster-02",
+                "representative_keyword": car_insurance,
+                "topic_terms": ["\uc790\ub3d9\ucc28", "\ubcf4\ud5d8", "\ud2b9\uc57d"],
+                "all_keywords": [car_insurance],
+            },
+        ],
+        "longtail_suggestions": [
+            {
+                "suggestion_id": "longtail-01",
+                "cluster_id": "cluster-01",
+                "representative_keyword": insurance,
+                "source_keyword": "\ubcf4\ud5d8 \uac00\uc785 \uc870\uac74",
+                "longtail_keyword": "\ubcf4\ud5d8 \uac00\uc785 \uc870\uac74 \uccb4\ud06c\ub9ac\uc2a4\ud2b8",
+                "combination_terms": [insurance, "\ubcf4\ud5d8 \uac00\uc785 \uc870\uac74", "\uac00\uc785 \uc870\uac74"],
+                "verification_status": "pass",
+                "verified_score": 68.0,
+            }
+        ],
+        "analyzed_keywords": [
+            {
+                "keyword": "\ubcf4\ud5d8 \uac00\uc785 \ubc29\ubc95",
+                "score": 44.0,
+                "metrics": {"volume": 180.0, "cpc": 120.0},
+            },
+            {
+                "keyword": "\uc790\ub3d9\ucc28 \ubcf4\ud5d8 \ud2b9\uc57d \uc11c\ub958",
+                "score": 20.0,
+                "metrics": {"volume": 15.0, "cpc": 45.0},
+            },
+            {
+                "keyword": "\uc790\ub3d9\ucc28 \ubcf4\ud5d8 \ud2b9\uc57d \uc815\ub9ac",
+                "score": 12.0,
+                "metrics": {"volume": 8.0, "cpc": 30.0},
+            },
+        ],
+        "title_options": {
+            "keyword_modes": [
+                "single",
+                "longtail_selected",
+                "longtail_exploratory",
+                "longtail_experimental",
+            ]
+        },
+    }
+
+
+def test_title_generator_builds_longtail_targets_for_keyword_modes() -> None:
+    result = run(_build_longtail_title_input())
+
+    summary = result["generation_meta"]["target_summary"]
+    assert summary["requested_modes"] == [
+        "single",
+        "longtail_selected",
+        "longtail_exploratory",
+        "longtail_experimental",
+    ]
+    assert summary["mode_counts"]["single"] == 2
+    assert summary["mode_counts"]["longtail_selected"] >= 1
+    assert summary["mode_counts"]["longtail_exploratory"] >= 1
+    assert summary["mode_counts"]["longtail_experimental"] >= 1
+    assert len(result["generated_titles"]) == summary["target_count"]
+
+    generated_modes = {item["target_mode"] for item in result["generated_titles"]}
+    assert generated_modes == {
+        "single",
+        "longtail_selected",
+        "longtail_exploratory",
+        "longtail_experimental",
+    }
+    assert any(item["target_id"] for item in result["generated_titles"])
+    assert any(
+        item["base_keyword"] == "\uc790\ub3d9\ucc28 \ubcf4\ud5d8"
+        for item in result["generated_titles"]
+        if item["target_mode"] == "longtail_experimental"
+    )
+
+
+def test_title_generator_supports_explicit_title_targets() -> None:
+    result = run(
+        {
+            "title_targets": [
+                {
+                    "target_id": "longtail_exploratory:insurance-checklist",
+                    "keyword": "\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8",
+                    "target_mode": "longtail_exploratory",
+                    "base_keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
+                    "support_keywords": ["\ubcf4\ud5d8 \uac00\uc785"],
+                    "source_keywords": ["\ubcf4\ud5d8 \ucd94\ucc9c", "\ubcf4\ud5d8 \uac00\uc785"],
+                    "source_kind": "explicit_target",
+                    "source_note": "\uc7ac\uc0dd\uc131 \uc804\uc6a9 target",
+                }
+            ],
+            "title_options": {
+                "mode": "template",
+            },
+        }
+    )
+
+    item = result["generated_titles"][0]
+    assert item["target_id"].startswith("longtail_exploratory:")
+    assert item["target_mode"] == "longtail_exploratory"
+    assert item["base_keyword"] == "\ubcf4\ud5d8 \ucd94\ucc9c"
+    assert item["support_keywords"] == ["\ubcf4\ud5d8 \uac00\uc785"]

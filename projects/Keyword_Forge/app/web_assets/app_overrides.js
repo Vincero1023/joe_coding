@@ -105,8 +105,13 @@ function getSelectedAttackabilityFilters() {
 }
 
 function hasExplicitAxisFilterSelection(profitabilityGrades, attackabilityGrades) {
-    return profitabilityGrades.length !== PROFITABILITY_ORDER.length
-        || attackabilityGrades.length !== ATTACKABILITY_ORDER.length;
+    const normalizedProfitability = normalizeProfitabilityList(profitabilityGrades);
+    const normalizedAttackability = normalizeAttackabilityList(attackabilityGrades);
+    if (!normalizedProfitability.length || !normalizedAttackability.length) {
+        return false;
+    }
+    return normalizedProfitability.length !== PROFITABILITY_ORDER.length
+        || normalizedAttackability.length !== ATTACKABILITY_ORDER.length;
 }
 
 function buildGradeRunLabel(profitabilityGrades, attackabilityGrades) {
@@ -401,7 +406,7 @@ async function runTitleStage() {
     }
     addLog(
         titleOptions.mode === "ai"
-            ? `제목 생성 시작: ${titleOptions.provider} / ${titleOptions.model} 모델을 사용합니다.`
+            ? `제목 생성 시작: ${buildTitleRunSummary(titleOptions)}`
             : "제목 생성 시작: template 규칙 기반 제목을 생성합니다.",
     );
     clearStageAndDownstream("titled");
@@ -410,6 +415,9 @@ async function runTitleStage() {
         endpoint: "/generate-title",
         inputData: {
             selected_keywords: state.results.selected?.selected_keywords || [],
+            keyword_clusters: state.results.selected?.keyword_clusters || [],
+            longtail_suggestions: state.results.selected?.longtail_suggestions || [],
+            analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
             title_options: titleOptions,
         },
     });

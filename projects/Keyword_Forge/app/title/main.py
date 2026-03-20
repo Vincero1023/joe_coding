@@ -15,14 +15,22 @@ from typing import Any
 
 from app.core.interfaces import ModuleRunner
 from app.title.ai_client import TitleGenerationOptions
+from app.title.targets import build_title_targets
 from app.title.title_generator import generate_titles
 
 
 class TitleService:
     def run(self, input_data: Any) -> Any:
-        items = _coerce_input_items(input_data)
-        options = TitleGenerationOptions.from_input(input_data) if isinstance(input_data, dict) else None
+        if isinstance(input_data, dict):
+            items, target_summary = build_title_targets(input_data)
+            options = TitleGenerationOptions.from_input(input_data)
+        else:
+            items = _coerce_input_items(input_data)
+            target_summary = {}
+            options = None
         generated, meta = generate_titles(items, options=options)
+        if target_summary:
+            meta["target_summary"] = target_summary
 
         if isinstance(input_data, list):
             return generated
@@ -83,6 +91,8 @@ def _coerce_input_items(input_data: Any) -> list[dict[str, Any]]:
         return [item for item in input_data if isinstance(item, dict)]
 
     if isinstance(input_data, dict):
+        if isinstance(input_data.get("title_targets"), list):
+            return [item for item in input_data["title_targets"] if isinstance(item, dict)]
         if isinstance(input_data.get("selected_keywords"), list):
             return [item for item in input_data["selected_keywords"] if isinstance(item, dict)]
         if isinstance(input_data.get("analyzed_keywords"), list):

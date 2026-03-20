@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.pipeline.main import run
+from app.pipeline.service import _build_title_input
 
 
 client = TestClient(app)
@@ -213,6 +214,34 @@ def test_pipeline_endpoint_runs_end_to_end() -> None:
     assert len(result["generated_titles"]) == len(result["selected_keywords"])
 
 
+def test_build_title_input_includes_longtail_context() -> None:
+    selected_result = {
+        "selected_keywords": [{"keyword": INSURANCE}],
+        "keyword_clusters": [{"cluster_id": "cluster-01", "representative_keyword": INSURANCE}],
+        "longtail_suggestions": [{"suggestion_id": "longtail-01", "longtail_keyword": f"{INSURANCE} 체크리스트"}],
+    }
+    analyzed_result = {
+        "analyzed_keywords": [{"keyword": f"{INSURANCE} 가입 방법"}],
+    }
+
+    result = _build_title_input(
+        {
+            "title_options": {
+                "mode": "template",
+                "keyword_modes": ["single", "longtail_selected", "longtail_exploratory"],
+            }
+        },
+        selected_result,
+        analyzed_result,
+    )
+
+    assert result["selected_keywords"] == selected_result["selected_keywords"]
+    assert result["keyword_clusters"] == selected_result["keyword_clusters"]
+    assert result["longtail_suggestions"] == selected_result["longtail_suggestions"]
+    assert result["analyzed_keywords"] == analyzed_result["analyzed_keywords"]
+    assert result["title_options"]["keyword_modes"] == ["single", "longtail_selected", "longtail_exploratory"]
+
+
 def test_pipeline_passes_title_ai_options_to_title_stage() -> None:
     with patch(
         "app.collector.service.get_naver_autocomplete",
@@ -240,7 +269,7 @@ def test_pipeline_passes_title_ai_options_to_title_stage() -> None:
                 },
             }
         ],
-    ):
+    ) as mocked_request:
         result = run(
             {
                 "collector": {
@@ -257,12 +286,23 @@ def test_pipeline_passes_title_ai_options_to_title_stage() -> None:
                 },
                 "title_options": {
                     "mode": "ai",
-                    "provider": "openai",
                     "api_key": "test-key",
-                    "model": "gpt-4o-mini",
+                    "preset_key": "gemini_fast",
+                    "keyword_modes": ["single", "longtail_exploratory", "longtail_experimental"],
                 },
             }
         )
 
     assert result["generated_titles"]
     assert result["title_generation_meta"]["used_mode"] in {"ai", "ai_with_template_fallback"}
+    assert result["title_generation_meta"]["preset_key"] == "gemini_fast"
+    assert result["title_generation_meta"]["provider"] == "gemini"
+    assert result["title_generation_meta"]["model"] == "gemini-2.5-flash-lite"
+    assert result["title_generation_meta"]["target_summary"]["requested_modes"] == [
+        "single",
+        "longtail_exploratory",
+        "longtail_experimental",
+    ]
+    requested_options = mocked_request.call_args.kwargs["options"]
+    assert requested_options.preset_key == "gemini_fast"
+    assert requested_options.provider == "gemini"

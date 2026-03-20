@@ -33,6 +33,62 @@
 ---
 
 ## Date
+- 2026-03-20 13:20 (KST)
+
+## What changed (변경점)
+- `app/title/targets.py`, `app/title/main.py`, `app/pipeline/service.py`에 제목 target builder를 추가해 `single / 롱테일 V1 / V2 / V3` 모드별 제목 대상을 서버에서 조합하도록 바꿨다.
+- `app/web.py`, `app/web_assets/app.js`, `app/web_assets/app_overrides.js`에 제목 키워드 모드 선택 UI, 결과 요약/CSV 메타, target 단위 재생성 흐름을 연결했다.
+- `app/title/quality.py`, `app/title/title_generator.py`에서 품질 검수와 AI 자동 재시도 뒤에도 target 메타데이터가 유지되도록 보강했고, `tests/test_title.py`, `tests/test_pipeline.py`에 관련 테스트를 추가했다.
+
+## Why (원인/배경)
+- 롱테일 후보는 이미 selector에서 만들 수 있었지만, 제목 단계는 여전히 선별 단일 키워드 기준이라 실제 `단일 / V1 / V2 / V3` 발행 흐름을 실험할 수 없었다.
+
+## How verified (검증 방법/체크리스트)
+- [ ] 로컬 재실행 완료
+- [ ] 출력 파일 생성 확인
+- [ ] 핵심 케이스 N건 수동 확인
+- [x] 회귀(기존 기능) 이상 없음
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 제목 생성이 `selected_keywords` 중심 계약에 묶여 있어 롱테일 모드를 켜도 결과 메타와 재생성 단위가 안정적으로 유지되지 않았다.
+- 원인: title stage가 target 개념 없이 키워드 문자열만 넘겼고, `quality.py`가 품질 enrich 시 메타데이터를 버렸으며, 프런트 재생성도 keyword 단위로만 동작했다.
+- 해결: `keyword_modes`와 `title_targets` 계약을 추가하고, 품질 검수/자동 재시도/CSV/재생성을 모두 target 단위로 맞춰 `single / V1 / V2 / V3` 병렬 생성을 일관되게 연결했다.
+
+## Next (다음 작업)
+- 브라우저에서 `single / V1 / V2 / V3` 조합별 수동 클릭 검증
+- 다음 우선순위인 `시크릿 / 로컬 데이터 정리` 진행
+
+---
+
+## Date
+- 2026-03-20 11:45 (KST)
+
+## What changed (변경점)
+- `app/title/presets.py`, `app/title/ai_client.py`, `app/title/title_generator.py`에 제목 프리셋 레지스트리와 preset 기반 옵션 해석을 추가해, provider/model/temperature/prompt guidance를 서버에서 한 번에 해석하도록 정리했다.
+- `app/web.py`, `app/web_assets/app.js`, `app/web_assets/app_overrides.js`에 `프롬프트 / 모델 프리셋` 선택 UI와 설명 문구, 수동 변경 시 custom 전환 로직, 결과 요약 표시를 붙였다.
+- `tests/test_title.py`, `tests/test_pipeline.py`에 preset 기본값/메타데이터/파이프라인 전달 테스트를 추가하고 회귀 테스트를 다시 돌렸다.
+
+## Why (원인/배경)
+- AI 제목 설정은 provider/model/temperature/custom prompt가 각각 흩어져 있어, 실제 운영용 조합을 저장하거나 재현하기 어려웠다.
+
+## How verified (검증 방법/체크리스트)
+- [ ] 로컬 재실행 완료
+- [ ] 출력 파일 생성 확인
+- [x] 핵심 케이스 3건 수동 확인
+- [x] 회귀(기존 기능) 이상 없음
+
+## Issues & Fix (문제-원인-해결)
+- 문제: AI 제목 생성 설정이 개별 입력만 있어 “검증된 조합”을 빠르게 다시 쓰거나 결과 메타에서 추적하기 어려웠다.
+- 원인: `title_options`가 raw provider/model/system_prompt만 받고, preset 개념과 서버 해석 계층이 없었다.
+- 해결: preset 레지스트리를 추가해 프런트와 백엔드가 같은 preset key를 공유하게 하고, generation meta에도 적용된 preset/model 정보를 함께 남기도록 바꿨다.
+
+## Next (다음 작업)
+- `시크릿 / 로컬 데이터 정리` 우선순위로 이동
+- 롱테일 검증 결과의 CSV / 제목 생성 연동 여부를 계속 검토
+
+---
+
+## Date
 - 2026-03-20 02:32 (KST)
 
 ## What changed (변경점)

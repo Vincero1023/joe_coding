@@ -42,6 +42,11 @@ def enrich_title_results(items: list[dict[str, Any]]) -> tuple[list[dict[str, An
         reports.append(report)
         enriched_items.append(
             {
+                **{
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"titles", "quality_report"}
+                },
                 "keyword": normalize_text(item.get("keyword")),
                 "titles": {
                     "naver_home": list(item.get("titles", {}).get("naver_home", [])),

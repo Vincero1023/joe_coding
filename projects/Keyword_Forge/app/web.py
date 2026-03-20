@@ -1,3 +1,4 @@
+import json
 from functools import lru_cache
 from html import escape
 from pathlib import Path
@@ -16,10 +17,11 @@ from app.collector.categories import (
     TREND_SERVICE_CHOICES,
 )
 from app.expander.utils.tokenizer import normalize_key
+from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_payload
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260320-longtail-verifier-v35"
+_ASSET_VERSION = "20260320-control-layout-v41"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -277,7 +279,7 @@ def _render_title_prompt_editor() -> str:
                     <p class="panel-kicker">Title Prompt</p>
                     <h1>AI 제목 프롬프트 편집</h1>
                     <p>
-                        여기서 입력한 문구는 기본 시스템 프롬프트 뒤에 추가 지침으로 붙습니다.
+                        선택한 프리셋 안내 뒤에, 여기서 입력한 문구가 추가 지침으로 붙습니다.
                         JSON 형식, 키워드 보존, 네이버 홈형 2개 + 블로그형 2개 규칙은 기본 프롬프트가 계속 고정합니다.
                     </p>
                 </div>
@@ -490,6 +492,14 @@ def _render_home() -> str:
         "</option>"
         for service in TREND_SERVICE_CHOICES
     )
+    title_presets = build_title_preset_payload()
+    title_preset_options = "".join(
+        f'<option value="{escape(str(item["key"]))}"{" selected" if item["key"] == DEFAULT_TITLE_PRESET_KEY else ""}>'
+        f'{escape(str(item["label"]))}'
+        "</option>"
+        for item in title_presets
+    )
+    title_preset_payload = json.dumps(title_presets, ensure_ascii=False).replace("</", "<\\/")
 
     return f"""<!DOCTYPE html>
 <html lang="ko">
@@ -501,6 +511,9 @@ def _render_home() -> str:
         name="description"
         content="수익형 키워드를 수집, 확장, 분석, 선별하고 제목까지 생성하는 로컬 도구"
     />
+    <script>
+        window.KEYWORD_FORGE_TITLE_PRESETS = {title_preset_payload};
+    </script>
     <link rel="stylesheet" href="/assets/app.css?v={_ASSET_VERSION}" />
     <script src="/assets/app.js?v={_ASSET_VERSION}" defer></script>
     <script src="/assets/app_overrides.js?v={_ASSET_VERSION}" defer></script>
@@ -707,9 +720,27 @@ def _render_home() -> str:
                     <button type="button" class="ghost-btn" id="stopStreamButton" disabled>중지</button>
                     <button type="button" class="ghost-btn" id="resetButton">결과 초기화</button>
                 </div>
+                <p class="input-help compact-help">
+                    상단 실행 버튼은 현재 입력값 기준으로 새로 시작합니다. 결과 카드의 `이 결과로 ...` 버튼은 지금 화면의 결과를 이어서 사용합니다.
+                </p>
 
                 </section>
 
+                </div>
+            </section>
+
+            <section class="panel launcher-panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="panel-kicker">Launcher</p>
+                        <h2>시작점</h2>
+                    </div>
+                </div>
+                <p class="input-help compact-help launcher-panel-note">
+                    현재 결과를 이어서 쓰거나 직접 붙여넣기로 확장, 분석, 제목 생성을 시작합니다.
+                </p>
+
+                <div class="control-launcher-column">
                     <section class="control-stage-block launcher-card control-stage-expand" data-control-block="expand" data-control-card="expand">
                         <div class="launcher-head">
                             <div>
@@ -745,10 +776,19 @@ def _render_home() -> str:
                         <div class="launcher-inline-grid">
                             <div class="field-block">
                                 <span class="field-label">확장 옵션</span>
-                                <div class="option-row">
-                                    <label class="check-chip"><input id="expandOptionRelated" type="checkbox" checked />연관확장</label>
-                                    <label class="check-chip"><input id="expandOptionAutocomplete" type="checkbox" checked />자동완성</label>
-                                    <label class="check-chip"><input id="expandOptionSeedFilter" type="checkbox" checked />원문포함</label>
+                                <div class="option-row launcher-toggle-row">
+                                    <label class="launcher-toggle-chip">
+                                        <input id="expandOptionRelated" type="checkbox" checked />
+                                        <span>연관확장</span>
+                                    </label>
+                                    <label class="launcher-toggle-chip">
+                                        <input id="expandOptionAutocomplete" type="checkbox" checked />
+                                        <span>자동완성</span>
+                                    </label>
+                                    <label class="launcher-toggle-chip">
+                                        <input id="expandOptionSeedFilter" type="checkbox" checked />
+                                        <span>원문포함</span>
+                                    </label>
                                 </div>
                             </div>
                             <div class="field-block">
@@ -811,11 +851,11 @@ def _render_home() -> str:
                         </details>
                     </section>
 
-                <section class="title-settings-card" data-control-block="title">
+                <section class="title-settings-card launcher-card control-stage-block control-stage-title" data-control-block="title">
                     <div class="launcher-head">
                         <div>
-                            <p class="panel-kicker">Title AI</p>
-                            <h3>제목 생성 설정</h3>
+                            <p class="panel-kicker">Title Entry</p>
+                            <h3>제목 생성 시작점</h3>
                         </div>
                         <span class="badge" id="titleModeBadge">template</span>
                     </div>
@@ -847,6 +887,29 @@ def _render_home() -> str:
                                 별도 API 설정 없이 가장 빠르게 사용할 수 있습니다.
                             </p>
                         </div>
+
+                        <div class="field-block field-block-wide">
+                            <span class="field-label">제목 키워드 조합</span>
+                            <div class="option-row" id="titleKeywordModes">
+                                <label class="check-chip"><input id="titleModeSingle" type="checkbox" checked />단일 키워드</label>
+                                <label class="check-chip"><input id="titleModeLongtailSelected" type="checkbox" checked />롱테일 V1</label>
+                                <label class="check-chip"><input id="titleModeLongtailExploratory" type="checkbox" />롱테일 V2</label>
+                                <label class="check-chip"><input id="titleModeLongtailExperimental" type="checkbox" />롱테일 V3</label>
+                            </div>
+                            <p id="titleKeywordModeSummary" class="input-help compact-help">
+                                단일 키워드와 검증 가능한 롱테일을 함께 제목 생성 대상으로 보냅니다.
+                            </p>
+                        </div>
+
+                        <label class="field-block" data-title-mode-visibility="ai" hidden>
+                            <span class="field-label">프롬프트 / 모델 프리셋</span>
+                            <select id="titlePreset">
+                                {title_preset_options}
+                            </select>
+                            <p id="titlePresetDescription" class="input-help compact-help">
+                                추천 균형형을 기본값으로 두고, 필요하면 직접 설정으로 바꿔 세부값을 조정합니다.
+                            </p>
+                        </label>
 
                         <label class="field-block" data-title-mode-visibility="ai" hidden>
                             <span class="field-label">AI Provider</span>

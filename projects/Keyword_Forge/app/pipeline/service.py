@@ -49,7 +49,7 @@ class PipelineService:
         titled_result = _run_stage(
             pipeline_debug,
             stage_name="title_gen",
-            runner=lambda: title_generator_module.run(_build_title_input(input_data, selected_result)),
+            runner=lambda: title_generator_module.run(_build_title_input(input_data, selected_result, analyzed_result)),
         )
 
         result = {
@@ -110,9 +110,13 @@ def _build_expander_input(input_data: dict[str, Any]) -> dict[str, Any]:
 def _build_title_input(
     input_data: dict[str, Any],
     selected_result: dict[str, Any],
+    analyzed_result: dict[str, Any],
 ) -> dict[str, Any]:
     title_defaults = {
         "selected_keywords": _get_list(selected_result, "selected_keywords"),
+        "keyword_clusters": _get_list(selected_result, "keyword_clusters"),
+        "longtail_suggestions": _get_list(selected_result, "longtail_suggestions"),
+        "analyzed_keywords": _get_list(analyzed_result, "analyzed_keywords"),
         "title_options": input_data.get("title_options", {}),
     }
     return _merge_stage_config(title_defaults, input_data.get("title"))

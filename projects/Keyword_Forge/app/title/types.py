@@ -51,7 +51,17 @@ class TitleQualityReport(TypedDict, total=False):
 
 
 class TitleOutputItem(TypedDict, total=False):
+    target_id: str
     keyword: str
+    target_mode: str
+    target_mode_label: str
+    base_keyword: str
+    support_keywords: list[str]
+    source_keywords: list[str]
+    source_kind: str
+    source_note: str
+    cluster_id: str
+    source_suggestion_id: str
     titles: GeneratedTitles
     quality_report: TitleQualityReport
 

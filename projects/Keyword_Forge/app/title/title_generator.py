@@ -17,12 +17,22 @@ def generate_titles(
     options: TitleGenerationOptions | None = None,
 ) -> tuple[list[TitleOutputItem], dict[str, Any]]:
     normalized_items = _normalize_input_items(items)
+    input_items_by_keyword = {
+        normalize_text(item.get("keyword")): item
+        for item in normalized_items
+        if normalize_text(item.get("keyword"))
+    }
     if options is None or options.mode != "ai":
         return _finalize_generated_results(
             _build_template_results(normalized_items),
             _build_meta(
                 requested_mode=options.mode if options else "template",
                 used_mode="template",
+                provider=options.provider if options else None,
+                model=options.model if options else None,
+                temperature=options.temperature if options else None,
+                preset_key=options.preset_key if options else "",
+                preset_label=options.preset_label if options else "",
             ),
         )
 
@@ -36,6 +46,9 @@ def generate_titles(
                 used_mode="template_fallback",
                 provider=options.provider,
                 model=options.model,
+                temperature=options.temperature,
+                preset_key=options.preset_key,
+                preset_label=options.preset_label,
                 fallback_reason="missing_api_key",
             ),
         )
@@ -54,7 +67,9 @@ def generate_titles(
                 titles = item.get("titles") if isinstance(item, dict) else None
                 if not keyword or not _is_valid_title_bundle(titles):
                     continue
+                source_item = input_items_by_keyword.get(keyword, {"keyword": keyword})
                 ai_results[keyword] = {
+                    **_strip_generated_fields(source_item),
                     "keyword": keyword,
                     "titles": {
                         "naver_home": list(titles["naver_home"]),
@@ -71,6 +86,9 @@ def generate_titles(
                 used_mode="template_fallback",
                 provider=options.provider,
                 model=options.model,
+                temperature=options.temperature,
+                preset_key=options.preset_key,
+                preset_label=options.preset_label,
                 fallback_reason=str(exc),
             ),
         )
@@ -97,6 +115,9 @@ def generate_titles(
             used_mode=used_mode,
             provider=options.provider,
             model=options.model,
+            temperature=options.temperature,
+            preset_key=options.preset_key,
+            preset_label=options.preset_label,
             fallback_reason=", ".join(fallback_keywords[:10]) if fallback_keywords else "",
             fallback_keywords=fallback_keywords,
         ),
@@ -106,24 +127,36 @@ def generate_titles(
 
 
 def _normalize_input_items(items: list[dict[str, Any]]) -> list[dict[str, str]]:
-    normalized_items: list[dict[str, str]] = []
+    normalized_items: list[dict[str, Any]] = []
 
     for item in items:
         keyword = normalize_text(item.get("keyword"))
         if not keyword:
             continue
-        normalized_items.append({"keyword": keyword})
+        normalized_items.append(
+            {
+                **_strip_generated_fields(item),
+                "keyword": keyword,
+            }
+        )
 
     return normalized_items
 
 
-def _build_template_results(items: list[dict[str, str]]) -> list[TitleOutputItem]:
-    return [_build_template_title_item(item["keyword"]) for item in items]
+def _build_template_results(items: list[dict[str, Any]]) -> list[TitleOutputItem]:
+    return [_build_template_title_item(item) for item in items]
 
 
-def _build_template_title_item(keyword: str) -> TitleOutputItem:
+def _build_template_title_item(item: dict[str, Any] | str) -> TitleOutputItem:
+    if isinstance(item, dict):
+        keyword = normalize_text(item.get("keyword"))
+        source_item = _strip_generated_fields(item)
+    else:
+        keyword = normalize_text(item)
+        source_item = {"keyword": keyword}
     category = detect_category(keyword)
     return {
+        **source_item,
         "keyword": keyword,
         "titles": {
             "naver_home": build_naver_home_titles(keyword, category),
@@ -134,6 +167,14 @@ def _build_template_title_item(keyword: str) -> TitleOutputItem:
 
 def _chunk_keywords(items: list[dict[str, str]], size: int) -> list[list[dict[str, str]]]:
     return [items[index:index + size] for index in range(0, len(items), size)]
+
+
+def _strip_generated_fields(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in item.items()
+        if key not in {"titles", "quality_report"}
+    }
 
 
 def _is_valid_title_bundle(titles: Any) -> bool:
@@ -189,6 +230,11 @@ def _auto_retry_low_quality_results(
 
     retried_by_keyword: dict[str, TitleOutputItem] = {}
     retry_error_messages: list[str] = []
+    original_items_by_keyword = {
+        normalize_text(item.get("keyword")): item
+        for item in original_results
+        if normalize_text(item.get("keyword"))
+    }
     retry_options = replace(
         options,
         batch_size=max(1, min(options.batch_size, 4)),
@@ -211,7 +257,9 @@ def _auto_retry_low_quality_results(
             titles = item.get("titles") if isinstance(item, dict) else None
             if not keyword or not _is_valid_title_bundle(titles):
                 continue
+            source_item = original_items_by_keyword.get(keyword, {"keyword": keyword})
             retried_by_keyword[keyword] = {
+                **_strip_generated_fields(source_item),
                 "keyword": keyword,
                 "titles": {
                     "naver_home": list(titles["naver_home"]),
@@ -342,6 +390,9 @@ def _build_meta(
     used_mode: str,
     provider: str | None = None,
     model: str | None = None,
+    temperature: float | None = None,
+    preset_key: str = "",
+    preset_label: str = "",
     fallback_reason: str = "",
     fallback_keywords: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -350,6 +401,9 @@ def _build_meta(
         "used_mode": used_mode,
         "provider": provider,
         "model": model,
+        "temperature": temperature,
+        "preset_key": preset_key,
+        "preset_label": preset_label,
         "fallback_reason": fallback_reason,
         "fallback_keywords": fallback_keywords or [],
     }

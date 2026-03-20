@@ -7,6 +7,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.expander.utils.tokenizer import normalize_text
+from app.title.presets import get_title_preset
 from app.title.rules import NAVER_HOME_MAX_LENGTH
 
 
@@ -53,6 +54,9 @@ class TitleGenerationOptions:
     batch_size: int = 8
     fallback_to_template: bool = True
     system_prompt: str = ""
+    preset_key: str = ""
+    preset_label: str = ""
+    preset_prompt: str = ""
 
     @classmethod
     def from_input(cls, input_data: Any) -> "TitleGenerationOptions":
@@ -60,10 +64,16 @@ class TitleGenerationOptions:
         if not isinstance(raw, dict):
             raw = {}
 
-        provider = _normalize_provider(raw.get("provider"))
+        preset = get_title_preset(raw.get("preset_key") or raw.get("preset"))
+        provider = _normalize_provider(raw.get("provider") or (preset.provider if preset else None))
         mode = "ai" if str(raw.get("mode") or "").strip().lower() == "ai" else "template"
-        model = normalize_text(raw.get("model")) or _DEFAULT_MODELS[provider]
-        temperature = _coerce_float(raw.get("temperature"), default=0.7, minimum=0.0, maximum=1.5)
+        model = normalize_text(raw.get("model")) or (preset.model if preset else _DEFAULT_MODELS[provider])
+        temperature = _coerce_float(
+            raw.get("temperature"),
+            default=float(preset.temperature if preset else 0.7),
+            minimum=0.0,
+            maximum=1.5,
+        )
         max_output_tokens = _coerce_int(raw.get("max_output_tokens"), default=1200, minimum=200, maximum=4000)
         batch_size = _coerce_int(raw.get("batch_size"), default=8, minimum=1, maximum=20)
 
@@ -77,14 +87,21 @@ class TitleGenerationOptions:
             batch_size=batch_size,
             fallback_to_template=bool(raw.get("fallback_to_template", True)),
             system_prompt=normalize_text(raw.get("system_prompt")) or "",
+            preset_key=preset.key if preset else "",
+            preset_label=preset.label if preset else "",
+            preset_prompt=preset.prompt_guidance if preset else "",
         )
 
     @property
     def effective_system_prompt(self) -> str:
+        prompt_sections = [_DEFAULT_SYSTEM_PROMPT]
+        preset_prompt = normalize_text(self.preset_prompt)
         extra_prompt = normalize_text(self.system_prompt)
-        if not extra_prompt:
-            return _DEFAULT_SYSTEM_PROMPT
-        return f"{_DEFAULT_SYSTEM_PROMPT}\n\nAdditional guidance:\n{extra_prompt}"
+        if preset_prompt:
+            prompt_sections.append(f"Preset guidance:\n{preset_prompt}")
+        if extra_prompt:
+            prompt_sections.append(f"Additional guidance:\n{extra_prompt}")
+        return "\n\n".join(prompt_sections)
 
 
 def request_ai_titles(
