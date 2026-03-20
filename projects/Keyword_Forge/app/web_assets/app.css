@@ -1248,6 +1248,45 @@ body.utility-drawer-open {
     flex-wrap: wrap;
     gap: 8px;
 }
+.title-sort-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.title-sort-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(20, 32, 51, 0.08);
+    background: rgba(247, 243, 234, 0.72);
+}
+.title-sort-field span {
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+.title-sort-field select {
+    min-width: 112px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+.title-sort-field select:focus {
+    outline: none;
+}
+.title-sort-count {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
 .title-item-actions .inline-action-btn {
     background: rgba(255, 255, 255, 0.86);
 }

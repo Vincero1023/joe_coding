@@ -6461,6 +6461,7 @@ function renderResults() {
                     ? buildEnhancedTitleGenerationSummaryText(state.results.titled?.generation_meta, generatedTitles)
                     : state.stageStatus.titled.message,
                 actionsHtml: [
+                    generatedTitles.length ? renderTitleResultControls(generatedTitles) : "",
                     renderStageStopAction("titled"),
                     lowQualityTitleCount
                         ? `<button type="button" class="inline-action-btn" data-inline-action="rerun_title_flagged">기준 미달 ${escapeHtml(String(lowQualityTitleCount))}건만 다시 생성</button>`
@@ -7273,6 +7274,18 @@ function resetAnalyzedFilters() {
     renderResults();
 }
 
+function updateTitleResultControl(name, value) {
+    if (name === "mode") {
+        state.titleModeFilter = normalizeTitleResultModeFilter(value);
+    } else if (name === "sort") {
+        state.titleSort = normalizeTitleResultSort(value);
+    } else {
+        return;
+    }
+    renderResults();
+    scheduleDashboardSessionSave();
+}
+
 function handleResultsGridInput(event) {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
@@ -7296,6 +7309,12 @@ function handleResultsGridChange(event) {
     const filterName = target.dataset.analyzedFilter || "";
     if (filterName) {
         updateAnalyzedFilter(filterName, target.value);
+        return;
+    }
+
+    const titleResultControl = target.dataset.titleResultControl || "";
+    if (titleResultControl) {
+        updateTitleResultControl(titleResultControl, target.value);
         return;
     }
 
@@ -8200,6 +8219,165 @@ function renderTitleList(items) {
         const qualityStatus = qualityReport.status || "review";
         const qualityLabel = qualityReport.label || "검수 대기";
         const summary = qualityReport.summary || "제목 품질을 확인하는 중입니다.";
+        const channelScores = qualityReport.channel_scores || {};
+        const titleChecks = qualityReport.title_checks || {};
+        const targetIdentity = getTitleTargetIdentity(item);
+        return `
+            <div class="title-item">
+                <div class="title-item-head">
+                    <div class="title-keyword">
+                        <strong>${escapeHtml(item.keyword || "-")}</strong>
+                        <span class="badge">제목 ${escapeHtml(String(naverHomeCount + blogCount))}개</span>
+                    </div>
+                    <div class="title-item-actions">
+                        <span class="title-quality-chip ${escapeHtml(qualityStatus)}">품질 ${escapeHtml(String(qualityReport.bundle_score || 0))}점</span>
+                        <span class="title-quality-chip ${escapeHtml(qualityStatus)}">${escapeHtml(qualityLabel)}</span>
+                        <button
+                            type="button"
+                            class="inline-action-btn"
+                            data-inline-action="rerun_title_single"
+                            data-title-target-id="${escapeHtml(targetIdentity)}"
+                        >이 키워드만 다시 생성</button>
+                    </div>
+                </div>
+                ${renderTitleTargetMeta(item)}
+                <div class="title-quality-summary ${escapeHtml(qualityStatus)}">
+                    <strong>${escapeHtml(summary)}</strong>
+                    <span>네이버 홈형 ${escapeHtml(String(channelScores.naver_home || 0))}점 · 블로그형 ${escapeHtml(String(channelScores.blog || 0))}점</span>
+                </div>
+                ${renderTitleQualityIssues(qualityReport)}
+                <div class="title-columns">
+                    <div class="title-column">
+                        <h4>네이버 홈형</h4>
+                        <ul>${renderTitleBulletList(item.titles?.naver_home || [], titleChecks.naver_home || [])}</ul>
+                    </div>
+                    <div class="title-column">
+                        <h4>블로그형</h4>
+                        <ul>${renderTitleBulletList(item.titles?.blog || [], titleChecks.blog || [])}</ul>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join("")}</div>`;
+}
+
+function normalizeTitleResultModeFilter(value) {
+    const safeValue = String(value || "all").trim();
+    return TITLE_RESULT_MODE_FILTER_OPTIONS.some((option) => option.value === safeValue)
+        ? safeValue
+        : "all";
+}
+
+function normalizeTitleResultSort(value) {
+    const safeValue = String(value || "mode_quality_desc").trim();
+    return TITLE_RESULT_SORT_OPTIONS.some((option) => option.value === safeValue)
+        ? safeValue
+        : "mode_quality_desc";
+}
+
+function getTitleModeSortRank(mode) {
+    const safeMode = String(mode || "single").trim();
+    const modeOrder = ["single", "longtail_selected", "longtail_exploratory", "longtail_experimental"];
+    const rank = modeOrder.indexOf(safeMode);
+    return rank === -1 ? modeOrder.length : rank;
+}
+
+function buildTitleListEntries(items) {
+    const modeFilter = normalizeTitleResultModeFilter(state.titleModeFilter);
+    const sortKey = normalizeTitleResultSort(state.titleSort);
+    const safeItems = Array.isArray(items) ? items : [];
+    const filtered = safeItems
+        .map((item, index) => {
+            const qualityReport = getTitleQualityReport(item);
+            return {
+                item,
+                qualityReport,
+                bundleScore: Number(qualityReport.bundle_score || 0),
+                keyword: String(item?.keyword || "").trim(),
+                mode: String(item?.target_mode || "single").trim() || "single",
+                originalIndex: index,
+            };
+        })
+        .filter((entry) => modeFilter === "all" || entry.mode === modeFilter);
+
+    filtered.sort((left, right) => {
+        if (sortKey === "quality_desc") {
+            if (right.bundleScore !== left.bundleScore) {
+                return right.bundleScore - left.bundleScore;
+            }
+        } else if (sortKey === "quality_asc") {
+            if (left.bundleScore !== right.bundleScore) {
+                return left.bundleScore - right.bundleScore;
+            }
+        } else if (sortKey === "keyword_asc") {
+            const keywordCompare = left.keyword.localeCompare(right.keyword, "ko");
+            if (keywordCompare !== 0) {
+                return keywordCompare;
+            }
+        } else {
+            const modeRankGap = getTitleModeSortRank(left.mode) - getTitleModeSortRank(right.mode);
+            if (modeRankGap !== 0) {
+                return modeRankGap;
+            }
+            if (right.bundleScore !== left.bundleScore) {
+                return right.bundleScore - left.bundleScore;
+            }
+        }
+
+        const keywordCompare = left.keyword.localeCompare(right.keyword, "ko");
+        if (keywordCompare !== 0) {
+            return keywordCompare;
+        }
+        return left.originalIndex - right.originalIndex;
+    });
+
+    return filtered;
+}
+
+function renderTitleResultControls(items) {
+    const entries = buildTitleListEntries(items);
+    const totalCount = Array.isArray(items) ? items.length : 0;
+    const displayedCount = entries.length;
+    const currentModeFilter = normalizeTitleResultModeFilter(state.titleModeFilter);
+    const currentSort = normalizeTitleResultSort(state.titleSort);
+    return `
+        <div class="title-sort-controls">
+            <label class="title-sort-field">
+                <span>버전</span>
+                <select data-title-result-control="mode">
+                    ${TITLE_RESULT_MODE_FILTER_OPTIONS.map((option) => `
+                        <option value="${escapeHtml(option.value)}" ${currentModeFilter === option.value ? "selected" : ""}>
+                            ${escapeHtml(option.label)}
+                        </option>
+                    `).join("")}
+                </select>
+            </label>
+            <label class="title-sort-field">
+                <span>정렬</span>
+                <select data-title-result-control="sort">
+                    ${TITLE_RESULT_SORT_OPTIONS.map((option) => `
+                        <option value="${escapeHtml(option.value)}" ${currentSort === option.value ? "selected" : ""}>
+                            ${escapeHtml(option.label)}
+                        </option>
+                    `).join("")}
+                </select>
+            </label>
+            <span class="title-sort-count">표시 ${escapeHtml(String(displayedCount))} / 전체 ${escapeHtml(String(totalCount))}</span>
+        </div>
+    `;
+}
+
+function renderTitleList(items) {
+    const entries = buildTitleListEntries(items);
+    if (!entries.length) {
+        return '<div class="collector-empty">선택한 조건에 맞는 제목 결과가 없습니다.</div>';
+    }
+    return `<div class="title-list">${entries.map(({ item, qualityReport }) => {
+        const naverHomeCount = Array.isArray(item.titles?.naver_home) ? item.titles.naver_home.length : 0;
+        const blogCount = Array.isArray(item.titles?.blog) ? item.titles.blog.length : 0;
+        const qualityStatus = qualityReport.status || "review";
+        const qualityLabel = qualityReport.label || "검수 대기";
+        const summary = qualityReport.summary || "제목 문장을 확인하는 중입니다.";
         const channelScores = qualityReport.channel_scores || {};
         const titleChecks = qualityReport.title_checks || {};
         const targetIdentity = getTitleTargetIdentity(item);
