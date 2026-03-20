@@ -3,11 +3,11 @@
 from app.title.types import TriggerBundle
 
 
-_TIME_TRIGGERS = ("어제", "방금", "이번주", "올해")
-_CURIOSITY_TRIGGERS = ("왜 이럴까", "알고 보니", "진짜일까")
-_CONTRAST_TRIGGERS = ("비교해보니", "더 좋은 쪽", "결과가 달랐다")
-_NUMERIC_TRIGGERS = ("3가지", "7일", "10%", "2026")
-_OPPORTUNITY_TRIGGERS = ("기회일까", "놓치면 손해", "지금 봐야 할 이유")
+_TIME_TRIGGERS = ("오늘", "이번주", "최근", "2026")
+_CURIOSITY_TRIGGERS = ("어디서 갈릴까", "핵심은 뭘까", "먼저 볼 부분", "왜 찾는지")
+_CONTRAST_TRIGGERS = ("비교 포인트", "선택 기준", "차이 정리", "체크 포인트")
+_NUMERIC_TRIGGERS = ("3가지", "5분", "체크리스트", "2026")
+_OPPORTUNITY_TRIGGERS = ("지금 확인할 포인트", "먼저 볼 이유", "실수 줄이는 법", "핵심만 보기")
 
 
 

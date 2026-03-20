@@ -19,7 +19,7 @@ from app.expander.utils.tokenizer import normalize_key
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260319-collect-compact-v27"
+_ASSET_VERSION = "20260320-longtail-verifier-v35"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -260,6 +260,140 @@ def _render_static_shell(*, title: str, description: str, body: str) -> str:
 """
 
 
+def _render_title_prompt_editor() -> str:
+    body = f"""
+    <div class="bg-orb bg-orb-a"></div>
+    <div class="bg-orb bg-orb-b"></div>
+    <div class="bg-grid"></div>
+    <main class="doc-shell title-prompt-shell">
+        <div class="doc-stack">
+            <section class="doc-hero doc-hero-compact">
+                <div class="doc-breadcrumbs">
+                    <a href="/">Keyword Forge</a>
+                    <span>/</span>
+                    <span>제목 프롬프트</span>
+                </div>
+                <div class="doc-hero-copy">
+                    <p class="panel-kicker">Title Prompt</p>
+                    <h1>AI 제목 프롬프트 편집</h1>
+                    <p>
+                        여기서 입력한 문구는 기본 시스템 프롬프트 뒤에 추가 지침으로 붙습니다.
+                        JSON 형식, 키워드 보존, 네이버 홈형 2개 + 블로그형 2개 규칙은 기본 프롬프트가 계속 고정합니다.
+                    </p>
+                </div>
+                <div class="title-prompt-guide">
+                    <div class="title-prompt-guide-card">
+                        <strong>권장 사용법</strong>
+                        <p>톤, 어휘, 클릭 유도 방식, 금지 표현 같은 운영 규칙만 추가하는 방식이 가장 안정적입니다.</p>
+                    </div>
+                    <div class="title-prompt-guide-card">
+                        <strong>예시</strong>
+                        <p>과장 표현은 줄이고, 숫자형 제목을 우선하며, 제목 첫 단어는 반드시 키워드로 시작하도록 작성할 수 있습니다.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="panel-kicker">Editor</p>
+                        <h2>추가 지침</h2>
+                    </div>
+                    <span class="status-pill" id="titlePromptEditorStatus">불러오는 중</span>
+                </div>
+                <label class="field-block field-block-wide">
+                    <span class="field-label">시스템 프롬프트에 덧붙일 지침</span>
+                    <textarea
+                        id="titlePromptEditorInput"
+                        class="title-prompt-textarea"
+                        rows="16"
+                        placeholder="예: 키워드는 항상 제목 맨 앞에 두고, 클릭 유도형 표현은 1개만 사용하세요."
+                    ></textarea>
+                </label>
+                <p class="input-help compact-help">
+                    저장하면 메인 화면의 제목 생성 설정에 즉시 반영됩니다. API Key는 이 화면에 노출하지 않습니다.
+                </p>
+                <div class="doc-actions title-prompt-actions">
+                    <button type="button" class="subtle-btn" id="saveTitlePromptButton">저장</button>
+                    <button type="button" class="ghost-btn" id="clearTitlePromptEditorButton">비우기</button>
+                    <button type="button" class="ghost-chip" id="closeTitlePromptEditorButton">탭 닫기</button>
+                </div>
+            </section>
+        </div>
+    </main>
+    <script>
+        (function() {{
+            const STORAGE_KEY = "keyword_forge_title_settings";
+            const input = document.getElementById("titlePromptEditorInput");
+            const status = document.getElementById("titlePromptEditorStatus");
+            const saveButton = document.getElementById("saveTitlePromptButton");
+            const clearButton = document.getElementById("clearTitlePromptEditorButton");
+            const closeButton = document.getElementById("closeTitlePromptEditorButton");
+
+            function readSettings() {{
+                try {{
+                    return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{{}}");
+                }} catch (error) {{
+                    return {{}};
+                }}
+            }}
+
+            function writeSettings(settings) {{
+                window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+            }}
+
+            function normalizePrompt(value) {{
+                return String(value || "").replace(/\\r\\n/g, "\\n").trim();
+            }}
+
+            function updateStatus(message, kind) {{
+                status.textContent = message;
+                status.classList.remove("success", "error");
+                if (kind) {{
+                    status.classList.add(kind);
+                }}
+            }}
+
+            function loadPrompt() {{
+                const settings = readSettings();
+                input.value = normalizePrompt(settings.system_prompt || "");
+                updateStatus(input.value ? `저장됨 · ${{input.value.length}}자` : "기본 프롬프트만 사용 중");
+            }}
+
+            function savePrompt() {{
+                const settings = readSettings();
+                const prompt = normalizePrompt(input.value);
+                settings.system_prompt = prompt;
+                writeSettings(settings);
+                updateStatus(prompt ? `저장됨 · ${{prompt.length}}자` : "기본 프롬프트만 사용 중", "success");
+            }}
+
+            saveButton.addEventListener("click", savePrompt);
+            clearButton.addEventListener("click", () => {{
+                input.value = "";
+                savePrompt();
+            }});
+            closeButton.addEventListener("click", () => {{
+                window.close();
+            }});
+            input.addEventListener("keydown", (event) => {{
+                if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {{
+                    event.preventDefault();
+                    savePrompt();
+                }}
+            }});
+
+            loadPrompt();
+        }})();
+    </script>
+    """
+    return _render_static_shell(
+        title="제목 프롬프트 편집",
+        description="AI 제목 생성용 추가 시스템 프롬프트를 수정합니다.",
+        body=body,
+    )
+
+
 def _render_guides_index() -> str:
     guides = _load_study_guides()
     grouped: dict[str, list[dict[str, object]]] = {key: [] for key, _label, _keywords in _GUIDE_GROUPS}
@@ -369,6 +503,7 @@ def _render_home() -> str:
     />
     <link rel="stylesheet" href="/assets/app.css?v={_ASSET_VERSION}" />
     <script src="/assets/app.js?v={_ASSET_VERSION}" defer></script>
+    <script src="/assets/app_overrides.js?v={_ASSET_VERSION}" defer></script>
 </head>
 <body>
     <div class="bg-orb bg-orb-a"></div>
@@ -573,33 +708,6 @@ def _render_home() -> str:
                     <button type="button" class="ghost-btn" id="resetButton">결과 초기화</button>
                 </div>
 
-                <section class="grade-select-panel">
-                    <div class="grade-select-head">
-                        <div>
-                            <span class="field-label">등급별 선별</span>
-                            <p class="grade-select-summary" id="gradeSelectSummary">전체 등급 선별</p>
-                        </div>
-                        <p class="input-help compact-help">수집 → 확장 → 분석까지 자동 실행한 뒤, 선택한 등급만 선별합니다.</p>
-                    </div>
-                    <div class="grade-select-presets">
-                        <button type="button" class="ghost-chip" data-grade-preset="all">전체</button>
-                        <button type="button" class="ghost-chip" data-grade-preset="sa">S·A</button>
-                        <button type="button" class="ghost-chip" data-grade-preset="ab">A·B</button>
-                        <button type="button" class="ghost-chip" data-grade-preset="bc">B·C</button>
-                        <button type="button" class="ghost-chip" data-grade-preset="cd">C·D</button>
-                        <button type="button" class="ghost-chip" data-grade-preset="df">D·F</button>
-                    </div>
-                    <div class="grade-select-row">
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="S">S</button>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="A">A</button>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="B">B</button>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="C">C</button>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="D">D</button>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-grade-toggle="F">F</button>
-                        <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">선택 등급 선별</button>
-                    </div>
-                </section>
-
                 </section>
 
                     <section class="control-stage-block launcher-card control-stage-expand" data-control-block="expand" data-control-card="expand">
@@ -751,7 +859,7 @@ def _render_home() -> str:
 
                         <label class="field-block" data-title-mode-visibility="ai" hidden>
                             <span class="field-label">Model</span>
-                            <input id="titleModel" type="text" value="gpt-4o-mini" placeholder="예: gpt-4o-mini" />
+                            <select id="titleModel"></select>
                         </label>
 
                         <label class="field-block field-block-wide" data-title-mode-visibility="ai" hidden>
@@ -759,15 +867,38 @@ def _render_home() -> str:
                             <input id="titleApiKey" type="password" placeholder="브라우저에만 저장됩니다." />
                         </label>
 
-                        <label class="field-block" data-title-mode-visibility="ai" hidden>
-                            <span class="field-label">Temperature</span>
-                            <input id="titleTemperature" type="text" value="0.7" />
-                        </label>
+                        <div class="field-block" data-title-mode-visibility="ai" hidden>
+                            <span class="field-label">창의성 프리셋</span>
+                            <select id="titleTemperature">
+                                <option value="0.2">안정형</option>
+                                <option value="0.5">절충형</option>
+                                <option value="0.7">(추천) 균형형</option>
+                                <option value="1.0">확장형</option>
+                            </select>
+                            <p id="titleTemperatureDescription" class="input-help compact-help title-temperature-note">
+                                규칙 준수와 표현 다양성의 균형이 가장 무난한 기본값입니다.
+                            </p>
+                        </div>
 
                         <label class="field-block" data-title-mode-visibility="ai" hidden>
                             <span class="field-label">Fallback</span>
                             <label class="check-chip"><input id="titleFallback" type="checkbox" checked />AI 실패 시 template 사용</label>
                         </label>
+
+                        <div class="field-block field-block-wide title-prompt-block" data-title-mode-visibility="ai" hidden>
+                            <div class="title-prompt-head">
+                                <div>
+                                    <span class="field-label">AI 프롬프트</span>
+                                    <p class="input-help compact-help">새 탭에서 제목 생성용 추가 지침을 수정합니다.</p>
+                                </div>
+                                <div class="title-prompt-actions">
+                                    <button type="button" class="ghost-chip" id="openTitlePromptEditorButton">프롬프트 편집</button>
+                                    <button type="button" class="ghost-chip" id="clearTitlePromptButton">비우기</button>
+                                </div>
+                            </div>
+                            <div id="titlePromptSummary" class="title-prompt-summary">기본 시스템 프롬프트만 사용 중입니다.</div>
+                            <input id="titleSystemPrompt" type="hidden" value="" />
+                        </div>
                     </div>
                     <p class="input-help" data-title-mode-visibility="ai" hidden>
                         API 키는 서버에 저장하지 않고 현재 브라우저 localStorage 에만 보관합니다.
@@ -784,35 +915,82 @@ def _render_home() -> str:
                         <h2>키워드 작업대</h2>
                     </div>
                 </div>
+                <section class="grade-select-panel workbench-grade-select">
+                    <div class="grade-select-head">
+                        <div>
+                            <span class="field-label">2축 선별</span>
+                            <p class="grade-select-summary" id="gradeSelectSummary">수익성 전체 · 공략성 전체</p>
+                        </div>
+                        <p class="input-help compact-help">수익성 A~D와 공략성 1~4를 조합해 선별합니다. 기본 골든 후보는 A~C · 1~3 조합입니다.</p>
+                    </div>
+                    <div class="grade-select-presets">
+                        <button type="button" class="ghost-chip" data-selection-preset="all">전체</button>
+                        <button type="button" class="ghost-chip" data-selection-preset="golden_candidate">골든 후보</button>
+                        <button type="button" class="ghost-chip" data-selection-preset="profit_focus">수익형 집중</button>
+                        <button type="button" class="ghost-chip" data-selection-preset="easy_exposure">쉬운 노출</button>
+                    </div>
+                    <div class="grade-select-row grade-select-axis-row">
+                        <span class="grade-select-axis-label">수익성</span>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="A">A</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="B">B</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="C">C</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="D">D</button>
+                    </div>
+                    <div class="grade-select-row grade-select-axis-row">
+                        <span class="grade-select-axis-label">공략성</span>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="1">1</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="2">2</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="3">3</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="4">4</button>
+                        <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">선택 조합 선별</button>
+                    </div>
+                </section>
+                <div class="results-panel-tools">
+                    <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">오류 / 진단</button>
+                    <button type="button" class="ghost-chip" data-utility-open="logs" aria-pressed="false">실행 로그</button>
+                    <button type="button" class="ghost-chip" id="exportTitleCsvButton">제목 결과 CSV</button>
+                </div>
                 <div id="resultsGrid" class="results-grid"></div>
             </section>
-
-            <section class="panel diagnostics-panel">
-                <div class="debug-box">
-                    <div class="debug-box-head">
-                        <div>
-                            <p class="panel-kicker">Debug</p>
-                            <h3>오류 및 진단</h3>
-                        </div>
-                        <button type="button" class="ghost-btn debug-clear-btn" id="clearDebugButton">진단 초기화</button>
-                    </div>
-                    <div id="errorConsole" class="error-console empty">오류가 발생하지 않았습니다.</div>
-                    <div id="debugPanels" class="debug-panels"></div>
-                </div>
-            </section>
-
-            <section class="panel logs-panel">
-                <div class="panel-head">
-                    <div>
-                        <p class="panel-kicker">Logs</p>
-                        <h2>실행 로그</h2>
-                    </div>
-                </div>
-                <div class="log-box">
-                    <div id="activityLog" class="activity-log"></div>
-                </div>
-            </section>
         </main>
+        <div id="utilityDrawer" class="utility-drawer" hidden>
+            <button type="button" class="utility-drawer-backdrop" id="utilityDrawerBackdrop" aria-label="보조 패널 닫기"></button>
+            <section class="utility-drawer-panel">
+                <div class="utility-drawer-head">
+                    <div class="utility-drawer-tabs">
+                        <button type="button" class="ghost-chip" data-utility-tab="diagnostics" aria-pressed="true">오류 / 진단</button>
+                        <button type="button" class="ghost-chip" data-utility-tab="logs" aria-pressed="false">실행 로그</button>
+                    </div>
+                    <button type="button" class="ghost-btn" id="utilityDrawerClose">닫기</button>
+                </div>
+                <div class="utility-drawer-body">
+                    <section class="utility-drawer-view" data-utility-panel="diagnostics">
+                        <div class="debug-box">
+                            <div class="debug-box-head">
+                                <div>
+                                    <p class="panel-kicker">Debug</p>
+                                    <h3>오류 및 진단</h3>
+                                </div>
+                                <button type="button" class="ghost-btn debug-clear-btn" id="clearDebugButton">진단 초기화</button>
+                            </div>
+                            <div id="errorConsole" class="error-console empty">오류가 발생하지 않았습니다.</div>
+                            <div id="debugPanels" class="debug-panels"></div>
+                        </div>
+                    </section>
+                    <section class="utility-drawer-view" data-utility-panel="logs" hidden>
+                        <div class="panel-head">
+                            <div>
+                                <p class="panel-kicker">Logs</p>
+                                <h2>실행 로그</h2>
+                            </div>
+                        </div>
+                        <div class="log-box">
+                            <div id="activityLog" class="activity-log"></div>
+                        </div>
+                    </section>
+                </div>
+            </section>
+        </div>
     </div>
 </body>
 </html>
@@ -832,3 +1010,8 @@ def guides_index() -> HTMLResponse:
 @router.get("/guides/{guide_slug}", response_class=HTMLResponse, include_in_schema=False)
 def guide_detail(guide_slug: str) -> HTMLResponse:
     return HTMLResponse(_render_guide_detail(guide_slug))
+
+
+@router.get("/title-prompt-editor", response_class=HTMLResponse, include_in_schema=False)
+def title_prompt_editor() -> HTMLResponse:
+    return HTMLResponse(_render_title_prompt_editor())

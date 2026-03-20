@@ -57,7 +57,15 @@ class PipelineService:
             "expanded_keywords": _get_list(expanded_result, "expanded_keywords"),
             "analyzed_keywords": _get_list(analyzed_result, "analyzed_keywords"),
             "selected_keywords": _get_list(selected_result, "selected_keywords"),
+            "keyword_clusters": _get_list(selected_result, "keyword_clusters"),
+            "longtail_suggestions": _get_list(selected_result, "longtail_suggestions"),
             "generated_titles": _get_list(titled_result, "generated_titles"),
+            "content_map_summary": selected_result.get("content_map_summary", {})
+            if isinstance(selected_result, dict)
+            else {},
+            "longtail_summary": selected_result.get("longtail_summary", {})
+            if isinstance(selected_result, dict)
+            else {},
             "title_generation_meta": titled_result.get("generation_meta", {})
             if isinstance(titled_result, dict)
             else {},
@@ -70,6 +78,8 @@ class PipelineService:
                 "expanded_keywords": len(result["expanded_keywords"]),
                 "analyzed_keywords": len(result["analyzed_keywords"]),
                 "selected_keywords": len(result["selected_keywords"]),
+                "keyword_clusters": len(result["keyword_clusters"]),
+                "longtail_suggestions": len(result["longtail_suggestions"]),
                 "generated_titles": len(result["generated_titles"]),
             }
             pipeline_debug.pop("perf_started_at", None)

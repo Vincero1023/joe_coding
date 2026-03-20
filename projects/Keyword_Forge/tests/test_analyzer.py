@@ -1,7 +1,16 @@
 from unittest.mock import patch
 
 from app.analyzer.main import analyze_keywords, run
-from app.analyzer.scorer import calculate_final_score, calculate_opportunity, calculate_profit
+from app.analyzer.scorer import (
+    calculate_attackability_score,
+    calculate_final_score,
+    calculate_opportunity,
+    calculate_profit,
+    calculate_profitability_score,
+    classify_attackability_grade,
+    classify_golden_bucket,
+    classify_profitability_grade,
+)
 
 
 def test_profit_and_opportunity_helpers_return_scaled_values() -> None:
@@ -85,6 +94,51 @@ def test_analyzer_uses_sample_style_score_tiers_for_measured_stats() -> None:
     assert analyzed[0]["metrics"]["cpc_score"] == 10.0
     assert analyzed[0]["metrics"]["search_volume_score"] == 60.0
     assert analyzed[0]["metrics"]["rarity_score"] == 15.0
+
+
+def test_dual_axis_labels_are_attached_to_analyzed_keywords() -> None:
+    result = run(
+        {
+            "keywords_text": "insurance compare",
+            "keyword_stats_items": [
+                {
+                    "keyword": "insurance compare",
+                    "pc_searches": 1300,
+                    "mobile_searches": 9200,
+                    "blog_results": 4800,
+                    "pc_clicks": 48.0,
+                    "mobile_clicks": 122.0,
+                    "bid_1": 9200,
+                    "bid_2": 7100,
+                    "bid_3": 5200,
+                }
+            ],
+        }
+    )
+
+    analyzed = result["analyzed_keywords"]
+    assert len(analyzed) == 1
+    assert analyzed[0]["profitability_grade"] in {"A", "B", "C", "D"}
+    assert analyzed[0]["attackability_grade"] in {"1", "2", "3", "4"}
+    assert analyzed[0]["combo_grade"] == (
+        f"{analyzed[0]['profitability_grade']}{analyzed[0]['attackability_grade']}"
+    )
+    assert analyzed[0]["golden_bucket"] in {"gold", "promising", "experimental", "hold"}
+    assert "click_potential_score" in analyzed[0]["metrics"]
+    assert "opportunity_score" in analyzed[0]["metrics"]
+    assert "competition_score" in analyzed[0]["metrics"]
+
+
+def test_dual_axis_helpers_classify_gold_combo() -> None:
+    profitability_score = calculate_profitability_score(90.0, 90.0, 240.0)
+    attackability_score = calculate_attackability_score(4.5, 35.0, 0.35, 90.0)
+
+    profitability_grade = classify_profitability_grade(profitability_score)
+    attackability_grade = classify_attackability_grade(attackability_score)
+
+    assert profitability_grade == "A"
+    assert attackability_grade == "2"
+    assert classify_golden_bucket(profitability_grade, attackability_grade) == "gold"
 
 
 def test_analyzer_matches_sample_detail_for_moderate_blog_counts() -> None:

@@ -169,6 +169,84 @@ def calculate_final_score(
     return float(math.floor(weighted_score + 0.5))
 
 
+def calculate_profitability_score(
+    monetization_score: float,
+    volume_score: float,
+    total_clicks: float,
+    config: AnalyzerConfig = DEFAULT_CONFIG,
+) -> float:
+    click_potential_score = _scale_click_potential(total_clicks, volume_score)
+    weighted_score = (
+        (monetization_score * config.profitability_monetization_weight)
+        + (volume_score * config.profitability_volume_weight)
+        + (click_potential_score * config.profitability_click_weight)
+    )
+    return float(math.floor(weighted_score + 0.5))
+
+
+def calculate_attackability_score(
+    opportunity_ratio: float,
+    rarity_score: float,
+    competition_ratio: float,
+    volume_score: float,
+    config: AnalyzerConfig = DEFAULT_CONFIG,
+) -> float:
+    opportunity_score = _scale_opportunity_ratio(opportunity_ratio)
+    competition_score = _scale_competition_ratio(competition_ratio)
+    weighted_score = (
+        (opportunity_score * config.attackability_opportunity_weight)
+        + (rarity_score * config.attackability_rarity_weight)
+        + (competition_score * config.attackability_competition_weight)
+        + (volume_score * config.attackability_volume_weight)
+    )
+    rounded_score = float(math.floor(weighted_score + 0.5))
+    if volume_score < 25.0:
+        return min(rounded_score, config.attackability_2_threshold)
+    if volume_score < 60.0:
+        return min(rounded_score, config.attackability_1_threshold + 4.0)
+    return rounded_score
+
+
+def classify_profitability_grade(
+    score: float,
+    config: AnalyzerConfig = DEFAULT_CONFIG,
+) -> str:
+    if score >= config.profitability_a_threshold:
+        return "A"
+    if score >= config.profitability_b_threshold:
+        return "B"
+    if score >= config.profitability_c_threshold:
+        return "C"
+    return "D"
+
+
+def classify_attackability_grade(
+    score: float,
+    config: AnalyzerConfig = DEFAULT_CONFIG,
+) -> str:
+    if score >= config.attackability_1_threshold:
+        return "1"
+    if score >= config.attackability_2_threshold:
+        return "2"
+    if score >= config.attackability_3_threshold:
+        return "3"
+    return "4"
+
+
+def classify_golden_bucket(
+    profitability_grade: str,
+    attackability_grade: str,
+) -> str:
+    combo_grade = f"{profitability_grade}{attackability_grade}"
+    if combo_grade in {"A1", "A2", "B1"}:
+        return "gold"
+    if combo_grade in {"A3", "B2", "B3", "C1", "C2"}:
+        return "promising"
+    if combo_grade in {"C3", "D1", "D2"}:
+        return "experimental"
+    return "hold"
+
+
 def classify_priority(score: float, config: AnalyzerConfig = DEFAULT_CONFIG) -> str:
     if score >= config.high_priority_threshold:
         return "high"
@@ -254,10 +332,33 @@ def _score_item(
         metrics["rarity_score"],
         config,
     )
+    profitability_score = calculate_profitability_score(
+        metrics["monetization_score"],
+        metrics["volume_score"],
+        metrics.get("total_clicks", 0.0),
+        config,
+    )
+    attackability_score = calculate_attackability_score(
+        metrics.get("opportunity", 0.0),
+        metrics["rarity_score"],
+        metrics.get("competition", 0.0),
+        metrics["volume_score"],
+        config,
+    )
+    profitability_grade = classify_profitability_grade(profitability_score, config)
+    attackability_grade = classify_attackability_grade(attackability_score, config)
+    combo_grade = f"{profitability_grade}{attackability_grade}"
+    golden_bucket = classify_golden_bucket(profitability_grade, attackability_grade)
 
     metrics = {
         **metrics,
         "confidence": round(confidence, 2),
+        "click_potential_score": _scale_click_potential(
+            metrics.get("total_clicks", 0.0),
+            metrics["volume_score"],
+        ),
+        "opportunity_score": _scale_opportunity_ratio(metrics.get("opportunity", 0.0)),
+        "competition_score": _scale_competition_ratio(metrics.get("competition", 0.0)),
     }
 
     return {
@@ -267,6 +368,14 @@ def _score_item(
         "score": score,
         "priority": classify_priority(score, config),
         "grade": classify_grade(score),
+        "profitability_score": profitability_score,
+        "profitability_grade": profitability_grade,
+        "attackability_score": attackability_score,
+        "attackability_grade": attackability_grade,
+        "combo_grade": combo_grade,
+        "golden_bucket": golden_bucket,
+        "is_golden_candidate": golden_bucket in {"gold", "promising"},
+        "is_true_gold": golden_bucket == "gold",
         "analysis_mode": analysis_mode,
         "confidence": round(confidence, 2),
         "metrics": metrics,
@@ -447,15 +556,33 @@ def _scale_bid_value(top_bid: float) -> float:
 def _scale_opportunity_ratio(opportunity_ratio: float) -> float:
     if opportunity_ratio <= 0:
         return 0.0
-    if opportunity_ratio >= 20.0:
+    if opportunity_ratio >= 15.0:
         return 100.0
-    if opportunity_ratio >= 10.0:
-        return 75.0
-    if opportunity_ratio >= 5.0:
+    if opportunity_ratio >= 8.0:
+        return 85.0
+    if opportunity_ratio >= 4.0:
+        return 70.0
+    if opportunity_ratio >= 2.0:
         return 55.0
-    if opportunity_ratio >= 1.5:
-        return 35.0
-    return 15.0
+    if opportunity_ratio >= 1.2:
+        return 40.0
+    return 20.0
+
+
+def _scale_competition_ratio(competition_ratio: float) -> float:
+    if competition_ratio <= 0:
+        return 100.0
+    if competition_ratio <= 0.05:
+        return 100.0
+    if competition_ratio <= 0.2:
+        return 85.0
+    if competition_ratio <= 0.6:
+        return 68.0
+    if competition_ratio <= 1.2:
+        return 48.0
+    if competition_ratio <= 2.0:
+        return 28.0
+    return 12.0
 
 
 def _scale_blog_rarity(blog_results: float) -> float:
@@ -464,6 +591,24 @@ def _scale_blog_rarity(blog_results: float) -> float:
     if blog_results < 5_000:
         return 35.0
     return 15.0
+
+
+def _scale_click_potential(total_clicks: float, volume_score: float) -> float:
+    if total_clicks <= 0:
+        if volume_score <= 0:
+            return 0.0
+        return _clamp(10.0 + (volume_score * 0.5), 10.0, 70.0)
+    if total_clicks >= 1_000:
+        return 100.0
+    if total_clicks >= 200:
+        return 85.0
+    if total_clicks >= 50:
+        return 65.0
+    if total_clicks >= 10:
+        return 45.0
+    if total_clicks >= 1:
+        return 25.0
+    return 10.0
 
 
 def _estimate_ctr(monetization_score: float, rarity_score: float) -> float:

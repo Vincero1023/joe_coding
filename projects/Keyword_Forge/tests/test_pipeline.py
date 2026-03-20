@@ -61,6 +61,81 @@ def test_generate_title_endpoint_returns_wrapped_title_sets() -> None:
     assert len(result["generated_titles"][0]["titles"]["blog"]) == 2
 
 
+def test_verify_longtail_endpoint_returns_verified_candidates() -> None:
+    with patch(
+        "app.selector.longtail.analyzer_module.run",
+        return_value={
+            "analyzed_keywords": [
+                {
+                    "keyword": "보험 추천 체크리스트",
+                    "profitability_grade": "B",
+                    "attackability_grade": "1",
+                    "combo_grade": "B1",
+                    "golden_bucket": "gold",
+                    "analysis_mode": "search_metrics",
+                    "score": 66.0,
+                    "metrics": {
+                        "volume": 320.0,
+                        "cpc": 180.0,
+                        "opportunity": 1.9,
+                    },
+                }
+            ]
+        },
+    ):
+        response = client.post(
+            "/verify-longtail",
+            json={
+                "input_data": {
+                    "selected_keywords": [
+                        {
+                            "keyword": "보험 추천",
+                            "profitability_grade": "A",
+                            "attackability_grade": "2",
+                            "combo_grade": "A2",
+                            "golden_bucket": "gold",
+                            "score": 76.0,
+                            "metrics": {"volume": 1200.0, "cpc": 210.0},
+                        },
+                        {
+                            "keyword": "보험 가입 조건",
+                            "profitability_grade": "B",
+                            "attackability_grade": "1",
+                            "combo_grade": "B1",
+                            "golden_bucket": "gold",
+                            "score": 71.0,
+                            "metrics": {"volume": 740.0, "cpc": 165.0},
+                        },
+                    ],
+                    "longtail_suggestions": [
+                        {
+                            "suggestion_id": "longtail-01",
+                            "cluster_id": "cluster-01",
+                            "representative_keyword": "보험 추천",
+                            "source_keyword": "보험 추천",
+                            "base_phrase": "보험",
+                            "modifier_phrase": "추천",
+                            "intent_key": "commercial",
+                            "intent_label": "비교/추천형",
+                            "longtail_keyword": "보험 추천 체크리스트",
+                            "projected_profitability_grade": "B",
+                            "projected_attackability_grade": "1",
+                            "projected_combo_grade": "B1",
+                            "projected_golden_bucket": "gold",
+                            "projected_score": 70.0,
+                            "verification_status": "pending",
+                        }
+                    ],
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["verified_longtail_suggestions"][0]["verification_status"] == "pass"
+    assert result["longtail_verification_summary"]["pass_count"] == 1
+
+
 def test_pipeline_run_returns_all_stage_outputs() -> None:
     with patch("app.collector.service.get_naver_autocomplete", side_effect=_fake_autocomplete), patch(
         "app.expander.engines.autocomplete_engine.get_naver_autocomplete",
@@ -92,6 +167,9 @@ def test_pipeline_run_returns_all_stage_outputs() -> None:
     assert result["expanded_keywords"]
     assert result["analyzed_keywords"]
     assert result["selected_keywords"]
+    assert result["keyword_clusters"]
+    assert isinstance(result["longtail_suggestions"], list)
+    assert result["longtail_summary"]["suggestion_count"] == len(result["longtail_suggestions"])
     assert len(result["generated_titles"]) == len(result["selected_keywords"])
     assert all(len(item["titles"]["naver_home"]) == 2 for item in result["generated_titles"][:10])
 
@@ -130,6 +208,8 @@ def test_pipeline_endpoint_runs_end_to_end() -> None:
 
     result = response.json()["result"]
     assert result["selected_keywords"]
+    assert result["keyword_clusters"]
+    assert isinstance(result["longtail_suggestions"], list)
     assert len(result["generated_titles"]) == len(result["selected_keywords"])
 
 

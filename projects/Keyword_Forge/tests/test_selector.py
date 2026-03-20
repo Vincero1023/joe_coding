@@ -1,10 +1,13 @@
+from unittest.mock import patch
+
+from app.selector.longtail import verify_longtail_candidates
 from app.selector.main import run
 from app.selector.service import is_golden_keyword
 
 
-def test_is_golden_keyword_accepts_high_scoring_metric_backed_keyword() -> None:
+def test_is_golden_keyword_accepts_balanced_metric_backed_keyword() -> None:
     item = {
-        "keyword": "운전자보험 비교",
+        "keyword": "insurance compare",
         "score": 74.0,
         "analysis_mode": "search_metrics",
         "confidence": 0.92,
@@ -17,6 +20,8 @@ def test_is_golden_keyword_accepts_high_scoring_metric_backed_keyword() -> None:
             "opportunity": 2.4,
             "monetization_score": 60.0,
             "rarity_score": 38.0,
+            "search_volume_score": 90.0,
+            "total_clicks": 84.0,
         },
     }
 
@@ -25,7 +30,7 @@ def test_is_golden_keyword_accepts_high_scoring_metric_backed_keyword() -> None:
 
 def test_is_golden_keyword_rejects_low_value_heuristic_keyword() -> None:
     item = {
-        "keyword": "보험연수원 보수교육 수강신청",
+        "keyword": "government registration notice",
         "score": 36.0,
         "analysis_mode": "heuristic",
         "confidence": 0.35,
@@ -38,6 +43,8 @@ def test_is_golden_keyword_rejects_low_value_heuristic_keyword() -> None:
             "opportunity": 1.7,
             "monetization_score": 22.0,
             "rarity_score": 18.0,
+            "search_volume_score": 25.0,
+            "total_clicks": 2.0,
         },
     }
 
@@ -48,7 +55,7 @@ def test_selector_returns_only_golden_keywords() -> None:
     result = run(
         [
             {
-                "keyword": "운전자보험 비교",
+                "keyword": "insurance compare",
                 "score": 74.0,
                 "analysis_mode": "search_metrics",
                 "confidence": 0.92,
@@ -62,10 +69,12 @@ def test_selector_returns_only_golden_keywords() -> None:
                     "opportunity": 2.4,
                     "monetization_score": 60.0,
                     "rarity_score": 38.0,
+                    "search_volume_score": 90.0,
+                    "total_clicks": 84.0,
                 },
             },
             {
-                "keyword": "보험연수원 보수교육 수강신청",
+                "keyword": "government registration notice",
                 "score": 36.0,
                 "analysis_mode": "heuristic",
                 "confidence": 0.35,
@@ -79,13 +88,16 @@ def test_selector_returns_only_golden_keywords() -> None:
                     "opportunity": 1.7,
                     "monetization_score": 22.0,
                     "rarity_score": 18.0,
+                    "search_volume_score": 25.0,
+                    "total_clicks": 2.0,
                 },
             },
         ]
     )
 
     assert len(result) == 1
-    assert result[0]["keyword"] == "운전자보험 비교"
+    assert result[0]["keyword"] == "insurance compare"
+    assert result[0]["selection_mode"] == "golden_combo"
 
 
 def test_selector_grade_filter_returns_allowed_grades_without_golden_filtering() -> None:
@@ -93,7 +105,7 @@ def test_selector_grade_filter_returns_allowed_grades_without_golden_filtering()
         {
             "analyzed_keywords": [
                 {
-                    "keyword": "정보성 키워드 A",
+                    "keyword": "정보형 키워드 A",
                     "grade": "A",
                     "score": 72.0,
                     "analysis_mode": "search_metrics",
@@ -108,7 +120,7 @@ def test_selector_grade_filter_returns_allowed_grades_without_golden_filtering()
                     },
                 },
                 {
-                    "keyword": "정보성 키워드 D",
+                    "keyword": "정보형 키워드 D",
                     "grade": "D",
                     "score": 31.0,
                     "analysis_mode": "search_metrics",
@@ -131,8 +143,44 @@ def test_selector_grade_filter_returns_allowed_grades_without_golden_filtering()
     )
 
     assert len(result["selected_keywords"]) == 1
-    assert result["selected_keywords"][0]["keyword"] == "정보성 키워드 D"
+    assert result["selected_keywords"][0]["keyword"] == "정보형 키워드 D"
     assert result["selected_keywords"][0]["selection_mode"] == "grade_filter"
+
+
+def test_selector_combo_filter_returns_matching_two_axis_keywords() -> None:
+    result = run(
+        {
+            "analyzed_keywords": [
+                {
+                    "keyword": "true_gold",
+                    "profitability_grade": "A",
+                    "attackability_grade": "2",
+                    "combo_grade": "A2",
+                    "golden_bucket": "gold",
+                    "score": 73.0,
+                    "metrics": {"volume": 2400.0, "cpc": 450.0},
+                },
+                {
+                    "keyword": "hold_keyword",
+                    "profitability_grade": "D",
+                    "attackability_grade": "4",
+                    "combo_grade": "D4",
+                    "golden_bucket": "hold",
+                    "score": 28.0,
+                    "metrics": {"volume": 60.0, "cpc": 20.0},
+                },
+            ],
+            "select_options": {
+                "mode": "combo_filter",
+                "allowed_profitability_grades": ["A", "B", "C"],
+                "allowed_attackability_grades": ["1", "2", "3"],
+            },
+        }
+    )
+
+    assert len(result["selected_keywords"]) == 1
+    assert result["selected_keywords"][0]["keyword"] == "true_gold"
+    assert result["selected_keywords"][0]["selection_mode"] == "combo_filter"
 
 
 def test_selector_grade_filter_uses_score_when_grade_is_missing() -> None:
@@ -164,3 +212,240 @@ def test_selector_grade_filter_uses_score_when_grade_is_missing() -> None:
     assert len(result["selected_keywords"]) == 1
     assert result["selected_keywords"][0]["keyword"] == "score_only_d_grade"
     assert result["selected_keywords"][0]["selection_mode"] == "grade_filter"
+
+
+def test_selector_builds_keyword_clusters_for_selected_keywords() -> None:
+    result = run(
+        {
+            "analyzed_keywords": [
+                {
+                    "keyword": "보험 추천",
+                    "grade": "A",
+                    "profitability_grade": "A",
+                    "attackability_grade": "2",
+                    "combo_grade": "A2",
+                    "golden_bucket": "gold",
+                    "score": 76.0,
+                    "metrics": {"volume": 1200.0, "cpc": 210.0},
+                },
+                {
+                    "keyword": "보험 비교",
+                    "grade": "A",
+                    "profitability_grade": "A",
+                    "attackability_grade": "2",
+                    "combo_grade": "A2",
+                    "golden_bucket": "gold",
+                    "score": 73.0,
+                    "metrics": {"volume": 980.0, "cpc": 180.0},
+                },
+                {
+                    "keyword": "보험 가입 조건",
+                    "grade": "A",
+                    "profitability_grade": "B",
+                    "attackability_grade": "1",
+                    "combo_grade": "B1",
+                    "golden_bucket": "gold",
+                    "score": 71.0,
+                    "metrics": {"volume": 740.0, "cpc": 165.0},
+                },
+                {
+                    "keyword": "제주 여행 코스",
+                    "grade": "A",
+                    "profitability_grade": "C",
+                    "attackability_grade": "2",
+                    "combo_grade": "C2",
+                    "golden_bucket": "promising",
+                    "score": 69.0,
+                    "metrics": {"volume": 1320.0, "cpc": 90.0},
+                },
+            ],
+            "select_options": {
+                "mode": "combo_filter",
+                "allowed_profitability_grades": ["A", "B", "C"],
+                "allowed_attackability_grades": ["1", "2", "3"],
+            },
+        }
+    )
+
+    assert len(result["selected_keywords"]) == 4
+    assert result["content_map_summary"]["cluster_count"] == 2
+    assert result["content_map_summary"]["keyword_count"] == 4
+
+    insurance_cluster = next(
+        cluster
+        for cluster in result["keyword_clusters"]
+        if "보험 추천" in cluster["all_keywords"]
+    )
+    assert insurance_cluster["keyword_count"] == 3
+    assert insurance_cluster["cluster_type"] == "multi_article"
+    assert insurance_cluster["recommended_article_count"] == 2
+    assert insurance_cluster["top_combo"] == "A2"
+
+
+def test_selector_content_map_splits_articles_by_intent() -> None:
+    result = run(
+        {
+            "analyzed_keywords": [
+                {
+                    "keyword": "보험 추천",
+                    "grade": "A",
+                    "profitability_grade": "A",
+                    "attackability_grade": "2",
+                    "combo_grade": "A2",
+                    "golden_bucket": "gold",
+                    "score": 77.0,
+                    "metrics": {"volume": 1100.0, "cpc": 220.0},
+                },
+                {
+                    "keyword": "보험 뜻 정리",
+                    "grade": "A",
+                    "profitability_grade": "C",
+                    "attackability_grade": "1",
+                    "combo_grade": "C1",
+                    "golden_bucket": "promising",
+                    "score": 70.0,
+                    "metrics": {"volume": 860.0, "cpc": 80.0},
+                },
+                {
+                    "keyword": "보험 가입 조건",
+                    "grade": "A",
+                    "profitability_grade": "B",
+                    "attackability_grade": "1",
+                    "combo_grade": "B1",
+                    "golden_bucket": "gold",
+                    "score": 72.0,
+                    "metrics": {"volume": 690.0, "cpc": 150.0},
+                },
+            ],
+            "select_options": {
+                "mode": "combo_filter",
+                "allowed_profitability_grades": ["A", "B", "C"],
+                "allowed_attackability_grades": ["1", "2", "3"],
+            },
+        }
+    )
+
+    cluster = result["keyword_clusters"][0]
+    intent_keys = {slot["intent_key"] for slot in cluster["article_plan"]}
+
+    assert cluster["keyword_count"] == 3
+    assert cluster["recommended_article_count"] == 3
+    assert intent_keys == {"commercial", "info", "action"}
+
+
+def test_selector_builds_longtail_suggestions_from_clustered_keywords() -> None:
+    result = run(
+        {
+            "analyzed_keywords": [
+                {
+                    "keyword": "보험 추천",
+                    "profitability_grade": "A",
+                    "attackability_grade": "2",
+                    "combo_grade": "A2",
+                    "golden_bucket": "gold",
+                    "score": 76.0,
+                    "metrics": {"volume": 1200.0, "cpc": 210.0},
+                },
+                {
+                    "keyword": "보험 비교",
+                    "profitability_grade": "A",
+                    "attackability_grade": "2",
+                    "combo_grade": "A2",
+                    "golden_bucket": "gold",
+                    "score": 73.0,
+                    "metrics": {"volume": 980.0, "cpc": 180.0},
+                },
+                {
+                    "keyword": "보험 가입 조건",
+                    "profitability_grade": "B",
+                    "attackability_grade": "1",
+                    "combo_grade": "B1",
+                    "golden_bucket": "gold",
+                    "score": 71.0,
+                    "metrics": {"volume": 740.0, "cpc": 165.0},
+                },
+            ],
+            "select_options": {
+                "mode": "combo_filter",
+                "allowed_profitability_grades": ["A", "B", "C"],
+                "allowed_attackability_grades": ["1", "2", "3"],
+            },
+        }
+    )
+
+    suggestions = result["longtail_suggestions"]
+    assert suggestions
+    assert result["longtail_summary"]["suggestion_count"] == len(suggestions)
+    assert any(item["projected_combo_grade"] for item in suggestions)
+    assert any("보험" in item["longtail_keyword"] for item in suggestions)
+
+
+def test_verify_longtail_candidates_merges_verified_analysis() -> None:
+    selected_keywords = [
+        {
+            "keyword": "보험 추천",
+            "profitability_grade": "A",
+            "attackability_grade": "2",
+            "combo_grade": "A2",
+            "golden_bucket": "gold",
+            "score": 76.0,
+            "metrics": {"volume": 1200.0, "cpc": 210.0},
+        },
+        {
+            "keyword": "보험 가입 조건",
+            "profitability_grade": "B",
+            "attackability_grade": "1",
+            "combo_grade": "B1",
+            "golden_bucket": "gold",
+            "score": 71.0,
+            "metrics": {"volume": 740.0, "cpc": 165.0},
+        },
+    ]
+    select_result = run(
+        {
+            "selected_keywords": selected_keywords,
+            "select_options": {
+                "mode": "combo_filter",
+                "allowed_profitability_grades": ["A", "B", "C"],
+                "allowed_attackability_grades": ["1", "2", "3"],
+            },
+        }
+    )
+    suggestions = select_result["longtail_suggestions"]
+    target_keyword = suggestions[0]["longtail_keyword"]
+
+    with patch(
+        "app.selector.longtail.analyzer_module.run",
+        return_value={
+            "analyzed_keywords": [
+                {
+                    "keyword": target_keyword,
+                    "profitability_grade": "B",
+                    "attackability_grade": "1",
+                    "combo_grade": "B1",
+                    "golden_bucket": "gold",
+                    "analysis_mode": "search_metrics",
+                    "score": 68.0,
+                    "metrics": {
+                        "volume": 380.0,
+                        "cpc": 190.0,
+                        "opportunity": 2.1,
+                    },
+                }
+            ]
+        },
+    ):
+        result = verify_longtail_candidates(
+            {
+                "selected_keywords": selected_keywords,
+                "keyword_clusters": select_result["keyword_clusters"],
+                "longtail_suggestions": suggestions[:1],
+            }
+        )
+
+    assert len(result["verified_longtail_suggestions"]) == 1
+    verified = result["verified_longtail_suggestions"][0]
+    assert verified["verification_status"] == "pass"
+    assert verified["verified_combo_grade"] == "B1"
+    assert verified["verified_metrics"]["volume"] == 380.0
+    assert result["longtail_verification_summary"]["pass_count"] == 1

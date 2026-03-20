@@ -16,16 +16,24 @@ _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
 _DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
-    "gemini": "gemini-2.5-flash",
-    "anthropic": "claude-sonnet-4-0",
+    "gemini": "gemini-2.5-flash-lite",
+    "anthropic": "claude-haiku-4-5",
 }
 
 _DEFAULT_SYSTEM_PROMPT = (
-    "You are a Korean SEO title generator. "
-    "Return strict JSON only. "
-    "Preserve each keyword exactly. "
-    "For every keyword, generate exactly 2 naver_home titles and 2 blog titles. "
-    f"Each naver_home title must be {NAVER_HOME_MAX_LENGTH} characters or fewer. "
+    "You are a Korean SEO title generator for Naver-focused content.\n"
+    "Return strict JSON only.\n"
+    "Preserve each keyword exactly.\n"
+    "For every keyword, generate exactly 2 naver_home titles and 2 blog titles.\n"
+    f"Each naver_home title must be {NAVER_HOME_MAX_LENGTH} characters or fewer.\n"
+    "Write natural Korean titles that sound like a real editor wrote them.\n"
+    "Keep the keyword near the front unless it becomes awkward.\n"
+    "The 2 naver_home titles for the same keyword must use clearly different framing.\n"
+    "The 2 blog titles for the same keyword must use clearly different framing.\n"
+    "Across the whole batch, avoid repeating the same headline skeleton.\n"
+    "Reflect the search intent in the wording: price, review, comparison, reservation, profile, location, how-to, or guide.\n"
+    "Avoid generic template phrases such as '완벽 정리', '한 번에 정리', '갑자기 바뀌었다', '이유가 이상하다', '놓치면 손해' unless they are truly necessary.\n"
+    "Avoid clickbait, exaggerated fear, and empty filler.\n"
     "Do not include markdown, commentary, or code fences."
 )
 
@@ -236,7 +244,12 @@ def _build_user_prompt(keywords: list[str]) -> str:
         "- Preserve each keyword exactly.\n"
         "- Write all titles in Korean.\n"
         "- naver_home and blog must each contain exactly 2 items.\n"
-        "- Avoid duplicate titles within the same keyword.\n\n"
+        "- Avoid duplicate titles within the same keyword.\n"
+        "- Avoid using the same sentence frame repeatedly across keywords.\n"
+        "- Make the 2 naver_home titles differ in angle such as comparison, checklist, question, update, or decision point.\n"
+        "- Make the 2 blog titles differ in angle such as guide, FAQ, checklist, comparison, or practical tips.\n"
+        "- Prefer specific wording that matches the keyword intent instead of generic SEO filler.\n"
+        "- Avoid stale patterns like '<keyword> 완벽 정리', '<keyword> 비교 및 선택 기준 정리', or '<time> <keyword> 갑자기 바뀌었다'.\n\n"
         f"Keywords:\n{keyword_lines}"
     )
 
