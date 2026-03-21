@@ -72,3 +72,12 @@
 {"logTime": "0319/013228", {"lineNo":0,"logLevel":2,"message":"Log: Starting fluid...","source":"Workspace Migration","timestamp":"2026-03-19T01:32:28.328Z"}}
 {"logTime": "0319/013228", {"lineNo":0,"logLevel":2,"message":"ScopedFluidManagerLifetime: Starting Fluid Manager for Migration","source":"Workspace Migration","timestamp":"2026-03-19T01:32:28.329Z"}}
 {"logTime": "0319/013228", {"lineNo":0,"logLevel":2,"message":"MaybeOrchestrateMigration: ~MaybeOrchestrateMigration","source":"Workspace Migration","timestamp":"2026-03-19T01:32:28.329Z"}}
+{"logTime": "0321/035853", {"lineNo":0,"logLevel":2,"message":"MaybeOrchestrateMigration: MaybeOrchestrateMigration","source":"Workspace Migration","timestamp":"2026-03-21T03:58:53.732Z"}}
+{"logTime": "0321/035853", {"lineNo":0,"logLevel":2,"message":"Migrate_FeatureCheck: Migrate_FeatureCheck","source":"Workspace Migration","timestamp":"2026-03-21T03:58:53.733Z"}}
+{"logTime": "0321/035853", {"lineNo":0,"logLevel":2,"message":"Migrate_MaybeHavePrefs: Migrate_MaybeHavePrefs","source":"Workspace Migration","timestamp":"2026-03-21T03:58:53.733Z"}}
+{"logTime": "0321/035853", {"lineNo":0,"logLevel":2,"message":"Migrate_Schedule: Migrate_Schedule","source":"Workspace Migration","timestamp":"2026-03-21T03:58:53.733Z"}}
+{"logTime": "0321/035853", {"lineNo":0,"logLevel":2,"message":"Log: Migrate_WaitForNotInUse","source":"Workspace Migration","timestamp":"2026-03-21T03:58:53.733Z"}}
+{"logTime": "0321/035853", {"lineNo":0,"logLevel":2,"message":"Log: Migrate_MaybeAfterWorkspacesNotInUse","source":"Workspace Migration","timestamp":"2026-03-21T03:58:53.734Z"}}
+{"logTime": "0321/035853", {"lineNo":0,"logLevel":2,"message":"Log: Starting fluid...","source":"Workspace Migration","timestamp":"2026-03-21T03:58:53.734Z"}}
+{"logTime": "0321/035853", {"lineNo":0,"logLevel":2,"message":"ScopedFluidManagerLifetime: Starting Fluid Manager for Migration","source":"Workspace Migration","timestamp":"2026-03-21T03:58:53.734Z"}}
+{"logTime": "0321/035853", {"lineNo":0,"logLevel":2,"message":"MaybeOrchestrateMigration: ~MaybeOrchestrateMigration","source":"Workspace Migration","timestamp":"2026-03-21T03:58:53.734Z"}}

@@ -1,5 +1,8 @@
 const originalBindElements = typeof window.bindElements === "function" ? window.bindElements : null;
 const originalBindEvents = typeof window.bindEvents === "function" ? window.bindEvents : null;
+const originalRunCollectStage = typeof window.runCollectStage === "function" ? window.runCollectStage : null;
+const originalRunExpandStage = typeof window.runExpandStage === "function" ? window.runExpandStage : null;
+const originalRunAnalyzeStage = typeof window.runAnalyzeStage === "function" ? window.runAnalyzeStage : null;
 
 window.bindElements = function bindElementsOverride() {
     originalBindElements?.();
@@ -274,6 +277,105 @@ function renderAxisScoreCell(badgeHtml, scoreValue) {
     `;
 }
 
+function buildEmptyCollectNotice(result = null) {
+    const debug = result?.debug || {};
+    const mode = String(debug.mode || (typeof getCollectorMode === "function" ? getCollectorMode() : "") || "").trim();
+    const requestedSeed = String(debug.requested_seed || elements.seedInput?.value || "").trim();
+    const resolvedCategory = String(
+        debug.resolved_category
+        || debug.requested_category
+        || elements.categoryInput?.value
+        || "",
+    ).trim();
+    const requestedSource = String(
+        debug.requested_category_source
+        || debug.effective_source
+        || elements.categorySourceInput?.value
+        || "",
+    ).trim();
+
+    if (mode === "seed" || requestedSeed) {
+        const targetSeed = requestedSeed || "입력한 시드";
+        const retryHint = targetSeed.includes(" ")
+            ? "너무 구체적인 복합어 대신 핵심 키워드 1~2개로 다시 시도해 주세요."
+            : "다른 시드나 표현으로 다시 시도해 주세요.";
+        return `수집 결과가 없습니다.\n시드 "${targetSeed}"에서 자동완성/연관검색 후보를 찾지 못했습니다.\n${retryHint}`;
+    }
+
+    if (mode === "category" || resolvedCategory) {
+        const targetCategory = resolvedCategory || "선택한 카테고리";
+        const retryHint = requestedSource === "naver_trend"
+            ? "카테고리, 날짜, 트렌드 소스를 바꾸거나 preset fallback을 켜서 다시 시도해 주세요."
+            : "카테고리나 수집 소스를 바꿔서 다시 시도해 주세요.";
+        return `수집 결과가 없습니다.\n${targetCategory}에서 가져올 키워드를 찾지 못했습니다.\n${retryHint}`;
+    }
+
+    return "수집 결과가 없습니다.\n입력 조건을 조금 넓혀서 다시 시도해 주세요.";
+}
+
+function buildEmptyExpandNotice() {
+    return "확장 결과가 없습니다.\n현재 수집 키워드에서 추가 확장 후보를 찾지 못했습니다.\n다른 시드로 다시 수집하거나 직접 입력 모드를 사용해 주세요.";
+}
+
+function buildEmptyAnalyzeNotice() {
+    return "분석 결과가 없습니다.\n확장 결과가 비어 있어 다음 단계로 진행할 수 없습니다.\n다른 키워드로 다시 확장하거나 직접 분석 입력을 사용해 주세요.";
+}
+
+window.runCollectStage = async function runCollectStageOverride() {
+    const result = await originalRunCollectStage();
+    if (countItems(result?.collected_keywords) > 0) {
+        return result;
+    }
+
+    throw createUserNoticeError(buildEmptyCollectNotice(result), {
+        code: "empty_collect_notice",
+        stageKey: "collected",
+    });
+};
+runCollectStage = window.runCollectStage;
+
+window.runExpandStage = async function runExpandStageOverride() {
+    const source = elements.expandInputSource?.value || "collector_selected";
+    if (source !== "manual_text" && state.results.collected && countItems(state.results.collected?.collected_keywords) === 0) {
+        throw createUserNoticeError(buildEmptyCollectNotice(state.results.collected), {
+            code: "empty_collect_notice",
+            stageKey: "collected",
+        });
+    }
+
+    const result = await originalRunExpandStage();
+    if (countItems(result?.expanded_keywords) > 0) {
+        return result;
+    }
+
+    throw createUserNoticeError(buildEmptyExpandNotice(), {
+        code: "empty_expand_notice",
+        stageKey: "expanded",
+    });
+};
+runExpandStage = window.runExpandStage;
+
+window.runAnalyzeStage = async function runAnalyzeStageOverride() {
+    const source = elements.analyzeInputSource?.value || "expanded_results";
+    if (source !== "manual_text" && state.results.expanded && countItems(state.results.expanded?.expanded_keywords) === 0) {
+        throw createUserNoticeError(buildEmptyExpandNotice(), {
+            code: "empty_expand_notice",
+            stageKey: "expanded",
+        });
+    }
+
+    const result = await originalRunAnalyzeStage();
+    if (countItems(result?.analyzed_keywords) > 0) {
+        return result;
+    }
+
+    throw createUserNoticeError(buildEmptyAnalyzeNotice(), {
+        code: "empty_analyze_notice",
+        stageKey: "analyzed",
+    });
+};
+runAnalyzeStage = window.runAnalyzeStage;
+
 function runThroughGradeSelect(allowedGrades, allowedAttackabilityGrades) {
     return runSelectStage({
         allowedProfitabilityGrades: allowedGrades,
@@ -420,6 +522,7 @@ async function runTitleStage() {
             keyword_clusters: state.results.selected?.keyword_clusters || [],
             longtail_suggestions: state.results.selected?.longtail_suggestions || [],
             analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
+            serp_competition_summary: state.results.selected?.serp_competition_summary || null,
             title_options: titleOptions,
         },
     });
@@ -709,11 +812,11 @@ function restoreResultsDomState(snapshot) {
 
 function getUtilityDrawerTab() {
     const safeTab = String(state.utilityDrawerTab || "").trim();
-    return ["diagnostics", "logs"].includes(safeTab) ? safeTab : "diagnostics";
+    return ["settings", "diagnostics", "logs"].includes(safeTab) ? safeTab : "diagnostics";
 }
 
 function setUtilityDrawerTab(tabKey) {
-    const safeTab = ["diagnostics", "logs"].includes(String(tabKey || "").trim())
+    const safeTab = ["settings", "diagnostics", "logs"].includes(String(tabKey || "").trim())
         ? String(tabKey || "").trim()
         : "diagnostics";
     state.utilityDrawerTab = safeTab;
@@ -730,6 +833,9 @@ function setUtilityDrawerTab(tabKey) {
         button.classList.toggle("active", active);
         button.setAttribute("aria-pressed", active ? "true" : "false");
     });
+    if (safeTab === "settings" && typeof window.refreshOperationSettings === "function") {
+        window.refreshOperationSettings();
+    }
 }
 
 function openUtilityDrawer(tabKey = "diagnostics") {

@@ -42,8 +42,32 @@ const DOWNSTREAM_STAGE_KEYS = {
 const TREND_SETTINGS_STORAGE_KEY = "keyword_forge_trend_settings";
 const TREND_SETTINGS_VERSION = 3;
 const TITLE_SETTINGS_STORAGE_KEY = "keyword_forge_title_settings";
+const OPERATION_SETTINGS_STORAGE_KEY = "keyword_forge_operation_settings";
 const DASHBOARD_SESSION_STORAGE_KEY = "keyword_forge_dashboard_session_v1";
 const TITLE_PROMPT_PREVIEW_LIMIT = 160;
+const OPERATION_MODE_DEFAULT = "always_on_slow";
+const OPERATION_MODE_PRESET_FALLBACKS = [
+    {
+        key: "daily_light",
+        label: "일일 10회 이하",
+        description: "하루 작업 수를 낮게 묶고 요청을 크게 띄워 IP 부담을 줄이는 모드입니다.",
+        naver_request_gap_seconds: 8.0,
+        daily_operation_limit: 10,
+        daily_naver_request_limit: 120,
+        max_continuous_minutes: 30,
+        stop_on_auth_error: true,
+    },
+    {
+        key: "always_on_slow",
+        label: "상시 슬로우",
+        description: "장시간 돌려도 기본 간격을 유지하면서 인증 오류는 바로 멈추는 모드입니다.",
+        naver_request_gap_seconds: 2.0,
+        daily_operation_limit: 0,
+        daily_naver_request_limit: 0,
+        max_continuous_minutes: 180,
+        stop_on_auth_error: true,
+    },
+];
 const TITLE_PROVIDER_DEFAULT_MODELS = {
     openai: "gpt-4o-mini",
     gemini: "gemini-2.5-flash-lite",
@@ -91,6 +115,7 @@ const TITLE_TEMPERATURE_PRESETS = [
 ];
 const TITLE_TEMPERATURE_DEFAULT = "0.7";
 const TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT = 84;
+const TITLE_ISSUE_CONTEXT_LIMIT_DEFAULT = 3;
 const TITLE_PRESET_LIBRARY = Array.isArray(window.KEYWORD_FORGE_TITLE_PRESETS)
     ? window.KEYWORD_FORGE_TITLE_PRESETS
     : [];
@@ -153,6 +178,8 @@ const state = {
     tickerId: null,
     titleModeFilter: "all",
     titleSort: "mode_quality_desc",
+    operationSettingsSnapshot: null,
+    operationModePresets: [...OPERATION_MODE_PRESET_FALLBACKS],
 };
 
 const elements = {};
@@ -162,7 +189,9 @@ document.addEventListener("DOMContentLoaded", () => {
     bindElements();
     loadTrendSettings();
     loadTitleSettings();
+    void loadOperationSettings();
     const restoredDashboard = restoreDashboardSession();
+    syncTrendDateToToday();
     bindEvents();
     window.addEventListener("pagehide", persistDashboardSessionNow);
     window.addEventListener("storage", handleTitleSettingsStorageSync);
@@ -207,6 +236,7 @@ function bindElements() {
     elements.titleTemperature = document.getElementById("titleTemperature");
     elements.titleFallback = document.getElementById("titleFallback");
     elements.titleSystemPrompt = document.getElementById("titleSystemPrompt");
+    elements.titlePromptProfilePicker = document.getElementById("titlePromptProfilePicker");
     elements.titlePromptSummary = document.getElementById("titlePromptSummary");
     elements.openTitlePromptEditorButton = document.getElementById("openTitlePromptEditorButton");
     elements.clearTitlePromptButton = document.getElementById("clearTitlePromptButton");
@@ -330,6 +360,7 @@ async function runWithGuard(task, runningMessage) {
         state.isBusy = false;
         syncBusyButtons();
         renderAll();
+        void loadOperationSettings({ forceServer: true });
     }
 }
 
@@ -481,6 +512,10 @@ async function runTitleStage() {
         endpoint: "/generate-title",
         inputData: {
             selected_keywords: state.results.selected?.selected_keywords || [],
+            keyword_clusters: state.results.selected?.keyword_clusters || [],
+            longtail_suggestions: state.results.selected?.longtail_suggestions || [],
+            analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
+            serp_competition_summary: state.results.selected?.serp_competition_summary || null,
             title_options: titleOptions,
         },
     });
@@ -1087,6 +1122,8 @@ function buildTitleOptions() {
         keyword_modes: formState.keyword_modes,
         auto_retry_enabled: formState.auto_retry_enabled,
         quality_retry_threshold: formState.quality_retry_threshold,
+        issue_context_enabled: formState.issue_context_enabled,
+        issue_context_limit: formState.issue_context_limit,
         preset_key: formState.preset_key,
         provider,
         model,
@@ -1118,17 +1155,16 @@ function buildTitleRunSummary(titleOptions) {
     if (titleOptions.mode !== "ai") {
         return `template 규칙 기반 / ${modeSummary}`;
     }
-    if (titleOptions.mode !== "ai") {
-        return "template 규칙 기반 제목을 생성합니다.";
-    }
     const preset = getTitlePresetConfig(titleOptions.preset_key);
     const parts = [
         preset?.label || "",
         formatTitleProviderLabel(titleOptions.provider),
         titleOptions.model,
     ].filter(Boolean);
+    if (titleOptions.issue_context_enabled) {
+        parts.push(`실시간 이슈 ${normalizeTitleIssueContextLimit(titleOptions.issue_context_limit)}개/요청`);
+    }
     return `${parts.join(" / ")} / ${modeSummary}`;
-    return `${parts.join(" / ")} 모델을 사용합니다.`;
 }
 
 function loadTrendSettings() {
@@ -1319,6 +1355,28 @@ async function openDedicatedLoginBrowser() {
     }
 }
 
+function resolvePreferredTitlePresetKey(storedSettings, resolvedPresetKey) {
+    const normalizedResolvedKey = normalizeTitlePresetKey(resolvedPresetKey);
+    const hasStoredSettings = Boolean(storedSettings && typeof storedSettings === "object");
+    if (!hasStoredSettings) {
+        return normalizedResolvedKey || DEFAULT_TITLE_PRESET_KEY;
+    }
+
+    const hasCustomPrompt = Boolean(String(storedSettings.system_prompt || "").trim());
+    if (hasCustomPrompt) {
+        return normalizedResolvedKey || DEFAULT_TITLE_PRESET_KEY;
+    }
+
+    const storedPresetKey = Object.prototype.hasOwnProperty.call(storedSettings, "preset_key")
+        ? normalizeTitlePresetKey(storedSettings.preset_key)
+        : "";
+    if (!storedPresetKey || storedPresetKey === "openai_balanced") {
+        return DEFAULT_TITLE_PRESET_KEY;
+    }
+
+    return normalizedResolvedKey || DEFAULT_TITLE_PRESET_KEY;
+}
+
 function loadTitleSettings() {
     const defaults = {
         mode: "template",
@@ -1362,9 +1420,26 @@ function handleTitleSettingsChange(event) {
 
 function persistTitleSettings() {
     try {
+        const existingSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+        const nextSettings = {
+            ...existingSettings,
+            ...getTitleSettingsFormState(),
+        };
+        const profiles = normalizeTitlePromptProfiles(nextSettings.prompt_profiles);
+        const activeProfile = resolveTitlePromptProfile(profiles, nextSettings.active_prompt_profile_id);
+
+        nextSettings.prompt_profiles = profiles;
+        if (activeProfile) {
+            nextSettings.system_prompt = activeProfile.prompt;
+        } else {
+            nextSettings.active_prompt_profile_id = "";
+            nextSettings.direct_system_prompt = normalizeTitlePromptText(nextSettings.system_prompt);
+            nextSettings.system_prompt = nextSettings.direct_system_prompt;
+        }
+
         window.localStorage.setItem(
             TITLE_SETTINGS_STORAGE_KEY,
-            JSON.stringify(getTitleSettingsFormState()),
+            JSON.stringify(nextSettings),
         );
     } catch (error) {
         addLog("브라우저 저장소에 제목 생성 설정을 저장하지 못했습니다.", "error");
@@ -1395,9 +1470,24 @@ function getTitleSettingsFormState() {
 }
 
 function getDefaultTrendDate() {
-    const current = new Date();
-    current.setDate(current.getDate() - 2);
-    return current.toISOString().slice(0, 10);
+    return formatDateInputValue(new Date());
+}
+
+function formatDateInputValue(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    const year = String(date.getFullYear());
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
+function syncTrendDateToToday() {
+    if (!elements.trendDateInput) {
+        return;
+    }
+
+    elements.trendDateInput.value = getDefaultTrendDate();
+    persistTrendSettings();
 }
 
 function describeExpandSource(inputData) {
@@ -3326,6 +3416,22 @@ function bindElements() {
     elements.openTitlePromptEditorButton = document.getElementById("openTitlePromptEditorButton");
     elements.clearTitlePromptButton = document.getElementById("clearTitlePromptButton");
     elements.titleModeBadge = document.getElementById("titleModeBadge");
+    elements.operationMode = document.getElementById("operationMode");
+    elements.operationRequestGap = document.getElementById("operationRequestGap");
+    elements.operationDailyLimit = document.getElementById("operationDailyLimit");
+    elements.operationDailyRequestLimit = document.getElementById("operationDailyRequestLimit");
+    elements.operationMaxContinuousMinutes = document.getElementById("operationMaxContinuousMinutes");
+    elements.operationStopOnAuthError = document.getElementById("operationStopOnAuthError");
+    elements.operationModeDescription = document.getElementById("operationModeDescription");
+    elements.operationSettingsHint = document.getElementById("operationSettingsHint");
+    elements.operationSettingsSyncStatus = document.getElementById("operationSettingsSyncStatus");
+    elements.operationModeStatus = document.getElementById("operationModeStatus");
+    elements.operationDailyUsage = document.getElementById("operationDailyUsage");
+    elements.operationRequestUsage = document.getElementById("operationRequestUsage");
+    elements.operationGuardStatus = document.getElementById("operationGuardStatus");
+    elements.refreshOperationSettingsButton = document.getElementById("refreshOperationSettingsButton");
+    elements.resetOperationGuardsButton = document.getElementById("resetOperationGuardsButton");
+    elements.saveOperationSettingsButton = document.getElementById("saveOperationSettingsButton");
     elements.titleModeRadios = Array.from(document.querySelectorAll("input[name='titleModeOption']"));
     elements.titleModeVisibilityBlocks = Array.from(document.querySelectorAll("[data-title-mode-visibility]"));
     elements.statusList = document.getElementById("statusList");
@@ -4657,6 +4763,9 @@ function bindElements() {
     elements.titleAutoRetryEnabled = document.getElementById("titleAutoRetryEnabled");
     elements.titleAutoRetryThreshold = document.getElementById("titleAutoRetryThreshold");
     elements.titleAutoRetrySummary = document.getElementById("titleAutoRetrySummary");
+    elements.titleIssueContextEnabled = document.getElementById("titleIssueContextEnabled");
+    elements.titleIssueContextLimit = document.getElementById("titleIssueContextLimit");
+    elements.titleIssueContextSummary = document.getElementById("titleIssueContextSummary");
     elements.titlePreset = document.getElementById("titlePreset");
     elements.titlePresetDescription = document.getElementById("titlePresetDescription");
     elements.titleProvider = document.getElementById("titleProvider");
@@ -4790,6 +4899,8 @@ function bindEvents() {
         elements.titleModeLongtailExperimental,
         elements.titleAutoRetryEnabled,
         elements.titleAutoRetryThreshold,
+        elements.titleIssueContextEnabled,
+        elements.titleIssueContextLimit,
         elements.titlePreset,
         elements.titleProvider,
         elements.titleModel,
@@ -4805,7 +4916,29 @@ function bindEvents() {
         radio.addEventListener("input", handleTitleSettingsChange);
     });
     elements.openTitlePromptEditorButton?.addEventListener("click", openTitlePromptEditor);
+    elements.titlePromptProfilePicker?.addEventListener("input", handleTitleSettingsChange);
+    elements.titlePromptProfilePicker?.addEventListener("change", handleTitleSettingsChange);
     elements.clearTitlePromptButton?.addEventListener("click", clearTitleSystemPrompt);
+    [
+        elements.operationMode,
+        elements.operationRequestGap,
+        elements.operationDailyLimit,
+        elements.operationDailyRequestLimit,
+        elements.operationMaxContinuousMinutes,
+        elements.operationStopOnAuthError,
+    ].forEach((element) => {
+        element?.addEventListener("input", handleOperationSettingsInputChange);
+        element?.addEventListener("change", handleOperationSettingsInputChange);
+    });
+    elements.refreshOperationSettingsButton?.addEventListener("click", () => {
+        void loadOperationSettings({ forceServer: true });
+    });
+    elements.saveOperationSettingsButton?.addEventListener("click", () => {
+        void saveOperationSettings();
+    });
+    elements.resetOperationGuardsButton?.addEventListener("click", () => {
+        void resetOperationGuards();
+    });
     document.querySelectorAll("[data-preset]").forEach((button) => {
         button.addEventListener("click", () => applyPreset(button.dataset.preset || "finance"));
     });
@@ -7840,6 +7973,39 @@ function updateTitleAutoRetrySummary() {
     elements.titleAutoRetrySummary.textContent = buildTitleAutoRetrySummary();
 }
 
+function normalizeTitleIssueContextLimit(value) {
+    const parsed = Number.parseInt(String(value ?? TITLE_ISSUE_CONTEXT_LIMIT_DEFAULT), 10);
+    if (!Number.isFinite(parsed)) {
+        return TITLE_ISSUE_CONTEXT_LIMIT_DEFAULT;
+    }
+    return Math.min(5, Math.max(1, parsed));
+}
+
+function buildTitleIssueContextSummary() {
+    const isAiMode = String(elements.titleMode?.value || "template").trim() === "ai";
+    const isEnabled = Boolean(elements.titleIssueContextEnabled?.checked);
+    const issueLimit = normalizeTitleIssueContextLimit(elements.titleIssueContextLimit?.value);
+    if (!isAiMode) {
+        return "AI 전용";
+    }
+    if (!isEnabled) {
+        return "실시간 이슈 반영 꺼짐";
+    }
+    return `AI 요청당 상위 ${issueLimit}개 키워드에 네이버 검색 상위 뉴스/콘텐츠 이슈 반영`;
+}
+
+function updateTitleIssueContextSummary() {
+    if (elements.titleIssueContextLimit) {
+        elements.titleIssueContextLimit.value = String(
+            normalizeTitleIssueContextLimit(elements.titleIssueContextLimit.value),
+        );
+    }
+    if (!elements.titleIssueContextSummary) {
+        return;
+    }
+    elements.titleIssueContextSummary.textContent = buildTitleIssueContextSummary();
+}
+
 function setTitleModelOptions(provider, preferredValue = "") {
     if (!elements.titleModel) {
         return;
@@ -7901,26 +8067,124 @@ function setTitleSystemPromptValue(value) {
     elements.titleSystemPrompt.value = String(value || "").replace(/\r\n/g, "\n").trim();
 }
 
-function buildTitlePromptSummary(prompt) {
-    const normalizedPrompt = String(prompt || "").replace(/\s+/g, " ").trim();
-    if (!normalizedPrompt) {
-        return "추가 지침 없음";
+function normalizeTitlePromptText(value) {
+    return String(value || "").replace(/\r\n/g, "\n").trim();
+}
+
+function normalizeTitlePromptProfileId(value) {
+    return String(value || "").trim();
+}
+
+function normalizeTitlePromptProfiles(value) {
+    if (!Array.isArray(value)) {
+        return [];
     }
-    return `추가 지침 ${normalizedPrompt.length}자`;
+    const seenIds = new Set();
+    return value.reduce((profiles, item, index) => {
+        if (!item || typeof item !== "object") {
+            return profiles;
+        }
+        const id = normalizeTitlePromptProfileId(item.id || `profile-${index + 1}`);
+        const name = String(item.name || "").replace(/\s+/g, " ").trim() || `저장본 ${profiles.length + 1}`;
+        const prompt = normalizeTitlePromptText(item.prompt);
+        if (!id || seenIds.has(id)) {
+            return profiles;
+        }
+        seenIds.add(id);
+        profiles.push({
+            id,
+            name,
+            prompt,
+            updated_at: String(item.updated_at || "").trim(),
+        });
+        return profiles;
+    }, []);
+}
+
+function resolveTitlePromptProfile(profiles, profileId) {
+    const normalizedProfileId = normalizeTitlePromptProfileId(profileId);
+    if (!normalizedProfileId) {
+        return null;
+    }
+    return (Array.isArray(profiles) ? profiles : []).find((profile) => profile.id === normalizedProfileId) || null;
+}
+
+function resolveDirectTitlePrompt(settings = {}) {
+    const directPrompt = normalizeTitlePromptText(settings.direct_system_prompt);
+    if (directPrompt) {
+        return directPrompt;
+    }
+    return normalizeTitlePromptText(settings.system_prompt);
+}
+
+function resolveStoredTitlePrompt(settings = {}, profiles = normalizeTitlePromptProfiles(settings.prompt_profiles)) {
+    const activeProfile = resolveTitlePromptProfile(profiles, settings.active_prompt_profile_id);
+    if (activeProfile) {
+        return activeProfile.prompt;
+    }
+    return resolveDirectTitlePrompt(settings);
+}
+
+function renderTitlePromptProfilePicker(settings = {}) {
+    if (!elements.titlePromptProfilePicker) {
+        return;
+    }
+
+    const profiles = normalizeTitlePromptProfiles(settings.prompt_profiles);
+    const activeProfileId = normalizeTitlePromptProfileId(settings.active_prompt_profile_id);
+    elements.titlePromptProfilePicker.innerHTML = "";
+
+    const directOption = document.createElement("option");
+    directOption.value = "";
+    directOption.textContent = profiles.length ? "직접 입력" : "직접 입력 (저장본 없음)";
+    elements.titlePromptProfilePicker.appendChild(directOption);
+
+    profiles.forEach((profile) => {
+        const option = document.createElement("option");
+        option.value = profile.id;
+        option.textContent = profile.name;
+        elements.titlePromptProfilePicker.appendChild(option);
+    });
+
+    elements.titlePromptProfilePicker.value = activeProfileId;
+    if (elements.titlePromptProfilePicker.value !== activeProfileId) {
+        elements.titlePromptProfilePicker.value = "";
+    }
+}
+
+function buildTitlePromptSummary(settings = {}) {
+    const profiles = normalizeTitlePromptProfiles(settings.prompt_profiles);
+    const activeProfile = resolveTitlePromptProfile(profiles, settings.active_prompt_profile_id);
+    const normalizedPrompt = normalizeTitlePromptText(resolveStoredTitlePrompt(settings, profiles)).replace(/\s+/g, " ").trim();
+    if (activeProfile) {
+        return normalizedPrompt
+            ? `저장본 ${activeProfile.name} · ${normalizedPrompt.length}자`
+            : `저장본 ${activeProfile.name} · 비어 있음`;
+    }
+    if (normalizedPrompt) {
+        return `직접 입력 · ${normalizedPrompt.length}자`;
+    }
+    return profiles.length ? `저장본 ${profiles.length}개 · 직접 입력 없음` : "추가 지침 없음";
 }
 
 function updateTitlePromptSummary() {
+    const settings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
     if (elements.titlePromptSummary) {
-        elements.titlePromptSummary.textContent = buildTitlePromptSummary(getTitleSystemPromptValue());
+        elements.titlePromptSummary.textContent = buildTitlePromptSummary(settings);
     }
     if (elements.clearTitlePromptButton) {
-        elements.clearTitlePromptButton.disabled = !getTitleSystemPromptValue();
+        elements.clearTitlePromptButton.disabled = !normalizeTitlePromptText(resolveStoredTitlePrompt(settings));
     }
 }
 
 function syncTitlePromptFromStorage() {
     const settings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
-    setTitleSystemPromptValue(settings.system_prompt || "");
+    const profiles = normalizeTitlePromptProfiles(settings.prompt_profiles);
+    renderTitlePromptProfilePicker({
+        ...settings,
+        prompt_profiles: profiles,
+    });
+    setTitleSystemPromptValue(resolveStoredTitlePrompt(settings, profiles));
     updateTitlePromptSummary();
 }
 
@@ -7945,6 +8209,9 @@ function openTitlePromptEditor() {
 }
 
 function clearTitleSystemPrompt() {
+    if (elements.titlePromptProfilePicker) {
+        elements.titlePromptProfilePicker.value = "";
+    }
     setTitleSystemPromptValue("");
     persistTitleSettings();
     renderTitleSettingsState();
@@ -7957,18 +8224,26 @@ function loadTitleSettings() {
         keyword_modes: ["single", "longtail_selected"],
         auto_retry_enabled: true,
         quality_retry_threshold: TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT,
+        issue_context_enabled: true,
+        issue_context_limit: TITLE_ISSUE_CONTEXT_LIMIT_DEFAULT,
         preset_key: DEFAULT_TITLE_PRESET_KEY,
         provider: "openai",
         model: TITLE_PROVIDER_DEFAULT_MODELS.openai,
         api_key: "",
         temperature: TITLE_TEMPERATURE_DEFAULT,
         fallback_to_template: true,
+        direct_system_prompt: "",
         system_prompt: "",
+        prompt_profiles: [],
+        active_prompt_profile_id: "",
     };
 
     const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY);
     const hasStoredSettings = Boolean(storedSettings && typeof storedSettings === "object");
     const settings = { ...defaults, ...(hasStoredSettings ? storedSettings : {}) };
+    const promptProfiles = normalizeTitlePromptProfiles(settings.prompt_profiles);
+    settings.prompt_profiles = promptProfiles;
+    settings.active_prompt_profile_id = resolveTitlePromptProfile(promptProfiles, settings.active_prompt_profile_id)?.id || "";
     const resolvedPresetKey = hasStoredSettings
         ? (
             Object.prototype.hasOwnProperty.call(storedSettings, "preset_key")
@@ -7976,10 +8251,11 @@ function loadTitleSettings() {
                 : (findMatchingTitlePresetKey(settings) || MANUAL_TITLE_PRESET_KEY)
         )
         : DEFAULT_TITLE_PRESET_KEY;
+    const preferredPresetKey = resolvePreferredTitlePresetKey(storedSettings, resolvedPresetKey);
 
     applyTitleModeSelection(settings.mode);
-    if (resolvedPresetKey !== MANUAL_TITLE_PRESET_KEY) {
-        applyTitlePresetSelection(resolvedPresetKey);
+    if (preferredPresetKey !== MANUAL_TITLE_PRESET_KEY) {
+        applyTitlePresetSelection(preferredPresetKey);
     } else {
         const provider = normalizeTitleProvider(settings.provider);
         if (elements.titlePreset) {
@@ -8000,7 +8276,16 @@ function loadTitleSettings() {
             normalizeTitleQualityRetryThreshold(settings.quality_retry_threshold),
         );
     }
-    setTitleSystemPromptValue(settings.system_prompt || "");
+    if (elements.titleIssueContextEnabled) {
+        elements.titleIssueContextEnabled.checked = Boolean(settings.issue_context_enabled ?? true);
+    }
+    if (elements.titleIssueContextLimit) {
+        elements.titleIssueContextLimit.value = String(
+            normalizeTitleIssueContextLimit(settings.issue_context_limit),
+        );
+    }
+    renderTitlePromptProfilePicker(settings);
+    setTitleSystemPromptValue(resolveStoredTitlePrompt(settings, promptProfiles));
     applyTitleKeywordModes(settings.keyword_modes);
 
     renderTitleSettingsState();
@@ -8016,6 +8301,15 @@ function handleTitleSettingsChange(event) {
         persistTitleSettings();
         renderTitleSettingsState();
         return;
+    }
+
+    if (event?.target === elements.titlePromptProfilePicker) {
+        const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+        const profiles = normalizeTitlePromptProfiles(storedSettings.prompt_profiles);
+        const selectedProfile = resolveTitlePromptProfile(profiles, elements.titlePromptProfilePicker.value);
+        setTitleSystemPromptValue(
+            selectedProfile ? selectedProfile.prompt : resolveDirectTitlePrompt(storedSettings),
+        );
     }
 
     if (event?.target === elements.titleProvider) {
@@ -8069,6 +8363,11 @@ function handleTitleSettingsChange(event) {
             normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold.value),
         );
     }
+    if (event?.target === elements.titleIssueContextLimit && elements.titleIssueContextLimit) {
+        elements.titleIssueContextLimit.value = String(
+            normalizeTitleIssueContextLimit(elements.titleIssueContextLimit.value),
+        );
+    }
 
     persistTitleSettings();
     renderTitleSettingsState();
@@ -8094,11 +8393,21 @@ function renderTitleSettingsState() {
     if (elements.titleAutoRetryThreshold) {
         elements.titleAutoRetryThreshold.disabled = !isAiMode || !Boolean(elements.titleAutoRetryEnabled?.checked);
     }
+    if (elements.titleIssueContextEnabled) {
+        elements.titleIssueContextEnabled.disabled = !isAiMode;
+    }
+    if (elements.titleIssueContextLimit) {
+        elements.titleIssueContextLimit.disabled = !isAiMode || !Boolean(elements.titleIssueContextEnabled?.checked);
+    }
     if (elements.openTitlePromptEditorButton) {
         elements.openTitlePromptEditorButton.disabled = !isAiMode;
     }
+    if (elements.titlePromptProfilePicker) {
+        elements.titlePromptProfilePicker.disabled = !isAiMode;
+    }
     updateTitleKeywordModeSummary();
     updateTitleAutoRetrySummary();
+    updateTitleIssueContextSummary();
     updateTitlePresetDescription();
     updateTitleTemperatureDescription();
     updateTitlePromptSummary();
@@ -8120,15 +8429,424 @@ function getTitleSettingsFormState() {
         ]),
         auto_retry_enabled: Boolean(elements.titleAutoRetryEnabled?.checked),
         quality_retry_threshold: normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold?.value),
+        issue_context_enabled: Boolean(elements.titleIssueContextEnabled?.checked),
+        issue_context_limit: normalizeTitleIssueContextLimit(elements.titleIssueContextLimit?.value),
         preset_key: presetKey,
         provider,
         model,
         api_key: String(elements.titleApiKey?.value || "").trim(),
         temperature: normalizeTitleTemperatureValue(elements.titleTemperature?.value || TITLE_TEMPERATURE_DEFAULT),
         fallback_to_template: Boolean(elements.titleFallback?.checked),
+        active_prompt_profile_id: normalizeTitlePromptProfileId(elements.titlePromptProfilePicker?.value || ""),
         system_prompt: getTitleSystemPromptValue(),
     };
 }
+
+function normalizeOperationMode(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return ["daily_light", "always_on_slow", "custom"].includes(normalized)
+        ? normalized
+        : OPERATION_MODE_DEFAULT;
+}
+
+function coerceOperationFloat(value, defaultValue, minimum = 0, maximum = 120) {
+    const parsed = Number.parseFloat(String(value ?? "").trim());
+    if (!Number.isFinite(parsed)) {
+        return defaultValue;
+    }
+    return Math.max(minimum, Math.min(maximum, parsed));
+}
+
+function coerceOperationInt(value, defaultValue, minimum = 0, maximum = 100000) {
+    const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+    if (!Number.isFinite(parsed)) {
+        return defaultValue;
+    }
+    return Math.max(minimum, Math.min(maximum, parsed));
+}
+
+function normalizeOperationPresetList(rawPresets) {
+    const presets = Array.isArray(rawPresets) && rawPresets.length
+        ? rawPresets
+        : OPERATION_MODE_PRESET_FALLBACKS;
+    return presets
+        .map((preset) => ({
+            key: normalizeOperationMode(preset?.key),
+            label: String(preset?.label || "").trim(),
+            description: String(preset?.description || "").trim(),
+            naver_request_gap_seconds: coerceOperationFloat(preset?.naver_request_gap_seconds, 2.0),
+            daily_operation_limit: coerceOperationInt(preset?.daily_operation_limit, 0, 0, 1000),
+            daily_naver_request_limit: coerceOperationInt(preset?.daily_naver_request_limit, 0, 0, 100000),
+            max_continuous_minutes: coerceOperationInt(preset?.max_continuous_minutes, 0, 0, 24 * 60),
+            stop_on_auth_error: Boolean(preset?.stop_on_auth_error ?? true),
+        }))
+        .filter((preset, index, items) => (
+            preset.key !== "custom"
+            && preset.label
+            && items.findIndex((candidate) => candidate.key === preset.key) === index
+        ));
+}
+
+function getOperationPresetLibrary() {
+    const presets = normalizeOperationPresetList(state.operationModePresets);
+    state.operationModePresets = presets;
+    return presets;
+}
+
+function findOperationModePreset(mode) {
+    const normalizedMode = normalizeOperationMode(mode);
+    return getOperationPresetLibrary().find((preset) => preset.key === normalizedMode)
+        || getOperationPresetLibrary().find((preset) => preset.key === OPERATION_MODE_DEFAULT)
+        || OPERATION_MODE_PRESET_FALLBACKS[1];
+}
+
+function normalizeOperationSettings(rawSettings) {
+    const raw = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
+    const mode = normalizeOperationMode(raw.mode);
+    if (mode !== "custom") {
+        const preset = findOperationModePreset(mode);
+        return {
+            mode: preset.key,
+            naver_request_gap_seconds: preset.naver_request_gap_seconds,
+            daily_operation_limit: preset.daily_operation_limit,
+            daily_naver_request_limit: preset.daily_naver_request_limit,
+            max_continuous_minutes: preset.max_continuous_minutes,
+            stop_on_auth_error: Boolean(preset.stop_on_auth_error),
+        };
+    }
+
+    const defaultPreset = findOperationModePreset(OPERATION_MODE_DEFAULT);
+    return {
+        mode: "custom",
+        naver_request_gap_seconds: coerceOperationFloat(
+            raw.naver_request_gap_seconds,
+            defaultPreset.naver_request_gap_seconds,
+        ),
+        daily_operation_limit: coerceOperationInt(
+            raw.daily_operation_limit,
+            defaultPreset.daily_operation_limit,
+            0,
+            1000,
+        ),
+        daily_naver_request_limit: coerceOperationInt(
+            raw.daily_naver_request_limit,
+            defaultPreset.daily_naver_request_limit,
+            0,
+            100000,
+        ),
+        max_continuous_minutes: coerceOperationInt(
+            raw.max_continuous_minutes,
+            defaultPreset.max_continuous_minutes,
+            0,
+            24 * 60,
+        ),
+        stop_on_auth_error: Boolean(raw.stop_on_auth_error ?? defaultPreset.stop_on_auth_error),
+    };
+}
+
+function applyOperationModePreset(mode) {
+    const normalizedMode = normalizeOperationMode(mode);
+    if (elements.operationMode) {
+        elements.operationMode.value = normalizedMode;
+    }
+    if (normalizedMode === "custom") {
+        return;
+    }
+    const preset = findOperationModePreset(normalizedMode);
+    if (elements.operationRequestGap) {
+        elements.operationRequestGap.value = String(preset.naver_request_gap_seconds);
+    }
+    if (elements.operationDailyLimit) {
+        elements.operationDailyLimit.value = String(preset.daily_operation_limit);
+    }
+    if (elements.operationDailyRequestLimit) {
+        elements.operationDailyRequestLimit.value = String(preset.daily_naver_request_limit);
+    }
+    if (elements.operationMaxContinuousMinutes) {
+        elements.operationMaxContinuousMinutes.value = String(preset.max_continuous_minutes);
+    }
+    if (elements.operationStopOnAuthError) {
+        elements.operationStopOnAuthError.checked = Boolean(preset.stop_on_auth_error);
+    }
+}
+
+function applyOperationSettingsToForm(rawSettings) {
+    if (!elements.operationMode) {
+        return;
+    }
+    const settings = normalizeOperationSettings(rawSettings);
+    applyOperationModePreset(settings.mode);
+    elements.operationMode.value = settings.mode;
+    if (elements.operationRequestGap) {
+        elements.operationRequestGap.value = String(settings.naver_request_gap_seconds);
+    }
+    if (elements.operationDailyLimit) {
+        elements.operationDailyLimit.value = String(settings.daily_operation_limit);
+    }
+    if (elements.operationDailyRequestLimit) {
+        elements.operationDailyRequestLimit.value = String(settings.daily_naver_request_limit);
+    }
+    if (elements.operationMaxContinuousMinutes) {
+        elements.operationMaxContinuousMinutes.value = String(settings.max_continuous_minutes);
+    }
+    if (elements.operationStopOnAuthError) {
+        elements.operationStopOnAuthError.checked = Boolean(settings.stop_on_auth_error);
+    }
+}
+
+function getOperationSettingsFormState() {
+    return normalizeOperationSettings({
+        mode: elements.operationMode?.value || OPERATION_MODE_DEFAULT,
+        naver_request_gap_seconds: elements.operationRequestGap?.value,
+        daily_operation_limit: elements.operationDailyLimit?.value,
+        daily_naver_request_limit: elements.operationDailyRequestLimit?.value,
+        max_continuous_minutes: elements.operationMaxContinuousMinutes?.value,
+        stop_on_auth_error: Boolean(elements.operationStopOnAuthError?.checked),
+    });
+}
+
+function persistOperationSettingsDraft(settings) {
+    try {
+        window.localStorage.setItem(
+            OPERATION_SETTINGS_STORAGE_KEY,
+            JSON.stringify(normalizeOperationSettings(settings)),
+        );
+    } catch (error) {
+        // Ignore storage failures and keep the settings drawer usable.
+    }
+}
+
+function readOperationSettingsDraft() {
+    return normalizeOperationSettings(readLocalStorageJson(OPERATION_SETTINGS_STORAGE_KEY) || {});
+}
+
+function formatOperationUsage(currentValue, remainingValue) {
+    const current = coerceOperationInt(currentValue, 0, 0, 100000);
+    if (remainingValue == null) {
+        return `${current} / 제한 없음`;
+    }
+    const remaining = coerceOperationInt(remainingValue, 0, 0, 100000);
+    return `${current} / ${current + remaining}`;
+}
+
+function buildOperationGuardLabel(runtimeState) {
+    if (runtimeState?.auth_lock_active) {
+        return "인증 잠금";
+    }
+    const activeWindowMinutes = coerceOperationInt(runtimeState?.active_window_minutes, 0, 0, 24 * 60);
+    if (activeWindowMinutes > 0) {
+        return `${activeWindowMinutes}분 연속`;
+    }
+    return "정상";
+}
+
+function renderOperationSettingsState() {
+    if (!elements.operationMode) {
+        return;
+    }
+
+    const settings = getOperationSettingsFormState();
+    const preset = settings.mode === "custom" ? null : findOperationModePreset(settings.mode);
+    const isCustomMode = settings.mode === "custom";
+
+    [
+        elements.operationRequestGap,
+        elements.operationDailyLimit,
+        elements.operationDailyRequestLimit,
+        elements.operationMaxContinuousMinutes,
+        elements.operationStopOnAuthError,
+    ].forEach((element) => {
+        if (element) {
+            element.disabled = !isCustomMode;
+        }
+    });
+
+    if (elements.operationModeDescription) {
+        elements.operationModeDescription.textContent = isCustomMode
+            ? "직접 설정 모드입니다. 숫자를 조정한 뒤 저장하면 현재 서버 런타임에 바로 반영됩니다."
+            : (preset?.description || "운영 모드 설명을 불러오지 못했습니다.");
+    }
+    if (elements.operationSettingsHint) {
+        elements.operationSettingsHint.textContent = isCustomMode
+            ? "0을 넣으면 해당 상한은 해제됩니다. 저장 후 즉시 서버 런타임에 반영됩니다."
+            : `${preset?.label || "프리셋"} 값이 자동으로 채워집니다. 변경하려면 '직접 설정'으로 바꾼 뒤 저장하세요.`;
+    }
+
+    const snapshot = state.operationSettingsSnapshot?.state ? state.operationSettingsSnapshot : null;
+    const runtimeSettings = normalizeOperationSettings(snapshot?.settings || settings);
+    const runtimeState = snapshot?.state || {
+        operations_started: 0,
+        daily_operation_remaining: runtimeSettings.daily_operation_limit > 0
+            ? runtimeSettings.daily_operation_limit
+            : null,
+        naver_requests_started: 0,
+        daily_naver_request_remaining: runtimeSettings.daily_naver_request_limit > 0
+            ? runtimeSettings.daily_naver_request_limit
+            : null,
+        active_window_minutes: 0,
+        last_operation_name: "",
+        auth_lock_active: false,
+    };
+    const statusPreset = runtimeSettings.mode === "custom"
+        ? null
+        : findOperationModePreset(runtimeSettings.mode);
+
+    if (elements.operationModeStatus) {
+        elements.operationModeStatus.textContent = runtimeSettings.mode === "custom"
+            ? "직접 설정"
+            : (statusPreset?.label || "상시 슬로우");
+    }
+    if (elements.operationDailyUsage) {
+        elements.operationDailyUsage.textContent = formatOperationUsage(
+            runtimeState.operations_started,
+            runtimeState.daily_operation_remaining,
+        );
+    }
+    if (elements.operationRequestUsage) {
+        elements.operationRequestUsage.textContent = formatOperationUsage(
+            runtimeState.naver_requests_started,
+            runtimeState.daily_naver_request_remaining,
+        );
+    }
+    if (elements.operationGuardStatus) {
+        elements.operationGuardStatus.textContent = buildOperationGuardLabel(runtimeState);
+    }
+    if (elements.operationSettingsSyncStatus) {
+        elements.operationSettingsSyncStatus.textContent = snapshot
+            ? `서버 반영값 기준입니다. 최근 작업: ${runtimeState.last_operation_name || "없음"}`
+            : "서버 반영값을 아직 받지 못했습니다. 로컬 저장본을 먼저 표시 중입니다.";
+    }
+}
+
+async function requestOperationSettings(endpoint, options = {}) {
+    const startedAt = Date.now();
+    let response;
+
+    try {
+        response = await fetch(endpoint, {
+            method: options.method || "GET",
+            headers: options.body ? { "Content-Type": "application/json" } : undefined,
+            body: options.body ? JSON.stringify(options.body) : undefined,
+        });
+    } catch (error) {
+        const networkError = new Error("운영 설정 서버에 연결하지 못했습니다.");
+        networkError.code = "settings_network_error";
+        networkError.endpoint = endpoint;
+        networkError.detail = error instanceof Error ? error.message : String(error);
+        networkError.durationMs = Date.now() - startedAt;
+        throw networkError;
+    }
+
+    const requestId = response.headers.get("X-Request-ID") || "";
+    const rawText = await response.text();
+    const payload = tryParseJson(rawText);
+    if (!response.ok) {
+        throw createApiError({
+            endpoint,
+            requestId,
+            statusCode: response.status,
+            payload,
+            rawText,
+            durationMs: Date.now() - startedAt,
+        });
+    }
+    return payload?.operation_settings || {};
+}
+
+async function loadOperationSettings(options = {}) {
+    if (!elements.operationMode) {
+        return null;
+    }
+
+    const draft = readOperationSettingsDraft();
+    if (!options.forceServer) {
+        applyOperationSettingsToForm(draft);
+        renderOperationSettingsState();
+    }
+
+    try {
+        const snapshot = await requestOperationSettings("/settings/runtime");
+        state.operationModePresets = normalizeOperationPresetList(snapshot.presets);
+        state.operationSettingsSnapshot = snapshot;
+        applyOperationSettingsToForm(snapshot.settings || {});
+        persistOperationSettingsDraft(snapshot.settings || {});
+        renderOperationSettingsState();
+        return snapshot;
+    } catch (error) {
+        state.operationSettingsSnapshot = null;
+        renderOperationSettingsState();
+        if (elements.operationSettingsSyncStatus) {
+            elements.operationSettingsSyncStatus.textContent = "서버 상태를 불러오지 못해 로컬 저장본을 표시 중입니다.";
+        }
+        return null;
+    }
+}
+
+async function saveOperationSettings() {
+    if (!elements.operationMode) {
+        return;
+    }
+
+    const settings = getOperationSettingsFormState();
+    persistOperationSettingsDraft(settings);
+
+    try {
+        const snapshot = await requestOperationSettings("/settings/runtime", {
+            method: "POST",
+            body: settings,
+        });
+        state.operationModePresets = normalizeOperationPresetList(snapshot.presets);
+        state.operationSettingsSnapshot = snapshot;
+        applyOperationSettingsToForm(snapshot.settings || settings);
+        persistOperationSettingsDraft(snapshot.settings || settings);
+        renderOperationSettingsState();
+        addLog("운영 설정을 저장하고 서버 런타임에 적용했습니다.", "success");
+    } catch (error) {
+        const normalizedError = normalizeError(error, { endpoint: "/settings/runtime" });
+        if (elements.operationSettingsSyncStatus) {
+            elements.operationSettingsSyncStatus.textContent = normalizedError.message;
+        }
+        addLog(normalizedError.message, "error");
+    }
+}
+
+async function resetOperationGuards() {
+    if (!elements.operationMode) {
+        return;
+    }
+
+    try {
+        const snapshot = await requestOperationSettings("/settings/runtime/reset-guards", {
+            method: "POST",
+        });
+        state.operationModePresets = normalizeOperationPresetList(snapshot.presets);
+        state.operationSettingsSnapshot = snapshot;
+        applyOperationSettingsToForm(snapshot.settings || getOperationSettingsFormState());
+        renderOperationSettingsState();
+        addLog("운영 보호 잠금을 해제했습니다.", "info");
+    } catch (error) {
+        const normalizedError = normalizeError(error, { endpoint: "/settings/runtime/reset-guards" });
+        if (elements.operationSettingsSyncStatus) {
+            elements.operationSettingsSyncStatus.textContent = normalizedError.message;
+        }
+        addLog(normalizedError.message, "error");
+    }
+}
+
+function handleOperationSettingsInputChange(event) {
+    if (!elements.operationMode) {
+        return;
+    }
+
+    if (event?.target === elements.operationMode) {
+        applyOperationModePreset(elements.operationMode.value);
+    }
+
+    persistOperationSettingsDraft(getOperationSettingsFormState());
+    renderOperationSettingsState();
+}
+
+window.refreshOperationSettings = (options = {}) => loadOperationSettings(options);
 
 function formatContentMapIntentLabel(intentKey) {
     const labelMap = {
@@ -8742,6 +9460,10 @@ async function rerunSingleTitle(keyword) {
         endpoint: "/generate-title",
         inputData: {
             selected_keywords: [selectedItem],
+            keyword_clusters: state.results.selected?.keyword_clusters || [],
+            longtail_suggestions: state.results.selected?.longtail_suggestions || [],
+            analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
+            serp_competition_summary: state.results.selected?.serp_competition_summary || null,
             title_options: titleOptions,
         },
     });
@@ -8787,6 +9509,10 @@ async function rerunFlaggedTitles() {
         endpoint: "/generate-title",
         inputData: {
             selected_keywords: selectedItems,
+            keyword_clusters: state.results.selected?.keyword_clusters || [],
+            longtail_suggestions: state.results.selected?.longtail_suggestions || [],
+            analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
+            serp_competition_summary: state.results.selected?.serp_competition_summary || null,
             title_options: titleOptions,
         },
     });
@@ -8831,6 +9557,7 @@ async function rerunTitleTarget(targetIdentity) {
         endpoint: "/generate-title",
         inputData: {
             title_targets: [titleTarget],
+            serp_competition_summary: state.results.selected?.serp_competition_summary || null,
             title_options: titleOptions,
         },
     });
@@ -8878,6 +9605,7 @@ async function rerunFlaggedTitleTargets() {
         endpoint: "/generate-title",
         inputData: {
             title_targets: titleTargets,
+            serp_competition_summary: state.results.selected?.serp_competition_summary || null,
             title_options: titleOptions,
         },
     });

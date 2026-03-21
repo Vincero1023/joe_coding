@@ -334,6 +334,8 @@ def test_pipeline_passes_title_ai_options_to_title_stage() -> None:
     assert result["title_generation_meta"]["preset_key"] == "gemini_fast"
     assert result["title_generation_meta"]["provider"] == "gemini"
     assert result["title_generation_meta"]["model"] == "gemini-2.5-flash-lite"
+    assert result["title_generation_meta"]["issue_context_enabled"] is True
+    assert result["title_generation_meta"]["issue_context_limit"] == 3
     assert result["title_generation_meta"]["target_summary"]["requested_modes"] == [
         "single",
         "longtail_exploratory",
@@ -342,3 +344,5 @@ def test_pipeline_passes_title_ai_options_to_title_stage() -> None:
     requested_options = mocked_request.call_args.kwargs["options"]
     assert requested_options.preset_key == "gemini_fast"
     assert requested_options.provider == "gemini"
+    assert requested_options.issue_context_enabled is True
+    assert requested_options.issue_context_limit == 3

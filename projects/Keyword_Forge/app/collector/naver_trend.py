@@ -10,6 +10,9 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from app.core.runtime_settings import report_naver_auth_error
+from app.expander.utils.throttle import wait_for_naver_keyword_request
+
 
 _API_BASE = "https://creator-advisor.naver.com/api/v6"
 _DEFAULT_TIMEOUT = 8.0
@@ -166,6 +169,7 @@ class NaverTrendClient:
         if query:
             url = f"{url}?{query}"
 
+        wait_for_naver_keyword_request()
         request = Request(
             url=url,
             headers={
@@ -194,6 +198,7 @@ class NaverTrendClient:
             payload = exc.read().decode("utf-8", errors="ignore")
             message = _extract_error_message(payload) or _default_http_error_message(exc.code)
             if exc.code in {401, 403}:
+                report_naver_auth_error(message)
                 raise NaverTrendAuthError(message) from exc
             raise NaverTrendResponseError(message) from exc
         except URLError as exc:
@@ -208,7 +213,7 @@ class NaverTrendClient:
 def resolve_trend_date(raw_date: str) -> str:
     normalized = str(raw_date or "").strip()
     if not normalized:
-        return (datetime.now(_KST).date() - timedelta(days=2)).isoformat()
+        return datetime.now(_KST).date().isoformat()
 
     try:
         return datetime.strptime(normalized, "%Y-%m-%d").date().isoformat()

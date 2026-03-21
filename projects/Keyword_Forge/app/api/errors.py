@@ -10,6 +10,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.core.runtime_settings import RuntimeGuardError
+
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,18 @@ def install_error_handlers(app: FastAPI, *, app_env: str) -> None:
             detail={"errors": exc.errors()},
         )
         response = JSONResponse(status_code=422, content=payload)
+        response.headers["X-Request-ID"] = payload["error"]["request_id"]
+        return response
+
+    @app.exception_handler(RuntimeGuardError)
+    async def handle_runtime_guard_error(request: Request, exc: RuntimeGuardError) -> JSONResponse:
+        payload = _build_error_payload(
+            request=request,
+            code=getattr(exc, "code", "runtime_guard"),
+            message=str(exc) or "Runtime guard blocked the request.",
+            detail=getattr(exc, "detail", {}),
+        )
+        response = JSONResponse(status_code=getattr(exc, "status_code", 429), content=payload)
         response.headers["X-Request-ID"] = payload["error"]["request_id"]
         return response
 

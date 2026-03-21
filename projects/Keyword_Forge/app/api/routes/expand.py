@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.schemas import ModuleRequest, ModuleResponse
+from app.core.runtime_settings import record_operation_start
 from app.expander.main import expander_module, run_with_analysis_progress, run_with_progress
 
 
@@ -22,11 +23,13 @@ _STREAM_HEARTBEAT_SECONDS = 5.0
 
 @router.post("/expand", response_model=ModuleResponse)
 def expand_keywords(payload: ModuleRequest) -> ModuleResponse:
+    record_operation_start("expand")
     return ModuleResponse(result=expander_module.run(payload.input_data))
 
 
 @router.post("/expand/stream")
 def expand_keywords_stream(payload: ModuleRequest, request: Request) -> StreamingResponse:
+    record_operation_start("expand_stream")
     request_id = getattr(request.state, "request_id", "")
     return _stream_expand_response(
         request=request,
@@ -42,6 +45,7 @@ def expand_keywords_stream(payload: ModuleRequest, request: Request) -> Streamin
 
 @router.post("/expand/analyze/stream")
 def expand_analyze_keywords_stream(payload: ModuleRequest, request: Request) -> StreamingResponse:
+    record_operation_start("expand_analyze_stream")
     request_id = getattr(request.state, "request_id", "")
     return _stream_expand_response(
         request=request,

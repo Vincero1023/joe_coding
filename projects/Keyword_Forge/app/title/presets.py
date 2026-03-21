@@ -16,6 +16,37 @@ class TitlePreset:
 
 TITLE_PRESETS: tuple[TitlePreset, ...] = (
     TitlePreset(
+        key="openai_home_issue_safe",
+        label="홈판 이슈형",
+        description="네이버 홈판용 이슈형 훅과 준최2 세이프 톤을 우선하는 기본 프리셋입니다.",
+        provider="openai",
+        model="gpt-4.1-mini",
+        temperature=0.7,
+        prompt_guidance=(
+            "Preset focus:\n"
+            "- Optimize naver_home titles for Naver home-feed exposure with a semi-safe issue-first style.\n"
+            "- For each keyword, infer one category and apply only that category's vocabulary and logic.\n"
+            "- Prioritize the most current issue, update, comparison point, reversal, ranking shift, spike or drop, schedule, policy change, or shortage signal implied by the keyword.\n"
+            "- When the issue signal is weak, fall back to update, checkpoint, comparison, or decision-point framing instead of fabricating breaking news.\n"
+            "- For naver_home titles, usually split the pair into issue or update plus debate or comparison, and issue or update plus reversal, question, or surprise.\n"
+            "- Keep each naver_home title within 40 Korean characters, avoid colons, and prefer zero or one comma.\n"
+            "- Use conversational Korean with a light emotional hook, but keep it editorial rather than spammy.\n"
+            "- Use freshness cues aggressively when natural, such as 오늘, 어제, 방금, 이번주, 이번달, 올해 누계, ranking, percentage, price, duration, wait time, budget, or checklist count.\n"
+            "- Never invent unsupported facts, rankings, official changes, prices, dates, or percentages. Use explicit signals when available and stay soft when not.\n"
+            "- Stay semi-safe: no ragebait, hate, certainty claims, cure claims, investment solicitation, or guaranteed outcomes.\n"
+            "- In YMYL areas such as money, health, law, and real estate, use hedged wording like '~로 보인다', '~로 집계됐다', or '~가능성이 있다'.\n"
+            "- Avoid stale or spammy skeletons such as '완벽 정리', '한 번에 정리', '갑자기 바뀌었다', '이유가 이상하다', '놓치면 손해', or shock words like '충격', '대박', '실화'.\n"
+            "- Consider input signals such as score, grade, volume, cpc, base keyword, support keyword, and source note when they help choose the issue angle.\n"
+            "- Product review overlay: focus on model or version, price moves, ratings, discount, real-use period, and key specs.\n"
+            "- Travel overlay: focus on seasonality, route efficiency, passes, crowd level, wait time, budget, and booking tips.\n"
+            "- Economy or stock overlay: focus on index events, rate expectations, earnings preview, consensus gaps, ETF rebalancing, and turnover.\n"
+            "- Senior info overlay: focus on benefit changes, eligibility, application timing, care, safety aids, and official-guide wording.\n"
+            "- Health food overlay: focus on ingredient plus method, time, serving size, calories, protein, sodium, and practical substitutions.\n"
+            "- Real-estate overlay: focus on region, project, line, subscription competition, unsold inventory, transaction volume, policy, transit, and supply calendar.\n"
+            "- Prefer titles that sound timely and issue-aware rather than evergreen encyclopedia headings."
+        ),
+    ),
+    TitlePreset(
         key="openai_balanced",
         label="추천 균형형",
         description="기본 추천값입니다. 규칙 준수와 제목 다양성의 균형을 가장 무난하게 맞춥니다.",
@@ -74,7 +105,7 @@ TITLE_PRESETS: tuple[TitlePreset, ...] = (
 )
 
 TITLE_PRESET_MAP = {preset.key: preset for preset in TITLE_PRESETS}
-DEFAULT_TITLE_PRESET_KEY = "openai_balanced"
+DEFAULT_TITLE_PRESET_KEY = "openai_home_issue_safe"
 MANUAL_TITLE_PRESET_KEY = "manual"
 
 

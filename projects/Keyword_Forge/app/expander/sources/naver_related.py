@@ -76,6 +76,7 @@ def _fetch_qra_related_queries(*, html: str, keyword: str, referer_url: str) -> 
     if not api_url:
         return []
 
+    wait_for_naver_keyword_request()
     request = Request(
         url=api_url,
         headers={

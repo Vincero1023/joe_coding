@@ -4,8 +4,11 @@ import os
 import threading
 import time
 
+from app.core.runtime_settings import before_naver_request, get_runtime_operation_settings
 
-_DEFAULT_NAVER_REQUEST_GAP_SECONDS = 0.55
+
+# Use a conservative default because unattended scheduled runs are now a first-class use case.
+_DEFAULT_NAVER_REQUEST_GAP_SECONDS = 2.0
 _NAVER_REQUEST_GAP_ENV = "KEYWORD_FORGE_NAVER_REQUEST_GAP_SECONDS"
 _NAVER_REQUEST_BUCKET = "naver_keyword_sources"
 
@@ -38,22 +41,24 @@ class RequestThrottle:
 
 
 def get_naver_request_gap_seconds() -> float:
+    runtime_gap = get_runtime_operation_settings().naver_request_gap_seconds
     raw_value = os.getenv(_NAVER_REQUEST_GAP_ENV, "").strip()
     if not raw_value:
-        return _DEFAULT_NAVER_REQUEST_GAP_SECONDS
+        return runtime_gap if runtime_gap >= 0 else _DEFAULT_NAVER_REQUEST_GAP_SECONDS
 
     try:
         parsed = float(raw_value)
     except ValueError:
-        return _DEFAULT_NAVER_REQUEST_GAP_SECONDS
+        return runtime_gap if runtime_gap >= 0 else _DEFAULT_NAVER_REQUEST_GAP_SECONDS
 
-    return parsed if parsed >= 0 else _DEFAULT_NAVER_REQUEST_GAP_SECONDS
+    return parsed if parsed >= 0 else (runtime_gap if runtime_gap >= 0 else _DEFAULT_NAVER_REQUEST_GAP_SECONDS)
 
 
 _GLOBAL_THROTTLE = RequestThrottle(default_min_interval_seconds=_DEFAULT_NAVER_REQUEST_GAP_SECONDS)
 
 
 def wait_for_naver_keyword_request() -> None:
+    before_naver_request()
     _GLOBAL_THROTTLE.wait(
         bucket=_NAVER_REQUEST_BUCKET,
         min_interval_seconds=get_naver_request_gap_seconds(),

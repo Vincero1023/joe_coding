@@ -1,10 +1,12 @@
 import json
+from datetime import datetime
 
 from app.collector.categories import CATEGORY_CHOICES, resolve_category_name
 from app.collector.naver_trend import (
     NaverTrendAuthError,
     NaverTrendClient,
     NaverTrendOptions,
+    resolve_trend_date,
 )
 
 
@@ -151,3 +153,14 @@ def test_naver_trend_client_uses_recent_non_empty_date_when_requested_date_is_em
         ("/trend/category", "2026-03-18"),
         ("/trend/category", "2026-03-17"),
     ]
+
+
+def test_resolve_trend_date_defaults_to_current_kst_day_when_blank(monkeypatch) -> None:
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 3, 21, 9, 15, 0, tzinfo=tz)
+
+    monkeypatch.setattr("app.collector.naver_trend.datetime", FixedDateTime)
+
+    assert resolve_trend_date("") == "2026-03-21"

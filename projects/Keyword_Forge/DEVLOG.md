@@ -61,6 +61,35 @@
 ---
 
 ## Date
+- 2026-03-21 17:20 (KST)
+
+## What changed (변경점)
+- `app/web.py`, `app/web_assets/app.js`, `app/web_assets/app.css`, `app/web_assets/app_overrides.js`에 `운영 설정` 드로어를 추가하고 `일일 10회 이하 / 상시 슬로우 / 직접 설정` 모드를 저장/적용할 수 있게 했다.
+- `app/core/runtime_settings.py`, `app/api/routes/settings.py`, `app/expander/utils/throttle.py`에 런타임 운영 가드를 추가해 Naver 요청 간격, 일일 작업 상한, 일일 Naver 요청 상한, 연속 실행 보호, 401/403 자동 잠금을 서버에서 직접 관리하게 했다.
+- 현재까지의 변경과 제목 개선 방향, 다른 PC에서 이어서 작업하는 방법을 `HANDOFF_2026-03-21.md`에 상세 정리했다.
+
+## Why (원인/배경)
+- 이제 초기 개발 단계가 지나서 실행 옵션이 메인 화면에 계속 쌓이는 구조보다, 장시간 실행과 예약모드 전환을 대비한 분리형 운영 설정이 필요했다.
+- 제목 생성은 검색 상위 제목을 참고하지만 아직 `뉴스 본문/커뮤니티 반응` 수준은 아니라, 다음 작업 우선순위를 문서로 명확히 남겨둘 필요가 있었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `pytest tests/test_web_routes.py tests/test_runtime_operation_settings.py tests/test_runtime_settings_api.py tests/test_expander_throttle.py tests/test_naver_request_slow_mode.py tests/test_stage_entrypoints.py`
+- [x] `node --check app/web_assets/app.js`
+- [x] `node --check app/web_assets/app_overrides.js`
+- [x] `python -m py_compile` 관련 파일 통과
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 장시간 실행/예약모드 대비 운영 안전장치와 세팅 분리 UI가 없고, 다른 PC에서 이어서 작업할 때 최근 변경 맥락이 끊겼다.
+- 원인: 요청 간격은 env 변수에만 묶여 있었고, 프런트 설정도 로컬 브라우저 저장 중심이라 인수인계 문서가 없으면 이어받기 어렵다.
+- 해결: 런타임 운영 설정 API와 세팅 드로어를 추가하고, 별도 핸드오프 문서에 최근 작업 내역과 제목 개선 조언을 정리했다.
+
+## Next (다음 작업)
+- 예약모드가 런타임 운영 설정을 그대로 읽도록 연결
+- 제목 생성은 `뉴스형 / 반응형 / 혼합형` 이슈 소스 분리부터 강화
+
+---
+
+## Date
 - 2026-03-20 17:22 (KST)
 
 ## What changed (변경점)

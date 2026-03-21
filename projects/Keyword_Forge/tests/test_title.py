@@ -1,10 +1,11 @@
 from unittest.mock import patch
 
-from app.title.ai_client import TitleGenerationOptions
+from app.title.ai_client import TitleGenerationOptions, _build_user_prompt_from_items, request_ai_titles
 from app.title.category_detector import detect_category
 from app.title.main import run
 from app.title.rules import NAVER_HOME_MAX_LENGTH
 from app.title.targets import build_title_targets
+from app.title.title_generator import generate_titles
 from app.title.templates import build_blog_titles, build_naver_home_titles
 
 
@@ -187,6 +188,112 @@ def test_title_generation_options_apply_preset_defaults() -> None:
     assert "Additional guidance" in options.effective_system_prompt
 
 
+def test_title_generation_options_use_home_issue_preset_by_default_in_ai_mode() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+            }
+        }
+    )
+
+    assert options.preset_key == "openai_home_issue_safe"
+    assert options.provider == "openai"
+    assert options.model == "gpt-4.1-mini"
+    assert options.temperature == 0.7
+    assert options.issue_context_enabled is True
+    assert options.issue_context_limit == 3
+    assert "Naver home-feed exposure" in options.effective_system_prompt
+    assert "When the issue signal is weak" in options.effective_system_prompt
+    assert "Never invent unsupported facts" in options.effective_system_prompt
+
+
+def test_ai_prompt_builder_includes_category_overlay_and_metrics() -> None:
+    prompt = _build_user_prompt_from_items(
+        [
+            {
+                "keyword": "서울 청약 경쟁률",
+                "score": 77.0,
+                "profitability_grade": "A",
+                "attackability_grade": "2",
+                "metrics": {
+                    "volume": 1250.0,
+                    "cpc": 310.0,
+                },
+                "target_mode": "single",
+                "source_kind": "selected_keyword",
+                "source_keywords": ["서울 청약 경쟁률", "서울 분양"],
+                "source_note": "최근 청약 일정과 경쟁률 흐름 확인용",
+                "issue_context": {
+                    "fetched_at": "2026-03-21T08:00:00+09:00",
+                    "title_count": 5,
+                    "news_count": 2,
+                    "source_mix": {"news": 2, "blog": 2, "official": 1},
+                    "issue_terms": ["일정", "경쟁률", "분양"],
+                    "news_headlines": [
+                        "서울 청약 경쟁률 이번주 일정 바뀌나",
+                        "서울 분양 경쟁률 다시 오르나",
+                    ],
+                },
+            }
+        ]
+    )
+
+    assert "Current local date reference:" in prompt
+    assert "Never invent unsupported facts" in prompt
+    assert "category overlay: 부동산 블로그" in prompt
+    assert "preferred naver_home pair:" in prompt
+    assert "freshness cues:" in prompt
+    assert "data hooks:" in prompt
+    assert "available signals: score 77" in prompt
+    assert "grade A/2" in prompt
+    assert "volume 1,250" in prompt
+    assert "cpc 310" in prompt
+    assert "target context: single" in prompt
+    assert "source hints: selected_keyword" in prompt
+    assert "source keywords 서울 청약 경쟁률, 서울 분양" in prompt
+    assert "live issue context: fetched 2026-03-21 / news 2/5" in prompt
+    assert "recent headlines: 서울 청약 경쟁률 이번주 일정 바뀌나" in prompt
+
+
+def test_request_ai_titles_includes_live_issue_context_in_prompt() -> None:
+    html = """
+    <html>
+      <body>
+        <a href="https://news.example.com/a" class="news_tit">서울 청약 경쟁률 이번주 일정 바뀌나</a>
+        <a href="https://blog.naver.com/post1" class="title_link">서울 청약 경쟁률 비교 포인트</a>
+        <a href="https://news.example.com/b" class="news_tit">서울 분양 경쟁률 다시 오르나</a>
+      </body>
+    </html>
+    """
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "openai",
+                "api_key": "test-key",
+                "issue_context_enabled": True,
+                "issue_context_limit": 1,
+            }
+        }
+    )
+
+    with patch.dict("app.title.ai_client._ISSUE_CONTEXT_CACHE", {}, clear=True), patch(
+        "app.title.ai_client.fetch_naver_serp_html",
+        return_value=html,
+    ), patch(
+        "app.title.ai_client._request_openai_titles",
+        return_value=[],
+    ) as mocked_request:
+        request_ai_titles([{"keyword": "서울 청약 경쟁률"}], options)
+
+    prompt = mocked_request.call_args.args[0]
+    assert "live issue context:" in prompt
+    assert "recent headlines:" in prompt
+    assert "서울 청약 경쟁률 이번주 일정 바뀌나" in prompt
+    assert "news 2/3" in prompt
+
+
 def test_title_generation_options_parse_quality_retry_settings() -> None:
     options = TitleGenerationOptions.from_input(
         {
@@ -346,6 +453,111 @@ def test_title_generator_auto_retries_low_quality_ai_titles() -> None:
     assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
     assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is False
     assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 80
+
+
+def test_title_generator_quality_retry_preserves_prompt_context() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "openai",
+                "api_key": "test-key",
+                "model": "gpt-4.1-mini",
+            }
+        }
+    )
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=[
+            [
+                {
+                    "keyword": "서울 청약 경쟁률",
+                    "titles": {
+                        "naver_home": ["서울 청약 경쟁률", "서울 청약 경쟁률"],
+                        "blog": ["서울 청약 경쟁률", "서울 청약 경쟁률"],
+                    },
+                }
+            ],
+            [
+                {
+                    "keyword": "서울 청약 경쟁률",
+                    "titles": {
+                        "naver_home": ["서울 청약 경쟁률 이번주 비교 포인트", "서울 청약 경쟁률 왜 달라졌나"],
+                        "blog": ["서울 청약 경쟁률 체크포인트", "서울 청약 경쟁률 이슈 정리"],
+                    },
+                }
+            ],
+        ],
+    ) as mocked_request:
+        generate_titles(
+            [
+                {
+                    "keyword": "서울 청약 경쟁률",
+                    "score": 77.0,
+                    "metrics": {"volume": 1250.0, "cpc": 310.0},
+                    "source_kind": "selected_keyword",
+                    "source_note": "최근 청약 일정과 경쟁률 흐름 확인용",
+                    "source_keywords": ["서울 청약 경쟁률", "서울 분양"],
+                }
+            ],
+            options=options,
+        )
+
+    assert mocked_request.call_count == 2
+    retry_chunk = mocked_request.call_args_list[1].args[0]
+    retry_options = mocked_request.call_args_list[1].kwargs["options"]
+
+    assert retry_chunk[0]["keyword"] == "서울 청약 경쟁률"
+    assert retry_chunk[0]["score"] == 77.0
+    assert retry_chunk[0]["metrics"]["volume"] == 1250.0
+    assert retry_chunk[0]["source_note"] == "최근 청약 일정과 경쟁률 흐름 확인용"
+    assert "home-feed pair issue-aware" in retry_options.system_prompt
+    assert "Do not invent unsupported dates, numbers, rankings, or official changes" in retry_options.system_prompt
+
+
+def test_title_service_reuses_existing_serp_issue_context() -> None:
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        return_value=[
+            {
+                "keyword": "보험 추천",
+                "titles": {
+                    "naver_home": ["보험 추천 이번주 비교 포인트", "보험 추천 기준 다시 보인다"],
+                    "blog": ["보험 추천 체크포인트", "보험 추천 이슈 정리"],
+                },
+            }
+        ],
+    ) as mocked_request:
+        run(
+            {
+                "selected_keywords": [
+                    {
+                        "keyword": "보험 추천",
+                        "score": 1.0,
+                    }
+                ],
+                "serp_competition_summary": {
+                    "queries": [
+                        {
+                            "query": "보험 추천",
+                            "source_mix": {"news": 1, "blog": 2},
+                            "common_terms": ["비교", "기준"],
+                            "top_titles": ["보험 추천 이번주 비교 포인트", "보험 추천 기준 바뀌었나"],
+                        }
+                    ]
+                },
+                "title_options": {
+                    "mode": "ai",
+                    "provider": "openai",
+                    "api_key": "test-key",
+                    "issue_context_enabled": False,
+                },
+            }
+        )
+
+    input_items = mocked_request.call_args.args[0]
+    assert input_items[0]["issue_context"]["query"] == "보험 추천"
+    assert input_items[0]["issue_context"]["source_mix"]["news"] == 1
 
 
 def _build_longtail_title_input() -> dict:

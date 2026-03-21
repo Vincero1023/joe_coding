@@ -1,5 +1,11 @@
-2026/03/19-17:25:48.107 5b44 Reusing MANIFEST D:\joe_coding\projects\Keyword_Forge\.local\naver_playwright\msedge\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
-2026/03/19-17:25:48.108 5b44 Recovering log #45
-2026/03/19-17:25:48.109 5b44 Reusing old log D:\joe_coding\projects\Keyword_Forge\.local\naver_playwright\msedge\Default\EdgeCoupons/coupons_data.db/000045.log 
-2026/03/19-17:25:48.165 4348 Level-0 table #50: started
-2026/03/19-17:25:48.237 4348 Level-0 table #50: 681708 bytes OK
+2026/03/21-12:58:53.830 1504 Reusing MANIFEST D:\joe_coding\projects\Keyword_Forge\.local\naver_playwright\msedge\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/03/21-12:58:53.885 1504 Recovering log #45
+2026/03/21-12:58:54.054 1504 Level-0 table #49: started
+2026/03/21-12:58:54.111 1504 Level-0 table #49: 681708 bytes OK
+2026/03/21-12:58:54.111 1504 Recovering log #49
+2026/03/21-12:58:54.112 1504 Reusing old log D:\joe_coding\projects\Keyword_Forge\.local\naver_playwright\msedge\Default\EdgeCoupons/coupons_data.db/000049.log 
+2026/03/21-12:58:54.141 1504 Delete type=0 #45
+2026/03/21-12:58:54.141 1504 Delete type=2 #50
+2026/03/21-12:58:54.412 50f4 Level-0 table #51: started
+2026/03/21-12:58:54.479 50f4 Level-0 table #51: 681712 bytes OK
+2026/03/21-12:58:54.510 50f4 Delete type=0 #49

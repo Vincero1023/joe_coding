@@ -17,6 +17,7 @@ from app.collector.categories import (
     TREND_SERVICE_CHOICES,
 )
 from app.expander.utils.tokenizer import normalize_key
+from app.title.ai_client import get_default_system_prompt
 from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_payload
 
 
@@ -275,10 +276,19 @@ def _render_static_shell(*, title: str, description: str, body: str) -> str:
 
 
 def _render_title_prompt_editor() -> str:
+    title_presets = build_title_preset_payload()
+    title_preset_payload = json.dumps(title_presets, ensure_ascii=False).replace("</", "<\\/")
+    default_system_prompt_payload = json.dumps(get_default_system_prompt(), ensure_ascii=False).replace("</", "<\\/")
+    default_preset_key_payload = json.dumps(DEFAULT_TITLE_PRESET_KEY, ensure_ascii=False)
     body = f"""
     <div class="bg-orb bg-orb-a"></div>
     <div class="bg-orb bg-orb-b"></div>
     <div class="bg-grid"></div>
+    <script>
+        window.KEYWORD_FORGE_TITLE_PRESETS = {title_preset_payload};
+        window.KEYWORD_FORGE_TITLE_DEFAULT_SYSTEM_PROMPT = {default_system_prompt_payload};
+        window.KEYWORD_FORGE_TITLE_DEFAULT_PRESET_KEY = {default_preset_key_payload};
+    </script>
     <main class="doc-shell title-prompt-shell">
         <div class="doc-stack">
             <section class="doc-hero doc-hero-compact">
@@ -289,20 +299,20 @@ def _render_title_prompt_editor() -> str:
                 </div>
                 <div class="doc-hero-copy">
                     <p class="panel-kicker">Title Prompt</p>
-                    <h1>AI 제목 프롬프트 편집</h1>
+                    <h1>AI 제목 프롬프트 관리</h1>
                     <p>
-                        선택한 프리셋 안내 뒤에, 여기서 입력한 문구가 추가 지침으로 붙습니다.
-                        JSON 형식, 키워드 보존, 네이버 홈형 2개 + 블로그형 2개 규칙은 기본 프롬프트가 계속 고정합니다.
+                        기본 시스템 프롬프트와 선택된 프리셋 안내는 계속 고정됩니다.
+                        여기서는 그 뒤에 붙는 사용자 저장본을 만들고, 저장하고, 불러와서 현재 적용본으로 바꿀 수 있습니다.
                     </p>
                 </div>
                 <div class="title-prompt-guide">
                     <div class="title-prompt-guide-card">
-                        <strong>권장 사용법</strong>
-                        <p>톤, 어휘, 클릭 유도 방식, 금지 표현 같은 운영 규칙만 추가하는 방식이 가장 안정적입니다.</p>
+                        <strong>현재 구조</strong>
+                        <p>기본 시스템 프롬프트 + 선택한 프리셋 안내 + 저장본 또는 직접 입력 지침 순서로 실제 프롬프트가 구성됩니다.</p>
                     </div>
                     <div class="title-prompt-guide-card">
-                        <strong>예시</strong>
-                        <p>과장 표현은 줄이고, 숫자형 제목을 우선하며, 제목 첫 단어는 반드시 키워드로 시작하도록 작성할 수 있습니다.</p>
+                        <strong>권장 운영</strong>
+                        <p>홈판형, 리뷰형, 보수형 같은 저장본을 따로 만들어 두고 필요할 때 선택해서 쓰는 방식이 가장 관리하기 쉽습니다.</p>
                     </div>
                 </div>
             </section>
@@ -310,26 +320,81 @@ def _render_title_prompt_editor() -> str:
             <section class="panel">
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">Editor</p>
-                        <h2>추가 지침</h2>
+                        <p class="panel-kicker">Preview</p>
+                        <h2>현재 적용 프롬프트 미리보기</h2>
                     </div>
                     <span class="status-pill" id="titlePromptEditorStatus">불러오는 중</span>
                 </div>
+                <div class="form-grid">
+                    <div class="field-block">
+                        <span class="field-label">현재 프리셋</span>
+                        <div id="titlePromptPresetLabel" class="title-prompt-summary">불러오는 중</div>
+                    </div>
+                    <div class="field-block">
+                        <span class="field-label">현재 적용 저장본</span>
+                        <div id="titlePromptAppliedProfile" class="title-prompt-summary">불러오는 중</div>
+                    </div>
+                    <label class="field-block field-block-wide">
+                        <span class="field-label">기본 시스템 + 프리셋 안내</span>
+                        <textarea
+                            id="titlePromptBasePreview"
+                            class="title-prompt-textarea"
+                            rows="14"
+                            readonly
+                        ></textarea>
+                    </label>
+                    <label class="field-block field-block-wide">
+                        <span class="field-label">실제 적용 프롬프트 전체 미리보기</span>
+                        <textarea
+                            id="titlePromptEffectivePreview"
+                            class="title-prompt-textarea"
+                            rows="18"
+                            readonly
+                        ></textarea>
+                    </label>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="panel-kicker">Profiles</p>
+                        <h2>저장본 편집 및 선택</h2>
+                    </div>
+                    <span class="status-pill" id="titlePromptProfileStatus">저장본 불러오는 중</span>
+                </div>
+                <div class="form-grid">
+                    <label class="field-block">
+                        <span class="field-label">저장본 선택</span>
+                        <select id="titlePromptProfileSelect"></select>
+                    </label>
+                    <label class="field-block">
+                        <span class="field-label">저장본 이름</span>
+                        <input
+                            id="titlePromptProfileName"
+                            type="text"
+                            maxlength="40"
+                            placeholder="예: 홈판 공격형"
+                        />
+                    </label>
+                </div>
                 <label class="field-block field-block-wide">
-                    <span class="field-label">시스템 프롬프트에 덧붙일 지침</span>
+                    <span class="field-label">추가 지침 편집</span>
                     <textarea
                         id="titlePromptEditorInput"
                         class="title-prompt-textarea"
                         rows="16"
-                        placeholder="예: 키워드는 항상 제목 맨 앞에 두고, 클릭 유도형 표현은 1개만 사용하세요."
+                        placeholder="예: 키워드는 항상 제목 맨 앞에 두고, 홈판용은 최신 이슈를 우선 반영하며, 과장형 금지 표현은 더 엄격하게 적용하세요."
                     ></textarea>
                 </label>
                 <p class="input-help compact-help">
-                    저장하면 메인 화면의 제목 생성 설정에 즉시 반영됩니다. API Key는 이 화면에 노출하지 않습니다.
+                    저장본을 선택한 뒤 저장하면 메인 화면에서 바로 적용됩니다. 직접 입력으로 두면 저장본 없이 현재 지침만 적용합니다.
                 </p>
                 <div class="doc-actions title-prompt-actions">
-                    <button type="button" class="subtle-btn" id="saveTitlePromptButton">저장</button>
-                    <button type="button" class="ghost-btn" id="clearTitlePromptEditorButton">비우기</button>
+                    <button type="button" class="subtle-btn" id="saveTitlePromptButton">현재 적용 저장</button>
+                    <button type="button" class="ghost-btn" id="saveAsTitlePromptButton">새 저장본</button>
+                    <button type="button" class="ghost-btn" id="deleteTitlePromptButton">저장본 삭제</button>
+                    <button type="button" class="ghost-btn" id="clearTitlePromptEditorButton">현재 비우기</button>
                     <button type="button" class="ghost-chip" id="closeTitlePromptEditorButton">탭 닫기</button>
                 </div>
             </section>
@@ -338,9 +403,28 @@ def _render_title_prompt_editor() -> str:
     <script>
         (function() {{
             const STORAGE_KEY = "keyword_forge_title_settings";
+            const presets = Array.isArray(window.KEYWORD_FORGE_TITLE_PRESETS) ? window.KEYWORD_FORGE_TITLE_PRESETS : [];
+            const presetMap = presets.reduce((map, item) => {{
+                const key = String(item && item.key || "").trim();
+                if (key) {{
+                    map[key] = item;
+                }}
+                return map;
+            }}, {{}});
+            const defaultSystemPrompt = String(window.KEYWORD_FORGE_TITLE_DEFAULT_SYSTEM_PROMPT || "").replace(/\\r\\n/g, "\\n").trim();
+            const defaultPresetKey = String(window.KEYWORD_FORGE_TITLE_DEFAULT_PRESET_KEY || "").trim();
             const input = document.getElementById("titlePromptEditorInput");
             const status = document.getElementById("titlePromptEditorStatus");
+            const profileStatus = document.getElementById("titlePromptProfileStatus");
+            const profileSelect = document.getElementById("titlePromptProfileSelect");
+            const profileNameInput = document.getElementById("titlePromptProfileName");
+            const presetLabel = document.getElementById("titlePromptPresetLabel");
+            const appliedProfile = document.getElementById("titlePromptAppliedProfile");
+            const basePreview = document.getElementById("titlePromptBasePreview");
+            const effectivePreview = document.getElementById("titlePromptEffectivePreview");
             const saveButton = document.getElementById("saveTitlePromptButton");
+            const saveAsButton = document.getElementById("saveAsTitlePromptButton");
+            const deleteButton = document.getElementById("deleteTitlePromptButton");
             const clearButton = document.getElementById("clearTitlePromptEditorButton");
             const closeButton = document.getElementById("closeTitlePromptEditorButton");
 
@@ -360,6 +444,90 @@ def _render_title_prompt_editor() -> str:
                 return String(value || "").replace(/\\r\\n/g, "\\n").trim();
             }}
 
+            function normalizeProfileName(value) {{
+                return String(value || "").replace(/\\s+/g, " ").trim();
+            }}
+
+            function normalizeProfileId(value) {{
+                return String(value || "").trim();
+            }}
+
+            function resolveDirectPrompt(settings) {{
+                const directPrompt = normalizePrompt(settings.direct_system_prompt || "");
+                if (directPrompt) {{
+                    return directPrompt;
+                }}
+                return normalizePrompt(settings.system_prompt || "");
+            }}
+
+            function normalizePromptProfiles(value) {{
+                if (!Array.isArray(value)) {{
+                    return [];
+                }}
+                const seenIds = new Set();
+                const output = [];
+                value.forEach((item, index) => {{
+                    if (!item || typeof item !== "object") {{
+                        return;
+                    }}
+                    const id = normalizeProfileId(item.id || `profile-${{index + 1}}`);
+                    const name = normalizeProfileName(item.name || `저장본 ${{output.length + 1}}`);
+                    const prompt = normalizePrompt(item.prompt);
+                    if (!id || seenIds.has(id)) {{
+                        return;
+                    }}
+                    seenIds.add(id);
+                    output.push({{
+                        id,
+                        name,
+                        prompt,
+                        updated_at: String(item.updated_at || "").trim(),
+                    }});
+                }});
+                return output;
+            }}
+
+            function createProfileId() {{
+                return `profile-${{Date.now()}}-${{Math.random().toString(36).slice(2, 8)}}`;
+            }}
+
+            function getPresetFromSettings(settings) {{
+                const presetKey = String(settings.preset_key || "").trim().toLowerCase();
+                return presetMap[presetKey] || presetMap[defaultPresetKey] || null;
+            }}
+
+            function resolveActiveProfile(settings, profiles = normalizePromptProfiles(settings.prompt_profiles)) {{
+                const activeProfileId = normalizeProfileId(settings.active_prompt_profile_id);
+                return profiles.find((profile) => profile.id === activeProfileId) || null;
+            }}
+
+            function resolveAppliedPrompt(settings, profiles = normalizePromptProfiles(settings.prompt_profiles)) {{
+                const activeProfile = resolveActiveProfile(settings, profiles);
+                if (activeProfile) {{
+                    return activeProfile.prompt;
+                }}
+                return resolveDirectPrompt(settings);
+            }}
+
+            function buildBasePrompt(settings) {{
+                const sections = [defaultSystemPrompt];
+                const preset = getPresetFromSettings(settings);
+                const presetPrompt = normalizePrompt(preset && preset.prompt_guidance || "");
+                if (presetPrompt) {{
+                    sections.push(`Preset guidance:\\n${{presetPrompt}}`);
+                }}
+                return sections.filter(Boolean).join("\\n\\n");
+            }}
+
+            function buildEffectivePrompt(settings, promptValue) {{
+                const sections = [buildBasePrompt(settings)];
+                const extraPrompt = normalizePrompt(promptValue);
+                if (extraPrompt) {{
+                    sections.push(`Additional guidance:\\n${{extraPrompt}}`);
+                }}
+                return sections.filter(Boolean).join("\\n\\n");
+            }}
+
             function updateStatus(message, kind) {{
                 status.textContent = message;
                 status.classList.remove("success", "error");
@@ -368,36 +536,214 @@ def _render_title_prompt_editor() -> str:
                 }}
             }}
 
-            function loadPrompt() {{
-                const settings = readSettings();
-                input.value = normalizePrompt(settings.system_prompt || "");
-                updateStatus(input.value ? `저장됨 · ${{input.value.length}}자` : "기본 프롬프트만 사용 중");
+            function updateProfileStatus(message, kind) {{
+                profileStatus.textContent = message;
+                profileStatus.classList.remove("success", "error");
+                if (kind) {{
+                    profileStatus.classList.add(kind);
+                }}
             }}
 
-            function savePrompt() {{
+            function renderProfileOptions(settings, selectedProfileId = "") {{
+                const profiles = normalizePromptProfiles(settings.prompt_profiles);
+                const activeProfileId = normalizeProfileId(selectedProfileId || settings.active_prompt_profile_id);
+                profileSelect.innerHTML = "";
+
+                const directOption = document.createElement("option");
+                directOption.value = "";
+                directOption.textContent = profiles.length ? "직접 입력 / 저장본 미선택" : "직접 입력";
+                profileSelect.appendChild(directOption);
+
+                profiles.forEach((profile) => {{
+                    const option = document.createElement("option");
+                    option.value = profile.id;
+                    option.textContent = profile.name;
+                    profileSelect.appendChild(option);
+                }});
+
+                profileSelect.value = activeProfileId;
+                if (profileSelect.value !== activeProfileId) {{
+                    profileSelect.value = "";
+                }}
+            }}
+
+            function updatePreview(settings) {{
+                const profiles = normalizePromptProfiles(settings.prompt_profiles);
+                const selectedProfile = profiles.find((profile) => profile.id === normalizeProfileId(profileSelect.value)) || null;
+                const promptValue = normalizePrompt(input.value);
+                const preset = getPresetFromSettings(settings);
+
+                presetLabel.textContent = preset
+                    ? `${{preset.label}} / ${{preset.provider}} / ${{preset.model}} / temperature ${{preset.temperature}}`
+                    : "직접 설정";
+                appliedProfile.textContent = selectedProfile
+                    ? `저장본 적용 예정: ${{selectedProfile.name}}`
+                    : (promptValue ? "직접 입력 적용 예정" : "추가 지침 없음");
+                basePreview.value = buildBasePrompt(settings);
+                effectivePreview.value = buildEffectivePrompt(settings, promptValue);
+            }}
+
+            function loadEditorState(selectedProfileId = "") {{
                 const settings = readSettings();
+                const profiles = normalizePromptProfiles(settings.prompt_profiles);
+                const activeProfile = resolveActiveProfile(settings, profiles);
+                renderProfileOptions(settings, selectedProfileId || (activeProfile && activeProfile.id) || "");
+
+                const selectedProfile = profiles.find((profile) => profile.id === normalizeProfileId(profileSelect.value)) || null;
+                if (selectedProfile) {{
+                    profileNameInput.value = selectedProfile.name;
+                    input.value = selectedProfile.prompt;
+                }} else {{
+                    profileNameInput.value = "";
+                    input.value = resolveDirectPrompt(settings);
+                }}
+
+                deleteButton.disabled = !selectedProfile;
+                updatePreview(settings);
+                updateStatus(
+                    input.value
+                        ? `현재 추가 지침 ${{input.value.length}}자`
+                        : "기본 시스템 프롬프트만 사용 중",
+                );
+                updateProfileStatus(
+                    selectedProfile
+                        ? `선택 저장본: ${{selectedProfile.name}}`
+                        : `저장본 ${{profiles.length}}개 / 직접 입력`,
+                );
+            }}
+
+            function saveCurrentPrompt() {{
+                const settings = readSettings();
+                const profiles = normalizePromptProfiles(settings.prompt_profiles);
+                const selectedProfileId = normalizeProfileId(profileSelect.value);
                 const prompt = normalizePrompt(input.value);
-                settings.system_prompt = prompt;
-                writeSettings(settings);
-                updateStatus(prompt ? `저장됨 · ${{prompt.length}}자` : "기본 프롬프트만 사용 중", "success");
+                const name = normalizeProfileName(profileNameInput.value);
+
+                if (selectedProfileId) {{
+                    const nextProfiles = profiles.map((profile) => (
+                        profile.id === selectedProfileId
+                            ? {{
+                                ...profile,
+                                name: name || profile.name,
+                                prompt,
+                                updated_at: new Date().toISOString(),
+                            }}
+                            : profile
+                    ));
+                    writeSettings({{
+                        ...settings,
+                        prompt_profiles: nextProfiles,
+                        active_prompt_profile_id: selectedProfileId,
+                        direct_system_prompt: resolveDirectPrompt(settings),
+                        system_prompt: prompt,
+                    }});
+                    loadEditorState(selectedProfileId);
+                    updateStatus(`저장됨 · ${{prompt.length}}자`, "success");
+                    updateProfileStatus(`저장본 업데이트: ${{name || "이름 없음"}}`, "success");
+                    return;
+                }}
+
+                writeSettings({{
+                    ...settings,
+                    active_prompt_profile_id: "",
+                    direct_system_prompt: prompt,
+                    system_prompt: prompt,
+                }});
+                loadEditorState("");
+                updateStatus(prompt ? `직접 입력 저장됨 · ${{prompt.length}}자` : "기본 시스템 프롬프트만 사용 중", "success");
+                updateProfileStatus("직접 입력 적용", "success");
             }}
 
-            saveButton.addEventListener("click", savePrompt);
-            clearButton.addEventListener("click", () => {{
+            function saveAsNewProfile() {{
+                const settings = readSettings();
+                const profiles = normalizePromptProfiles(settings.prompt_profiles);
+                const prompt = normalizePrompt(input.value);
+                const name = normalizeProfileName(profileNameInput.value) || `저장본 ${{profiles.length + 1}}`;
+                const newProfileId = createProfileId();
+                const nextProfiles = [
+                    ...profiles,
+                    {{
+                        id: newProfileId,
+                        name,
+                        prompt,
+                        updated_at: new Date().toISOString(),
+                    }},
+                ];
+
+                writeSettings({{
+                    ...settings,
+                    prompt_profiles: nextProfiles,
+                    active_prompt_profile_id: newProfileId,
+                    direct_system_prompt: resolveDirectPrompt(settings),
+                    system_prompt: prompt,
+                }});
+                loadEditorState(newProfileId);
+                updateStatus(`새 저장본 저장됨 · ${{prompt.length}}자`, "success");
+                updateProfileStatus(`저장본 생성: ${{name}}`, "success");
+            }}
+
+            function deleteSelectedProfile() {{
+                const settings = readSettings();
+                const profiles = normalizePromptProfiles(settings.prompt_profiles);
+                const selectedProfileId = normalizeProfileId(profileSelect.value);
+                if (!selectedProfileId) {{
+                    updateProfileStatus("삭제할 저장본이 없습니다.", "error");
+                    return;
+                }}
+
+                const nextProfiles = profiles.filter((profile) => profile.id !== selectedProfileId);
+                const directPrompt = resolveDirectPrompt(settings);
+                writeSettings({{
+                    ...settings,
+                    prompt_profiles: nextProfiles,
+                    active_prompt_profile_id: "",
+                    direct_system_prompt: directPrompt,
+                    system_prompt: directPrompt,
+                }});
+                loadEditorState("");
+                updateStatus(
+                    directPrompt
+                        ? `직접 입력 유지 · ${{directPrompt.length}}자`
+                        : "기본 시스템 프롬프트만 사용 중",
+                    "success",
+                );
+                updateProfileStatus("저장본 삭제 완료", "success");
+            }}
+
+            function clearCurrentPrompt() {{
                 input.value = "";
-                savePrompt();
+                updatePreview(readSettings());
+                updateStatus("현재 입력 비움");
+            }}
+
+            saveButton.addEventListener("click", saveCurrentPrompt);
+            saveAsButton.addEventListener("click", saveAsNewProfile);
+            deleteButton.addEventListener("click", deleteSelectedProfile);
+            clearButton.addEventListener("click", () => {{
+                clearCurrentPrompt();
             }});
             closeButton.addEventListener("click", () => {{
                 window.close();
             }});
+            profileSelect.addEventListener("change", () => {{
+                loadEditorState(profileSelect.value);
+            }});
+            input.addEventListener("input", () => {{
+                updatePreview(readSettings());
+                updateStatus(
+                    input.value
+                        ? `현재 추가 지침 ${{normalizePrompt(input.value).length}}자`
+                        : "기본 시스템 프롬프트만 사용 중",
+                );
+            }});
             input.addEventListener("keydown", (event) => {{
                 if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {{
                     event.preventDefault();
-                    savePrompt();
+                    saveCurrentPrompt();
                 }}
             }});
 
-            loadPrompt();
+            loadEditorState();
         }})();
     </script>
     """
@@ -525,6 +871,10 @@ def _render_home() -> str:
     title_auto_retry_help = _render_help_tooltip(
         "AI 모드에서 품질 점수가 기준보다 낮은 제목만 1회 더 다시 생성합니다.\n"
         "기준 점수를 올리면 더 엄격하게 다시 쓰고, 너무 높이면 호출량과 시간이 늘어납니다."
+    )
+    title_issue_context_help = _render_help_tooltip(
+        "AI 제목 생성 직전에 네이버 검색 상위 결과를 확인해 최근 뉴스/이슈 표현을 프롬프트에 반영합니다.\n"
+        "조회 개수는 이번 호출에서 실시간 맥락을 붙일 키워드 수입니다. 높일수록 느려질 수 있습니다."
     )
     title_api_key_help = _render_help_tooltip(
         "API 키는 서버에 저장하지 않고 현재 브라우저 localStorage에만 보관합니다."
@@ -983,12 +1333,29 @@ def _render_home() -> str:
                             </p>
                         </div>
 
+                        <div class="field-block field-block-wide" data-title-mode-visibility="ai" hidden>
+                            <span class="field-label field-label-row">
+                                <span>실시간 이슈 반영</span>
+                                {title_issue_context_help}
+                            </span>
+                            <div class="title-auto-retry-row">
+                                <label class="check-chip"><input id="titleIssueContextEnabled" type="checkbox" checked />네이버 검색 상위 뉴스/콘텐츠 이슈 반영</label>
+                                <label class="title-auto-retry-threshold">
+                                    <span>조회 개수</span>
+                                    <input id="titleIssueContextLimit" type="number" min="1" max="5" step="1" value="3" />
+                                </label>
+                            </div>
+                            <p id="titleIssueContextSummary" class="input-help compact-help">
+                                AI 요청당 상위 3개 키워드에 실시간 이슈 반영
+                            </p>
+                        </div>
+
                         <label class="field-block" data-title-mode-visibility="ai" hidden>
                             <span class="field-label field-label-row">
                                 <span>프롬프트 / 모델 프리셋</span>
                                 <span class="inline-help">
                                     <button type="button" class="help-icon-btn" aria-label="프리셋 도움말">?</button>
-                                    <span id="titlePresetDescription" class="help-tooltip">추천 균형형을 기본값으로 두고, 필요하면 직접 설정으로 바꿔 세부값을 조정합니다.</span>
+                                    <span id="titlePresetDescription" class="help-tooltip">홈판 이슈형을 기본값으로 두고, 필요하면 직접 설정으로 바꿔 세부값을 조정합니다.</span>
                                 </span>
                             </span>
                             <select id="titlePreset">
@@ -1047,11 +1414,17 @@ def _render_home() -> str:
                                         {title_prompt_help}
                                     </span>
                                 </div>
-                                <div class="title-prompt-actions">
+                            <div class="title-prompt-actions">
                                     <button type="button" class="ghost-chip" id="openTitlePromptEditorButton">프롬프트 편집</button>
                                     <button type="button" class="ghost-chip" id="clearTitlePromptButton">비우기</button>
                                 </div>
                             </div>
+                            <label class="field-block">
+                                <span class="field-label">저장본 선택</span>
+                                <select id="titlePromptProfilePicker">
+                                    <option value="">직접 입력</option>
+                                </select>
+                            </label>
                             <div id="titlePromptSummary" class="title-prompt-summary">추가 지침 없음</div>
                             <input id="titleSystemPrompt" type="hidden" value="" />
                         </div>
@@ -1069,6 +1442,7 @@ def _render_home() -> str:
                     </div>
                 </div>
                 <div class="results-panel-tools">
+                    <button type="button" class="ghost-chip" data-utility-open="settings" aria-pressed="false">운영 설정</button>
                     <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">오류 / 진단</button>
                     <button type="button" class="ghost-chip" data-utility-open="logs" aria-pressed="false">실행 로그</button>
                     <button type="button" class="ghost-chip" id="exportTitleCsvButton">제목 결과 CSV</button>
@@ -1081,12 +1455,109 @@ def _render_home() -> str:
             <section class="utility-drawer-panel">
                 <div class="utility-drawer-head">
                     <div class="utility-drawer-tabs">
+                        <button type="button" class="ghost-chip" data-utility-tab="settings" aria-pressed="false">운영 설정</button>
                         <button type="button" class="ghost-chip" data-utility-tab="diagnostics" aria-pressed="true">오류 / 진단</button>
                         <button type="button" class="ghost-chip" data-utility-tab="logs" aria-pressed="false">실행 로그</button>
                     </div>
                     <button type="button" class="ghost-btn" id="utilityDrawerClose">닫기</button>
                 </div>
                 <div class="utility-drawer-body">
+                    <section class="utility-drawer-view" data-utility-panel="settings" hidden>
+                        <div class="settings-shell">
+                            <div class="settings-hero">
+                                <div>
+                                    <p class="panel-kicker">Ops</p>
+                                    <h2>운영 설정</h2>
+                                    <p class="settings-copy">
+                                        예약모드와 장시간 실행을 대비해 요청 간격, 일일 한도, 인증 오류 보호를 여기서 관리합니다.
+                                    </p>
+                                </div>
+                                <div class="settings-hero-actions">
+                                    <button type="button" class="ghost-chip" id="refreshOperationSettingsButton">새로고침</button>
+                                    <button type="button" class="ghost-chip" id="resetOperationGuardsButton">보호 잠금 해제</button>
+                                    <button type="button" class="ghost-btn" id="saveOperationSettingsButton">저장 후 적용</button>
+                                </div>
+                            </div>
+                            <div class="settings-status-grid">
+                                <article class="collector-stat-card">
+                                    <span>현재 모드</span>
+                                    <strong id="operationModeStatus">상시 슬로우</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>오늘 작업</span>
+                                    <strong id="operationDailyUsage">0 / 제한 없음</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>오늘 Naver 요청</span>
+                                    <strong id="operationRequestUsage">0 / 제한 없음</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>보호 상태</span>
+                                    <strong id="operationGuardStatus">정상</strong>
+                                </article>
+                            </div>
+                            <div class="settings-panel-grid">
+                                <section class="settings-card">
+                                    <div class="collector-panel-head">
+                                        <div>
+                                            <p class="panel-kicker">Mode</p>
+                                            <h3>운영 모드</h3>
+                                        </div>
+                                    </div>
+                                    <div class="field-block">
+                                        <span class="field-label">모드 선택</span>
+                                        <select id="operationMode">
+                                            <option value="daily_light">일일 10회 이하</option>
+                                            <option value="always_on_slow">상시 슬로우</option>
+                                            <option value="custom">직접 설정</option>
+                                        </select>
+                                    </div>
+                                    <div id="operationModeDescription" class="collector-empty">
+                                        상시 슬로우를 기본으로 두고, 작업 횟수나 요청 한도가 필요하면 다른 모드로 바꿉니다.
+                                    </div>
+                                </section>
+                                <section class="settings-card">
+                                    <div class="collector-panel-head">
+                                        <div>
+                                            <p class="panel-kicker">Guard</p>
+                                            <h3>보호 옵션</h3>
+                                        </div>
+                                    </div>
+                                    <div class="settings-form-grid">
+                                        <label class="field-block">
+                                            <span class="field-label">Naver 요청 간격(초)</span>
+                                            <input id="operationRequestGap" type="number" min="0" max="120" step="0.5" />
+                                        </label>
+                                        <label class="field-block">
+                                            <span class="field-label">하루 작업 시작 상한</span>
+                                            <input id="operationDailyLimit" type="number" min="0" max="1000" step="1" />
+                                        </label>
+                                        <label class="field-block">
+                                            <span class="field-label">하루 Naver 요청 상한</span>
+                                            <input id="operationDailyRequestLimit" type="number" min="0" max="100000" step="1" />
+                                        </label>
+                                        <label class="field-block">
+                                            <span class="field-label">연속 실행 보호(분)</span>
+                                            <input id="operationMaxContinuousMinutes" type="number" min="0" max="1440" step="5" />
+                                        </label>
+                                        <label class="field-block field-block-wide">
+                                            <span class="field-label">인증 오류 보호</span>
+                                            <label class="check-chip">
+                                                <input id="operationStopOnAuthError" type="checkbox" checked />
+                                                401/403 감지 시 이후 요청 자동 중지
+                                            </label>
+                                        </label>
+                                    </div>
+                                    <div id="operationSettingsHint" class="settings-hint">
+                                        0을 넣으면 해당 상한은 해제됩니다. 저장 후 즉시 서버 런타임에 반영됩니다.
+                                    </div>
+                                    <div id="operationSettingsSyncStatus" class="collector-empty">
+                                        서버 런타임 상태를 불러오는 중입니다.
+                                    </div>
+                                </section>
+                            </div>
+                        </div>
+                    </section>
                     <section class="utility-drawer-view" data-utility-panel="diagnostics">
                         <div class="debug-box">
                             <div class="debug-box-head">

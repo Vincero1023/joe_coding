@@ -14,6 +14,7 @@ if _PROJECT_ROOT not in sys.path:
 from typing import Any
 
 from app.core.interfaces import ModuleRunner
+from app.expander.utils.tokenizer import normalize_text
 from app.title.ai_client import TitleGenerationOptions
 from app.title.targets import build_title_targets
 from app.title.title_generator import generate_titles
@@ -24,6 +25,7 @@ class TitleService:
         if isinstance(input_data, dict):
             items, target_summary = build_title_targets(input_data)
             options = TitleGenerationOptions.from_input(input_data)
+            items = _attach_issue_context_from_input(items, input_data)
         else:
             items = _coerce_input_items(input_data)
             target_summary = {}
@@ -101,6 +103,64 @@ def _coerce_input_items(input_data: Any) -> list[dict[str, Any]]:
             return [item for item in input_data["generated_titles"] if isinstance(item, dict)]
 
     return []
+
+
+def _attach_issue_context_from_input(
+    items: list[dict[str, Any]],
+    input_data: dict[str, Any],
+) -> list[dict[str, Any]]:
+    serp_summary = input_data.get("serp_competition_summary")
+    if not isinstance(serp_summary, dict):
+        return items
+
+    queries = serp_summary.get("queries")
+    if not isinstance(queries, list):
+        return items
+
+    context_by_keyword = {
+        normalize_text(item.get("query")): item
+        for item in queries
+        if isinstance(item, dict) and normalize_text(item.get("query"))
+    }
+    if not context_by_keyword:
+        return items
+
+    enriched_items: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if isinstance(item.get("issue_context"), dict):
+            enriched_items.append(item)
+            continue
+
+        lookup_candidates = [
+            normalize_text(item.get("keyword")),
+            normalize_text(item.get("base_keyword")),
+        ]
+        source_keywords = item.get("source_keywords")
+        if isinstance(source_keywords, list):
+            lookup_candidates.extend(normalize_text(keyword) for keyword in source_keywords)
+
+        issue_context = next(
+            (
+                context_by_keyword[candidate]
+                for candidate in lookup_candidates
+                if candidate and candidate in context_by_keyword
+            ),
+            None,
+        )
+        if issue_context is None:
+            enriched_items.append(item)
+            continue
+
+        enriched_items.append(
+            {
+                **item,
+                "issue_context": issue_context,
+            }
+        )
+
+    return enriched_items
 
 
 if __name__ == "__main__":

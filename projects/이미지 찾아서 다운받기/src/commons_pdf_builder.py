@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -13,6 +14,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
+from PIL import Image
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.shared import Mm, Pt
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader, simpleSplit
 from reportlab.pdfbase import pdfmetrics
@@ -21,10 +27,13 @@ from reportlab.pdfgen import canvas
 
 COMMONS_API_URL = "https://commons.wikimedia.org/w/api.php"
 USER_AGENT = "commons-pdf-builder/0.1 (local personal document generation script)"
-DEFAULT_TIMEOUT = 30
+DEFAULT_TIMEOUT = 8
 IMAGE_HEIGHT = 82
-MIN_REQUEST_INTERVAL = 0.8
-MAX_RETRIES = 3
+DOCX_IMAGE_MAX_WIDTH_MM = 150
+DOCX_IMAGE_MAX_HEIGHT_MM = 90
+MIN_REQUEST_INTERVAL = 0.5
+MAX_RETRIES = 1
+DEFAULT_THUMB_WIDTH = 320
 
 SECTION_RE = re.compile(r"^🔥\s*(\d+)\.\s*(.+)$")
 THEME_RE = re.compile(r"^👉\s*핵심:\s*(.+)$")
@@ -33,6 +42,24 @@ HANGUL_RE = re.compile(r"[가-힣]+")
 NON_SEARCH_RE = re.compile(r"[^\w\s'().,&:-]+")
 MULTISPACE_RE = re.compile(r"\s+")
 PAREN_RE = re.compile(r"\((.*?)\)")
+BAD_TITLE_HINTS = (
+    ".pdf",
+    ".djvu",
+    "ia_",
+    "encyclopaedia",
+    "catalogue",
+    "sunday school",
+    "study of his life",
+    "great englishmen",
+    "enterprise",
+    "news",
+)
+MANUAL_TITLE_OVERRIDES = {
+    "Christ Alone in Prayer - modern chiaroscuro works": "File:Oración en el Huerto (Tiziano).jpg",
+}
+MANUAL_LOCAL_IMAGE_OVERRIDES = {
+    "Christ Alone in Prayer - modern chiaroscuro works": Path(".cache/commons/Christ_in_Gethsemane_by_Carl_Heinrich_Bloch_1880.jpg_82efb6f30e86.jpg"),
+}
 
 
 class ManifestError(ValueError):
@@ -66,6 +93,12 @@ class ResolvedArtwork:
     title: str
     image_path: Path
     description_url: str
+
+
+def console_print(message: str = "") -> None:
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    safe_message = message.encode(encoding, errors="replace").decode(encoding, errors="replace")
+    print(safe_message)
 
 
 def normalize_spaces(value: str) -> str:
@@ -140,7 +173,8 @@ def parse_source_text(text: str) -> list[PageGroup]:
             if current.startswith("👉 핵심:"):
                 raise ManifestError(f"{page_title} 섹션에서 작품 목록 대신 핵심 문구가 다시 나왔습니다.")
 
-            title_line = normalize_spaces(current)
+            raw_title_line = current
+            title_line = normalize_spaces(raw_title_line)
             index += 1
 
             while index < len(lines) and not lines[index].strip():
@@ -153,7 +187,7 @@ def parse_source_text(text: str) -> list[PageGroup]:
                 raise ManifestError(f"{title_line} 작품 설명이 없습니다.")
 
             description = parse_note_line(description_line)
-            search_title, search_artist = parse_title_line(title_line)
+            search_title, search_artist = parse_title_line(raw_title_line)
             items.append(
                 ArtworkItem(
                     title_line=title_line,
@@ -200,7 +234,7 @@ def register_fonts() -> tuple[str, str]:
 
 
 class WikimediaCommonsClient:
-    def __init__(self, cache_dir: Path, thumb_width: int = 1200, timeout: int = DEFAULT_TIMEOUT) -> None:
+    def __init__(self, cache_dir: Path, thumb_width: int = DEFAULT_THUMB_WIDTH, timeout: int = DEFAULT_TIMEOUT) -> None:
         self.cache_dir = cache_dir
         self.thumb_width = thumb_width
         self.timeout = timeout
@@ -214,7 +248,18 @@ class WikimediaCommonsClient:
         if cache_key in self._resolved_cache:
             return self._resolved_cache[cache_key]
 
-        title, image_urls = self._find_best_match(item)
+        local_override = MANUAL_LOCAL_IMAGE_OVERRIDES.get(cache_key)
+        if local_override and local_override.exists():
+            resolved = ResolvedArtwork(title=cache_key, image_path=local_override, description_url="")
+            self._resolved_cache[cache_key] = resolved
+            return resolved
+
+        override_title = MANUAL_TITLE_OVERRIDES.get(cache_key)
+        if override_title:
+            title = override_title
+            image_urls = self._fetch_image_urls(title)
+        else:
+            title, image_urls = self._find_best_match(item)
         image_path = self._download_image(image_urls, title)
         description_url = f"https://commons.wikimedia.org/wiki/{quote(title.replace(' ', '_'), safe=':_()')}"
         resolved = ResolvedArtwork(title=title, image_path=image_path, description_url=description_url)
@@ -233,14 +278,18 @@ class WikimediaCommonsClient:
                 gsrnamespace="6",
                 gsrlimit="10",
                 prop="imageinfo",
-                iiprop="url|size",
+                iiprop="url|size|mime",
                 iiurlwidth=str(self.thumb_width),
             )
             pages = payload.get("query", {}).get("pages", [])
             for rank, result in enumerate(pages):
                 title = result["title"]
                 info = (result.get("imageinfo") or [{}])[0]
-                urls = [url for url in [info.get("thumburl"), info.get("url")] if url]
+                mime = info.get("mime", "")
+                if mime.startswith("image/"):
+                    urls = [url for url in [info.get("thumburl"), info.get("url")] if url]
+                else:
+                    urls = [url for url in [info.get("thumburl")] if url]
                 score = self._score_candidate(title, item, rank)
                 if urls:
                     self._image_url_cache[title] = urls
@@ -291,6 +340,11 @@ class WikimediaCommonsClient:
             if year in candidate_title:
                 score += 1.2
 
+        lowered = candidate_title.lower()
+        for hint in BAD_TITLE_HINTS:
+            if hint in lowered:
+                score -= 4.0
+
         score -= rank * 0.15
         return score
 
@@ -308,28 +362,42 @@ class WikimediaCommonsClient:
             formatversion="2",
             prop="imageinfo",
             titles=title,
-            iiprop="url|size",
+            iiprop="url|size|mime",
             iiurlwidth=str(self.thumb_width),
         )
         pages = payload.get("query", {}).get("pages", [])
         if not pages or "imageinfo" not in pages[0]:
             raise ManifestError(f"이미지 URL을 가져오지 못했습니다: {title}")
         info = pages[0]["imageinfo"][0]
-        urls = [info.get("thumburl"), info.get("url")]
+        mime = info.get("mime", "")
+        if mime.startswith("image/"):
+            urls = [info.get("thumburl"), info.get("url")]
+        else:
+            urls = [info.get("thumburl")]
         resolved_urls = [url for url in urls if url]
         self._image_url_cache[title] = resolved_urls
         return resolved_urls
 
     def _download_image(self, urls: list[str], title: str) -> Path:
         last_error: Exception | None = None
+        prepared: list[tuple[str, Path]] = []
         for url in urls:
             parsed = urlparse(url)
             suffix = Path(parsed.path).suffix or ".jpg"
             digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
             safe_stem = re.sub(r"[^0-9A-Za-z._-]+", "_", title.removeprefix("File:"))[:80].strip("_")
             target = self.cache_dir / f"{safe_stem}_{digest}{suffix}"
+            prepared.append((url, target))
+
+        for index, (url, target) in enumerate(prepared):
             if target.exists() and target.stat().st_size > 0:
                 return target
+
+            if index == 0 and len(prepared) > 1:
+                fallback_target = prepared[1][1]
+                if fallback_target.exists() and fallback_target.stat().st_size > 0:
+                    self._create_resized_copy(fallback_target, target)
+                    return target
 
             request = Request(url, headers={"User-Agent": USER_AGENT})
             try:
@@ -343,6 +411,13 @@ class WikimediaCommonsClient:
         if last_error:
             raise last_error
         raise ManifestError(f"이미지 다운로드 실패: {title}")
+
+    def _create_resized_copy(self, source_path: Path, target_path: Path) -> None:
+        with Image.open(source_path) as image:
+            image = image.convert("RGB")
+            image.thumbnail((self.thumb_width, self.thumb_width * 2))
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            image.save(target_path, format="JPEG", quality=85)
 
     def _call_api(self, **params: str) -> dict:
         url = f"{COMMONS_API_URL}?{urlencode(params)}"
@@ -427,6 +502,104 @@ def fit_image(image_path: Path, max_width: float, fixed_height: float) -> tuple[
     return max_width, height * scale
 
 
+def configure_docx_styles(document: Document) -> None:
+    font_name = "Malgun Gothic"
+    style_specs = {
+        "Normal": (font_name, 10.5, False),
+        "Heading 1": (font_name, 15, True),
+        "Heading 2": (font_name, 11, True),
+    }
+    for style_name, (name, size, bold) in style_specs.items():
+        style = document.styles[style_name]
+        style.font.name = name
+        style.font.size = Pt(size)
+        style.font.bold = bold
+        style.element.rPr.rFonts.set(qn("w:eastAsia"), name)
+
+
+def get_docx_image_size(image_path: Path) -> tuple[str, Mm]:
+    with Image.open(image_path) as image:
+        width, height = image.size
+    if width <= 0 or height <= 0:
+        return "width", Mm(DOCX_IMAGE_MAX_WIDTH_MM)
+
+    image_ratio = width / height
+    bounds_ratio = DOCX_IMAGE_MAX_WIDTH_MM / DOCX_IMAGE_MAX_HEIGHT_MM
+    if image_ratio >= bounds_ratio:
+        return "width", Mm(DOCX_IMAGE_MAX_WIDTH_MM)
+    return "height", Mm(DOCX_IMAGE_MAX_HEIGHT_MM)
+
+
+def add_docx_picture(paragraph, image_path: Path) -> None:
+    size_key, size_value = get_docx_image_size(image_path)
+    run = paragraph.add_run()
+    if size_key == "width":
+        run.add_picture(str(image_path), width=size_value)
+        return
+    run.add_picture(str(image_path), height=size_value)
+
+
+def render_docx(groups: list[PageGroup], output_path: Path, client: WikimediaCommonsClient) -> list[str]:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    document = Document()
+    configure_docx_styles(document)
+
+    section = document.sections[0]
+    section.top_margin = Mm(18)
+    section.bottom_margin = Mm(18)
+    section.left_margin = Mm(18)
+    section.right_margin = Mm(18)
+    document.core_properties.title = "Wikimedia Commons Passion Document"
+
+    warnings: list[str] = []
+
+    for group_index, group in enumerate(groups):
+        if group_index:
+            document.add_page_break()
+
+        title_paragraph = document.add_paragraph(style="Heading 1")
+        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_paragraph.add_run(f"{group.section_number}. {group.page_title}")
+
+        theme_paragraph = document.add_paragraph()
+        theme_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        theme_run = theme_paragraph.add_run(f"Theme: {group.theme}")
+        theme_run.bold = True
+        theme_run.font.size = Pt(10.5)
+
+        for item_index, item in enumerate(group.items, start=1):
+            console_print(f"[{group.section_number}-{item_index}] {item.display_title}")
+
+            item_heading = document.add_paragraph(style="Heading 2")
+            item_heading.add_run(f"{item_index}. {item.display_title}")
+
+            description_paragraph = document.add_paragraph()
+            description_paragraph.add_run(item.description)
+
+            try:
+                resolved = client.resolve_artwork(item)
+                image_paragraph = document.add_paragraph()
+                image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                add_docx_picture(image_paragraph, resolved.image_path)
+
+                source_paragraph = document.add_paragraph()
+                source_run = source_paragraph.add_run(f"Source: {resolved.description_url}")
+                source_run.italic = True
+                source_run.font.size = Pt(8.5)
+            except Exception as exc:
+                warning = f"{group.section_number}-{item_index}: {item.display_title} / {exc}"
+                warnings.append(warning)
+                warning_paragraph = document.add_paragraph()
+                warning_run = warning_paragraph.add_run("Image could not be resolved.")
+                warning_run.bold = True
+
+            if item_index != len(group.items):
+                document.add_paragraph()
+
+    document.save(output_path)
+    return warnings
+
+
 def render_pdf(groups: list[PageGroup], output_path: Path, client: WikimediaCommonsClient) -> list[str]:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     regular_font, bold_font = register_fonts()
@@ -462,7 +635,7 @@ def render_pdf(groups: list[PageGroup], output_path: Path, client: WikimediaComm
 
         current_top = top_y - title_block
         for item_index, item in enumerate(group.items, start=1):
-            print(f"[{group.section_number}-{item_index}] {item.display_title}")
+            console_print(f"[{group.section_number}-{item_index}] {item.display_title}")
             slot_bottom = current_top - slot_height
             pdf.roundRect(margin_x, slot_bottom, content_width, slot_height, 8, stroke=1, fill=0)
             inner_x = margin_x + 12
@@ -521,10 +694,19 @@ def load_groups(source_path: Path) -> list[PageGroup]:
     return parse_source_text(source_path.read_text(encoding="utf-8"))
 
 
-def build_pdf(source_path: Path, output_path: Path, cache_dir: Path) -> list[str]:
+def build_output(source_path: Path, output_path: Path, cache_dir: Path) -> list[str]:
     groups = load_groups(source_path)
     client = WikimediaCommonsClient(cache_dir=cache_dir)
-    return render_pdf(groups, output_path, client)
+    suffix = output_path.suffix.lower()
+    if suffix == ".pdf":
+        return render_pdf(groups, output_path, client)
+    if suffix == ".docx":
+        return render_docx(groups, output_path, client)
+    raise ManifestError(f"Unsupported output format: {output_path.suffix or '(none)'}")
+
+
+def build_pdf(source_path: Path, output_path: Path, cache_dir: Path) -> list[str]:
+    return build_output(source_path, output_path, cache_dir)
 
 
 def parse_args() -> argparse.Namespace:
@@ -544,6 +726,26 @@ def main() -> int:
         print("확인 필요 항목:")
         for warning in warnings:
             print(f"- {warning}")
+    return 0
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate PDF or DOCX from Wikimedia Commons image results.")
+    parser.add_argument("source", type=Path, help="Source manifest text file path")
+    parser.add_argument("--output", type=Path, default=Path("output/passion_artwork.docx"), help="Output path (.pdf or .docx)")
+    parser.add_argument("--cache-dir", type=Path, default=Path(".cache/commons"), help="Downloaded image cache directory")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    warnings = build_output(args.source, args.output, args.cache_dir)
+    console_print(f"Document generated: {args.output}")
+    if warnings:
+        console_print("")
+        console_print("Warnings:")
+        for warning in warnings:
+            console_print(f"- {warning}")
     return 0
 
 

@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.schemas import ModuleRequest, ModuleResponse
+from app.core.runtime_settings import record_operation_start
 from app.title_gen.main import title_generator_module
 
 
@@ -9,6 +10,7 @@ router = APIRouter()
 
 @router.post("/generate-title", response_model=ModuleResponse)
 def generate_title(payload: ModuleRequest) -> ModuleResponse:
+    record_operation_start("generate_title")
     return ModuleResponse(result=title_generator_module.run(payload.input_data))
 
 

@@ -26,6 +26,7 @@ from app.collector.naver_trend import (
 )
 from app.expander.sources.naver_autocomplete import get_naver_autocomplete
 from app.expander.sources.naver_related import get_naver_related_queries
+from app.expander.utils.throttle import wait_for_naver_keyword_request
 from app.expander.utils.tokenizer import normalize_text
 
 
@@ -596,6 +597,7 @@ class CollectorService:
 
     def _search_naver_results(self, query: str, search_area: str) -> list[str]:
         url = f"{_SEARCH_HOST}?where={search_area}&query={quote(query)}"
+        wait_for_naver_keyword_request()
         request = Request(
             url=url,
             headers={
