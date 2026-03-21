@@ -11,6 +11,7 @@ from app.analyzer.scorer import (
     classify_profitability_grade,
 )
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
+from app.selector.cannibalization import build_cannibalization_report
 
 
 _INTENT_TERMS: dict[str, tuple[str, ...]] = {
@@ -113,11 +114,17 @@ def verify_longtail_candidates(input_data: dict[str, Any]) -> dict[str, Any]:
         _merge_verified_longtail_suggestion(suggestion, analyzed_by_keyword.get(normalize_text(suggestion.get("longtail_keyword"))))
         for suggestion in suggestions
     ]
+    cannibalization_report = build_cannibalization_report(
+        selected_items,
+        keyword_clusters,
+        verified_suggestions,
+    )
 
     return {
         "verified_longtail_suggestions": verified_suggestions,
         "longtail_verification_summary": _build_longtail_summary(verified_suggestions),
         "verified_longtail_keywords": analyzed_items,
+        "cannibalization_report": cannibalization_report,
     }
 
 

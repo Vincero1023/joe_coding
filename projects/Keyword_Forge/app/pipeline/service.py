@@ -66,6 +66,9 @@ class PipelineService:
             "longtail_summary": selected_result.get("longtail_summary", {})
             if isinstance(selected_result, dict)
             else {},
+            "cannibalization_report": selected_result.get("cannibalization_report", {})
+            if isinstance(selected_result, dict)
+            else {},
             "title_generation_meta": titled_result.get("generation_meta", {})
             if isinstance(titled_result, dict)
             else {},

@@ -70,7 +70,10 @@ def resolve_title_keyword_modes(input_data: Any) -> list[str]:
 def build_title_targets(input_data: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if isinstance(input_data, list):
         explicit_targets = _coerce_explicit_title_targets(input_data)
-        return explicit_targets, _build_target_summary(explicit_targets, requested_modes=["single"])
+        return explicit_targets, _build_target_summary(
+            explicit_targets,
+            requested_modes=_resolve_requested_modes_for_targets(explicit_targets),
+        )
 
     if not isinstance(input_data, dict):
         return [], _build_target_summary([], requested_modes=list(DEFAULT_TITLE_KEYWORD_MODES))
@@ -78,7 +81,10 @@ def build_title_targets(input_data: Any) -> tuple[list[dict[str, Any]], dict[str
     explicit_targets = _coerce_explicit_title_targets(input_data.get("title_targets"))
     requested_modes = resolve_title_keyword_modes(input_data)
     if explicit_targets:
-        return explicit_targets, _build_target_summary(explicit_targets, requested_modes=requested_modes)
+        return explicit_targets, _build_target_summary(
+            explicit_targets,
+            requested_modes=_resolve_requested_modes_for_targets(explicit_targets),
+        )
 
     selected_items = _coerce_items(input_data.get("selected_keywords"))
     keyword_clusters = _coerce_items(input_data.get("keyword_clusters"))
@@ -254,6 +260,11 @@ def _build_related_mode_targets(
             build_longtail_map([selected_item, *related_candidates], [custom_cluster]).get("longtail_suggestions")
         )
         for suggestion in suggestions:
+            if _should_skip_related_mode_suggestion(
+                suggestion,
+                representative_keyword=representative_keyword,
+            ):
+                continue
             keyword = normalize_text(suggestion.get("longtail_keyword"))
             keyword_key = normalize_key(keyword)
             if not keyword or not keyword_key or keyword_key in seen_keywords:
@@ -405,36 +416,50 @@ def _build_target_summary(targets: list[dict[str, Any]], *, requested_modes: lis
     }
 
 
+def _resolve_requested_modes_for_targets(targets: list[dict[str, Any]]) -> list[str]:
+    inferred_modes: list[str] = []
+    seen_modes: set[str] = set()
+    for target in targets:
+        mode = str(target.get("target_mode") or "").strip().lower()
+        if mode not in TITLE_KEYWORD_MODE_LABELS or mode in seen_modes:
+            continue
+        seen_modes.add(mode)
+        inferred_modes.append(mode)
+    return inferred_modes or list(DEFAULT_TITLE_KEYWORD_MODES)
+
+
 def _coerce_explicit_title_targets(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
 
     targets: list[dict[str, Any]] = []
-    seen_keywords: set[str] = set()
+    seen_target_ids: set[str] = set()
     for raw_item in value:
         if not isinstance(raw_item, dict):
             continue
         keyword = normalize_text(raw_item.get("keyword"))
         keyword_key = normalize_key(keyword)
-        if not keyword or not keyword_key or keyword_key in seen_keywords:
+        if not keyword or not keyword_key:
             continue
-        seen_keywords.add(keyword_key)
         mode = str(raw_item.get("target_mode") or "single").strip().lower()
         if mode not in TITLE_KEYWORD_MODE_LABELS:
             mode = "single"
-        targets.append(
-            _build_title_target(
-                keyword=keyword,
-                target_mode=mode,
-                base_keyword=normalize_text(raw_item.get("base_keyword")) or keyword,
-                support_keywords=_coerce_string_list(raw_item.get("support_keywords"))[:2],
-                source_keywords=_coerce_string_list(raw_item.get("source_keywords"))[:3] or [keyword],
-                cluster_id=normalize_text(raw_item.get("cluster_id")),
-                source_kind=normalize_text(raw_item.get("source_kind")) or "explicit_target",
-                source_note=normalize_text(raw_item.get("source_note")),
-                source_suggestion_id=normalize_text(raw_item.get("source_suggestion_id")),
-            )
+        target = _build_title_target(
+            keyword=keyword,
+            target_mode=mode,
+            base_keyword=normalize_text(raw_item.get("base_keyword")) or keyword,
+            support_keywords=_coerce_string_list(raw_item.get("support_keywords"))[:2],
+            source_keywords=_coerce_string_list(raw_item.get("source_keywords"))[:3] or [keyword],
+            cluster_id=normalize_text(raw_item.get("cluster_id")),
+            source_kind=normalize_text(raw_item.get("source_kind")) or "explicit_target",
+            source_note=normalize_text(raw_item.get("source_note")),
+            source_suggestion_id=normalize_text(raw_item.get("source_suggestion_id")),
         )
+        target_identity = normalize_text(target.get("target_id"))
+        if not target_identity or target_identity in seen_target_ids:
+            continue
+        seen_target_ids.add(target_identity)
+        targets.append(target)
     return targets
 
 
@@ -452,9 +477,25 @@ def _build_cluster_lookup(keyword_clusters: list[dict[str, Any]]) -> dict[str, d
 
 def _resolve_topic_terms(cluster: dict[str, Any], representative_keyword: str) -> list[str]:
     topic_terms = _coerce_string_list(cluster.get("topic_terms"))
+    filtered_topic_terms = [
+        term
+        for term in topic_terms
+        if normalize_key(term) and normalize_key(term) not in _STOP_TOKEN_KEYS
+    ]
+    if filtered_topic_terms:
+        return filtered_topic_terms[:4]
     if topic_terms:
         return topic_terms[:4]
-    return tokenize_text(representative_keyword)[:4]
+
+    representative_tokens = tokenize_text(representative_keyword)
+    filtered_representative_tokens = [
+        token
+        for token in representative_tokens
+        if normalize_key(token) and normalize_key(token) not in _STOP_TOKEN_KEYS
+    ]
+    if filtered_representative_tokens:
+        return filtered_representative_tokens[:4]
+    return representative_tokens[:4]
 
 
 def _resolve_topic_keys(cluster: dict[str, Any], representative_keyword: str) -> set[str]:
@@ -489,3 +530,16 @@ def _coerce_float(value: Any) -> float:
         return float(value or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _should_skip_related_mode_suggestion(
+    suggestion: dict[str, Any],
+    *,
+    representative_keyword: str,
+) -> bool:
+    source_keyword = normalize_text(suggestion.get("source_keyword"))
+    if source_keyword and normalize_key(source_keyword) == normalize_key(representative_keyword):
+        return True
+
+    modifier_phrase_key = normalize_key(suggestion.get("modifier_phrase"))
+    return bool(modifier_phrase_key and modifier_phrase_key in _STOP_TOKEN_KEYS)

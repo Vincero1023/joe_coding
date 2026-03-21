@@ -135,6 +135,41 @@ def test_verify_longtail_endpoint_returns_verified_candidates() -> None:
     result = response.json()["result"]
     assert result["verified_longtail_suggestions"][0]["verification_status"] == "pass"
     assert result["longtail_verification_summary"]["pass_count"] == 1
+    assert result["cannibalization_report"]["summary"]["issue_group_count"] >= 1
+
+
+def test_serp_competition_summary_endpoint_returns_query_summaries() -> None:
+    html = """
+    <html>
+      <body>
+        <div class="title_area"><a href="https://blog.naver.com/post1" class="title_link">보험 추천 비교 포인트</a></div>
+        <div class="title_area"><a href="https://blog.naver.com/post2" class="title_link">보험 추천 가격 비교 가이드</a></div>
+        <div class="title_area"><a href="https://terms.naver.com/entry" class="title_link">보험 비교 기준 정리</a></div>
+      </body>
+    </html>
+    """
+    with patch("app.selector.serp_summary.fetch_naver_serp_html", return_value=html):
+        response = client.post(
+            "/serp-competition-summary",
+            json={
+                "input_data": {
+                    "selected_keywords": [
+                        {
+                            "keyword": INSURANCE,
+                            "score": 76.0,
+                        }
+                    ],
+                    "limit": 1,
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    result = response.json()["result"]["serp_competition_summary"]
+    assert result["summary"]["query_count"] == 1
+    assert result["summary"]["success_count"] == 1
+    assert result["queries"][0]["query"] == INSURANCE
+    assert len(result["queries"][0]["top_titles"]) == 3
 
 
 def test_pipeline_run_returns_all_stage_outputs() -> None:
@@ -171,6 +206,7 @@ def test_pipeline_run_returns_all_stage_outputs() -> None:
     assert result["keyword_clusters"]
     assert isinstance(result["longtail_suggestions"], list)
     assert result["longtail_summary"]["suggestion_count"] == len(result["longtail_suggestions"])
+    assert "cannibalization_report" in result
     assert len(result["generated_titles"]) == len(result["selected_keywords"])
     assert all(len(item["titles"]["naver_home"]) == 2 for item in result["generated_titles"][:10])
 

@@ -21,7 +21,7 @@ from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_paylo
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260320-control-layout-v42"
+_ASSET_VERSION = "20260321-cannibal-serp-v48"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -54,6 +54,18 @@ def _replace_sample_site_name(value: str) -> str:
 
 def _clean_text(value: str) -> str:
     return " ".join(_replace_sample_site_name(value).split())
+
+
+def _render_help_tooltip(text: str, *, label: str = "도움말") -> str:
+    lines = [escape(_clean_text(line)) for line in str(text or "").splitlines() if _clean_text(line)]
+    if not lines:
+        return ""
+    return (
+        '<span class="inline-help">'
+        f'<button type="button" class="help-icon-btn" aria-label="{escape(label)}">?</button>'
+        f'<span class="help-tooltip">{"<br />".join(lines)}</span>'
+        "</span>"
+    )
 
 
 def _build_guide_slug(index: int, path: Path) -> str:
@@ -500,6 +512,29 @@ def _render_home() -> str:
         for item in title_presets
     )
     title_preset_payload = json.dumps(title_presets, ensure_ascii=False).replace("</", "<\\/")
+    title_mode_help = _render_help_tooltip(
+        "template는 규칙 기반으로 바로 생성합니다.\n"
+        "AI는 provider/model을 사용해 더 유연하게 생성하고, 저점수 자동 재작성도 함께 쓸 수 있습니다."
+    )
+    title_keyword_modes_help = _render_help_tooltip(
+        "단일은 안전형입니다.\n"
+        "V1은 선별 결과 기반 롱테일입니다.\n"
+        "V2는 관련 탈락 키워드 연계 확장입니다.\n"
+        "V3는 저검색량까지 넓히는 실험형입니다."
+    )
+    title_auto_retry_help = _render_help_tooltip(
+        "AI 모드에서 품질 점수가 기준보다 낮은 제목만 1회 더 다시 생성합니다.\n"
+        "기준 점수를 올리면 더 엄격하게 다시 쓰고, 너무 높이면 호출량과 시간이 늘어납니다."
+    )
+    title_api_key_help = _render_help_tooltip(
+        "API 키는 서버에 저장하지 않고 현재 브라우저 localStorage에만 보관합니다."
+    )
+    title_prompt_help = _render_help_tooltip(
+        "새 탭에서 제목 생성용 추가 지침을 수정합니다. 저장하면 현재 작업대에 바로 반영됩니다."
+    )
+    creator_login_help = _render_help_tooltip(
+        "전용 프로필에서 로그인하면 세션을 저장해 다음 수집에 바로 사용합니다."
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="ko">
@@ -585,11 +620,6 @@ def _render_home() -> str:
                         <p class="panel-kicker">Input</p>
                         <h2>실행 조건</h2>
                     </div>
-                    <div class="preset-group">
-                        <button type="button" class="ghost-chip" data-preset="finance">금융 예시</button>
-                        <button type="button" class="ghost-chip" data-preset="travel">여행 예시</button>
-                        <button type="button" class="ghost-chip" data-preset="food">맛집 예시</button>
-                    </div>
                 </div>
 
                 <div class="control-stack" id="controlStack">
@@ -659,14 +689,16 @@ def _render_home() -> str:
                         </label>
 
                         <div class="field-block category-setting-card session-helper-card">
-                            <span class="field-label">Creator Advisor 로그인</span>
+                            <span class="field-label field-label-row">
+                                <span>Creator Advisor 로그인</span>
+                                {creator_login_help}
+                            </span>
                             <input
                                 id="trendCookieInput"
                                 type="hidden"
                                 value=""
                             />
-                            <button type="button" class="primary-btn session-helper-btn" id="launchLoginBrowserButton">전용 로그인 브라우저 열기</button>
-                            <p class="input-help compact-help">전용 프로필에서 로그인하면 세션을 자동 저장해 다음 수집에 바로 사용합니다.</p>
+                            <button type="button" class="primary-btn session-helper-btn" id="launchLoginBrowserButton">로그인</button>
                         </div>
                     </div>
 
@@ -675,31 +707,36 @@ def _render_home() -> str:
                         <input id="seedInput" type="text" placeholder="예: 보험" />
                     </label>
 
-                    <div class="field-block field-block-wide collector-inline-actions" data-mode-visibility="seed" hidden>
-                        <div class="action-row action-row-tight">
-                            <button type="button" class="subtle-btn" data-run-action="collect">수집만 실행</button>
+                    <div class="field-block field-block-wide collector-inline-actions">
+                        <div class="collector-action-row">
+                            <button type="button" class="subtle-btn collector-run-btn" data-run-action="collect">수집만 실행</button>
+                            <div class="collector-option-row">
+                                <label class="launcher-toggle-chip collector-toggle-chip">
+                                    <input id="optionRelated" type="checkbox" checked />
+                                    <span>연관 키워드 수집</span>
+                                </label>
+                                <label class="launcher-toggle-chip collector-toggle-chip">
+                                    <input id="optionAutocomplete" type="checkbox" checked />
+                                    <span>자동완성 우선 사용</span>
+                                </label>
+                                <label class="launcher-toggle-chip collector-toggle-chip">
+                                    <input id="optionDebug" type="checkbox" checked />
+                                    <span>디버그 정보 포함</span>
+                                </label>
+                            </div>
                         </div>
                     </div>
+                </div>
 
-                    <div class="field-block field-block-wide collector-inline-actions" data-mode-visibility="category">
-                        <div class="action-row action-row-tight">
-                            <button type="button" class="subtle-btn" data-run-action="collect">수집만 실행</button>
-                        </div>
-                    </div>
+                <div class="option-row collect-category-options" data-mode-visibility="category">
+                    <label class="check-chip"><input id="optionBulk" type="checkbox" checked />카테고리 다중 쿼리 사용</label>
+                    <label class="check-chip"><input id="trendFallbackInput" type="checkbox" />트렌드 실패 시 preset fallback</label>
                 </div>
 
                 <p class="input-help" id="trendSourceHelp" data-mode-visibility="category">
                     카테고리 모드에서 네이버 트렌드를 고르면 Creator Advisor 주제 기반 인기 키워드를 먼저 조회합니다.
                     쿠키가 없거나 실패하면 아래 fallback 설정에 따라 검색 preset으로 전환합니다.
                 </p>
-
-                <div class="option-row">
-                    <label class="check-chip"><input id="optionRelated" type="checkbox" checked />연관 키워드 수집</label>
-                    <label class="check-chip"><input id="optionAutocomplete" type="checkbox" checked />자동완성 우선 사용</label>
-                    <label class="check-chip" data-mode-visibility="category"><input id="optionBulk" type="checkbox" checked />카테고리 다중 쿼리 사용</label>
-                    <label class="check-chip"><input id="optionDebug" type="checkbox" checked />디버그 정보 포함</label>
-                    <label class="check-chip" data-mode-visibility="category"><input id="trendFallbackInput" type="checkbox" />트렌드 실패 시 preset fallback</label>
-                </div>
 
                 </section>
 
@@ -720,6 +757,36 @@ def _render_home() -> str:
                     <button type="button" class="ghost-btn" id="stopStreamButton" disabled>중지</button>
                     <button type="button" class="ghost-btn" id="resetButton">결과 초기화</button>
                 </div>
+                <section class="grade-select-panel pipeline-grade-select">
+                    <div class="grade-select-head">
+                        <div>
+                            <span class="field-label">2축 선별</span>
+                            <p class="grade-select-summary" id="gradeSelectSummary">수익성 전체 · 공략성 전체</p>
+                        </div>
+                        <p class="input-help compact-help">수익성 A~D와 공략성 1~4를 조합해 선별합니다. 기본 골든 후보는 A~C · 1~3 조합입니다.</p>
+                    </div>
+                    <div class="grade-select-presets">
+                        <button type="button" class="ghost-chip" data-selection-preset="all">전체</button>
+                        <button type="button" class="ghost-chip" data-selection-preset="golden_candidate">골든 후보</button>
+                        <button type="button" class="ghost-chip" data-selection-preset="profit_focus">수익형 집중</button>
+                        <button type="button" class="ghost-chip" data-selection-preset="easy_exposure">쉬운 노출</button>
+                    </div>
+                    <div class="grade-select-row grade-select-axis-row">
+                        <span class="grade-select-axis-label">수익성</span>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="A">A</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="B">B</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="C">C</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="D">D</button>
+                    </div>
+                    <div class="grade-select-row grade-select-axis-row">
+                        <span class="grade-select-axis-label">공략성</span>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="1">1</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="2">2</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="3">3</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="4">4</button>
+                        <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">선택 조합 선별</button>
+                    </div>
+                </section>
                 <p class="input-help compact-help">
                     상단 실행 버튼은 현재 입력값 기준으로 새로 시작합니다. 결과 카드의 `이 결과로 ...` 버튼은 지금 화면의 결과를 이어서 사용합니다.
                 </p>
@@ -863,7 +930,10 @@ def _render_home() -> str:
                         <input id="titleMode" type="hidden" value="template" />
 
                         <div class="field-block mode-block title-mode-block">
-                            <span class="field-label">제목 생성 모드</span>
+                            <span class="field-label field-label-row">
+                                <span>제목 생성 모드</span>
+                                {title_mode_help}
+                            </span>
                             <label class="mode-card">
                                 <input type="radio" name="titleModeOption" value="template" checked />
                                 <span>
@@ -880,16 +950,11 @@ def _render_home() -> str:
                             </label>
                         </div>
 
-                        <div class="field-block field-block-wide title-mode-note" data-title-mode-visibility="template">
-                            <span class="field-label">템플릿 안내</span>
-                            <p class="input-help compact-help">
-                                템플릿 모드는 현재 선택된 골든 키워드로 네이버형/블로그형 제목 세트를 바로 만듭니다.
-                                별도 API 설정 없이 가장 빠르게 사용할 수 있습니다.
-                            </p>
-                        </div>
-
                         <div class="field-block field-block-wide">
-                            <span class="field-label">제목 키워드 조합</span>
+                            <span class="field-label field-label-row">
+                                <span>제목 키워드 조합</span>
+                                {title_keyword_modes_help}
+                            </span>
                             <div class="option-row" id="titleKeywordModes">
                                 <label class="check-chip"><input id="titleModeSingle" type="checkbox" checked />단일 키워드</label>
                                 <label class="check-chip"><input id="titleModeLongtailSelected" type="checkbox" checked />롱테일 V1</label>
@@ -897,18 +962,38 @@ def _render_home() -> str:
                                 <label class="check-chip"><input id="titleModeLongtailExperimental" type="checkbox" />롱테일 V3</label>
                             </div>
                             <p id="titleKeywordModeSummary" class="input-help compact-help">
-                                단일 키워드와 검증 가능한 롱테일을 함께 제목 생성 대상으로 보냅니다.
+                                선택: 단일 + V1
+                            </p>
+                        </div>
+
+                        <div class="field-block field-block-wide">
+                            <span class="field-label field-label-row">
+                                <span>저점수 자동 재작성</span>
+                                {title_auto_retry_help}
+                            </span>
+                            <div class="title-auto-retry-row">
+                                <label class="check-chip"><input id="titleAutoRetryEnabled" type="checkbox" checked />기준 미달 제목 1회 자동 재작성</label>
+                                <label class="title-auto-retry-threshold">
+                                    <span>최소 점수</span>
+                                    <input id="titleAutoRetryThreshold" type="number" min="70" max="100" step="1" value="84" />
+                                </label>
+                            </div>
+                            <p id="titleAutoRetrySummary" class="input-help compact-help">
+                                84점 미만만 자동 재작성
                             </p>
                         </div>
 
                         <label class="field-block" data-title-mode-visibility="ai" hidden>
-                            <span class="field-label">프롬프트 / 모델 프리셋</span>
+                            <span class="field-label field-label-row">
+                                <span>프롬프트 / 모델 프리셋</span>
+                                <span class="inline-help">
+                                    <button type="button" class="help-icon-btn" aria-label="프리셋 도움말">?</button>
+                                    <span id="titlePresetDescription" class="help-tooltip">추천 균형형을 기본값으로 두고, 필요하면 직접 설정으로 바꿔 세부값을 조정합니다.</span>
+                                </span>
+                            </span>
                             <select id="titlePreset">
                                 {title_preset_options}
                             </select>
-                            <p id="titlePresetDescription" class="input-help compact-help">
-                                추천 균형형을 기본값으로 두고, 필요하면 직접 설정으로 바꿔 세부값을 조정합니다.
-                            </p>
                         </label>
 
                         <label class="field-block" data-title-mode-visibility="ai" hidden>
@@ -926,21 +1011,27 @@ def _render_home() -> str:
                         </label>
 
                         <label class="field-block field-block-wide" data-title-mode-visibility="ai" hidden>
-                            <span class="field-label">API Key</span>
+                            <span class="field-label field-label-row">
+                                <span>API Key</span>
+                                {title_api_key_help}
+                            </span>
                             <input id="titleApiKey" type="password" placeholder="브라우저에만 저장됩니다." />
                         </label>
 
                         <div class="field-block" data-title-mode-visibility="ai" hidden>
-                            <span class="field-label">창의성 프리셋</span>
+                            <span class="field-label field-label-row">
+                                <span>창의성 프리셋</span>
+                                <span class="inline-help">
+                                    <button type="button" class="help-icon-btn" aria-label="창의성 프리셋 도움말">?</button>
+                                    <span id="titleTemperatureDescription" class="help-tooltip">규칙 준수와 표현 다양성의 균형이 가장 무난한 기본값입니다.</span>
+                                </span>
+                            </span>
                             <select id="titleTemperature">
                                 <option value="0.2">안정형</option>
                                 <option value="0.5">절충형</option>
                                 <option value="0.7">(추천) 균형형</option>
                                 <option value="1.0">확장형</option>
                             </select>
-                            <p id="titleTemperatureDescription" class="input-help compact-help title-temperature-note">
-                                규칙 준수와 표현 다양성의 균형이 가장 무난한 기본값입니다.
-                            </p>
                         </div>
 
                         <label class="field-block" data-title-mode-visibility="ai" hidden>
@@ -951,21 +1042,20 @@ def _render_home() -> str:
                         <div class="field-block field-block-wide title-prompt-block" data-title-mode-visibility="ai" hidden>
                             <div class="title-prompt-head">
                                 <div>
-                                    <span class="field-label">AI 프롬프트</span>
-                                    <p class="input-help compact-help">새 탭에서 제목 생성용 추가 지침을 수정합니다.</p>
+                                    <span class="field-label field-label-row">
+                                        <span>AI 프롬프트</span>
+                                        {title_prompt_help}
+                                    </span>
                                 </div>
                                 <div class="title-prompt-actions">
                                     <button type="button" class="ghost-chip" id="openTitlePromptEditorButton">프롬프트 편집</button>
                                     <button type="button" class="ghost-chip" id="clearTitlePromptButton">비우기</button>
                                 </div>
                             </div>
-                            <div id="titlePromptSummary" class="title-prompt-summary">기본 시스템 프롬프트만 사용 중입니다.</div>
+                            <div id="titlePromptSummary" class="title-prompt-summary">추가 지침 없음</div>
                             <input id="titleSystemPrompt" type="hidden" value="" />
                         </div>
                     </div>
-                    <p class="input-help" data-title-mode-visibility="ai" hidden>
-                        API 키는 서버에 저장하지 않고 현재 브라우저 localStorage 에만 보관합니다.
-                    </p>
                 </section>
                 </div>
 
@@ -978,36 +1068,6 @@ def _render_home() -> str:
                         <h2>키워드 작업대</h2>
                     </div>
                 </div>
-                <section class="grade-select-panel workbench-grade-select">
-                    <div class="grade-select-head">
-                        <div>
-                            <span class="field-label">2축 선별</span>
-                            <p class="grade-select-summary" id="gradeSelectSummary">수익성 전체 · 공략성 전체</p>
-                        </div>
-                        <p class="input-help compact-help">수익성 A~D와 공략성 1~4를 조합해 선별합니다. 기본 골든 후보는 A~C · 1~3 조합입니다.</p>
-                    </div>
-                    <div class="grade-select-presets">
-                        <button type="button" class="ghost-chip" data-selection-preset="all">전체</button>
-                        <button type="button" class="ghost-chip" data-selection-preset="golden_candidate">골든 후보</button>
-                        <button type="button" class="ghost-chip" data-selection-preset="profit_focus">수익형 집중</button>
-                        <button type="button" class="ghost-chip" data-selection-preset="easy_exposure">쉬운 노출</button>
-                    </div>
-                    <div class="grade-select-row grade-select-axis-row">
-                        <span class="grade-select-axis-label">수익성</span>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="A">A</button>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="B">B</button>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="C">C</button>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="D">D</button>
-                    </div>
-                    <div class="grade-select-row grade-select-axis-row">
-                        <span class="grade-select-axis-label">공략성</span>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="1">1</button>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="2">2</button>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="3">3</button>
-                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="4">4</button>
-                        <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">선택 조합 선별</button>
-                    </div>
-                </section>
                 <div class="results-panel-tools">
                     <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">오류 / 진단</button>
                     <button type="button" class="ghost-chip" data-utility-open="logs" aria-pressed="false">실행 로그</button>

@@ -10,6 +10,7 @@ from app.analyzer.scorer import (
     classify_golden_bucket,
     classify_profitability_grade,
 )
+from app.selector.cannibalization import build_cannibalization_report
 from app.selector.content_map import build_content_map
 from app.selector.longtail import build_longtail_map
 
@@ -71,10 +72,16 @@ def _build_selected_payload(selected: list[dict[str, Any]]) -> dict[str, Any]:
         selected,
         content_map.get("keyword_clusters") if isinstance(content_map, dict) else [],
     )
+    cannibalization_report = build_cannibalization_report(
+        selected,
+        content_map.get("keyword_clusters") if isinstance(content_map, dict) else [],
+        longtail_map.get("longtail_suggestions") if isinstance(longtail_map, dict) else [],
+    )
     return {
         "selected_keywords": selected,
         **content_map,
         **longtail_map,
+        "cannibalization_report": cannibalization_report,
     }
 
 

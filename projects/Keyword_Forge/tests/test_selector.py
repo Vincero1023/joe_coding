@@ -1,7 +1,9 @@
 from unittest.mock import patch
 
+from app.selector.cannibalization import build_cannibalization_report
 from app.selector.longtail import verify_longtail_candidates
 from app.selector.main import run
+from app.selector.serp_summary import parse_serp_titles, summarize_serp_competition
 from app.selector.service import is_golden_keyword
 
 
@@ -270,6 +272,7 @@ def test_selector_builds_keyword_clusters_for_selected_keywords() -> None:
     assert len(result["selected_keywords"]) == 4
     assert result["content_map_summary"]["cluster_count"] == 2
     assert result["content_map_summary"]["keyword_count"] == 4
+    assert result["cannibalization_report"]["summary"]["candidate_count"] >= 4
 
     insurance_cluster = next(
         cluster
@@ -449,3 +452,75 @@ def test_verify_longtail_candidates_merges_verified_analysis() -> None:
     assert verified["verified_combo_grade"] == "B1"
     assert verified["verified_metrics"]["volume"] == 380.0
     assert result["longtail_verification_summary"]["pass_count"] == 1
+    assert result["cannibalization_report"]["summary"]["candidate_count"] >= 3
+
+
+def test_cannibalization_report_flags_same_intent_cluster_candidates() -> None:
+    insurance_recommend = "\ubcf4\ud5d8 \ucd94\ucc9c"
+    insurance_compare = "\ubcf4\ud5d8 \ube44\uad50"
+    insurance_compare_guide = "\ubcf4\ud5d8 \ube44\uad50 \uac00\uc774\ub4dc"
+
+    report = build_cannibalization_report(
+        selected_items=[
+            {"keyword": insurance_recommend, "score": 76.0},
+            {"keyword": insurance_compare, "score": 73.0},
+        ],
+        keyword_clusters=[
+            {
+                "cluster_id": "cluster-01",
+                "representative_keyword": insurance_recommend,
+                "topic_terms": ["\ubcf4\ud5d8"],
+                "recommended_article_count": 2,
+                "all_keywords": [insurance_recommend, insurance_compare],
+            }
+        ],
+        longtail_suggestions=[
+            {
+                "cluster_id": "cluster-01",
+                "representative_keyword": insurance_recommend,
+                "intent_key": "commercial",
+                "longtail_keyword": insurance_compare_guide,
+                "projected_score": 68.0,
+                "verification_status": "pending",
+            }
+        ],
+    )
+
+    assert report["summary"]["issue_group_count"] == 1
+    assert report["summary"]["high_risk_count"] == 1
+    assert report["summary"]["safe_split_cluster_count"] == 1
+    assert report["groups"][0]["recommended_action"] == "merge"
+    assert report["groups"][0]["candidate_count"] == 3
+    assert report["groups"][0]["primary_keyword"] == insurance_recommend
+    assert any(item["source_type"] == "longtail" for item in report["groups"][0]["items"])
+
+
+def test_serp_summary_parses_titles_and_builds_competition_summary() -> None:
+    html = """
+    <html>
+      <body>
+        <div class="title_area"><a href="https://blog.naver.com/post1" class="title_link">보험 추천 비교 포인트</a></div>
+        <div class="title_area"><a href="https://blog.naver.com/post2" class="title_link">보험 추천 가격 비교 가이드</a></div>
+        <div class="title_area"><a href="https://terms.naver.com/entry" class="title_link">보험 비교 기준 정리</a></div>
+      </body>
+    </html>
+    """
+
+    parsed_titles = parse_serp_titles(html)
+    assert len(parsed_titles) == 3
+    assert parsed_titles[0]["domain"] == "blog.naver.com"
+    assert parsed_titles[2]["source_bucket"] == "official"
+
+    summary = summarize_serp_competition(
+        {
+            "selected_keywords": [{"keyword": "\ubcf4\ud5d8 \ucd94\ucc9c", "score": 76.0}],
+            "limit": 1,
+        },
+        fetch_html=lambda keyword: html,
+    )["serp_competition_summary"]
+
+    assert summary["summary"]["query_count"] == 1
+    assert summary["summary"]["success_count"] == 1
+    assert summary["queries"][0]["query"] == "\ubcf4\ud5d8 \ucd94\ucc9c"
+    assert summary["queries"][0]["competition_level"] in {"medium", "high"}
+    assert len(summary["queries"][0]["top_titles"]) == 3

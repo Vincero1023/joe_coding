@@ -7,6 +7,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.expander.utils.tokenizer import normalize_text
+from app.title.quality import TITLE_QUALITY_PASS_SCORE
 from app.title.presets import get_title_preset
 from app.title.rules import NAVER_HOME_MAX_LENGTH
 
@@ -57,6 +58,8 @@ class TitleGenerationOptions:
     preset_key: str = ""
     preset_label: str = ""
     preset_prompt: str = ""
+    auto_retry_enabled: bool = True
+    quality_retry_threshold: int = TITLE_QUALITY_PASS_SCORE
 
     @classmethod
     def from_input(cls, input_data: Any) -> "TitleGenerationOptions":
@@ -90,6 +93,13 @@ class TitleGenerationOptions:
             preset_key=preset.key if preset else "",
             preset_label=preset.label if preset else "",
             preset_prompt=preset.prompt_guidance if preset else "",
+            auto_retry_enabled=bool(raw.get("auto_retry_enabled", True)),
+            quality_retry_threshold=_coerce_int(
+                raw.get("quality_retry_threshold"),
+                default=TITLE_QUALITY_PASS_SCORE,
+                minimum=70,
+                maximum=100,
+            ),
         )
 
     @property

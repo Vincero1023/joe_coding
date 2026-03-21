@@ -33,6 +33,8 @@ def generate_titles(
                 temperature=options.temperature if options else None,
                 preset_key=options.preset_key if options else "",
                 preset_label=options.preset_label if options else "",
+                auto_retry_enabled=options.auto_retry_enabled if options else False,
+                quality_retry_threshold=options.quality_retry_threshold if options else TITLE_QUALITY_PASS_SCORE,
             ),
         )
 
@@ -50,6 +52,8 @@ def generate_titles(
                 preset_key=options.preset_key,
                 preset_label=options.preset_label,
                 fallback_reason="missing_api_key",
+                auto_retry_enabled=options.auto_retry_enabled,
+                quality_retry_threshold=options.quality_retry_threshold,
             ),
         )
 
@@ -90,6 +94,8 @@ def generate_titles(
                 preset_key=options.preset_key,
                 preset_label=options.preset_label,
                 fallback_reason=str(exc),
+                auto_retry_enabled=options.auto_retry_enabled,
+                quality_retry_threshold=options.quality_retry_threshold,
             ),
         )
 
@@ -110,20 +116,22 @@ def generate_titles(
 
     return _finalize_generated_results(
         results,
-        _build_meta(
-            requested_mode="ai",
-            used_mode=used_mode,
-            provider=options.provider,
-            model=options.model,
-            temperature=options.temperature,
-            preset_key=options.preset_key,
-            preset_label=options.preset_label,
-            fallback_reason=", ".join(fallback_keywords[:10]) if fallback_keywords else "",
-            fallback_keywords=fallback_keywords,
-        ),
-        options=options,
-        allow_auto_retry=used_mode in {"ai", "ai_with_template_fallback"},
-    )
+            _build_meta(
+                requested_mode="ai",
+                used_mode=used_mode,
+                provider=options.provider,
+                model=options.model,
+                temperature=options.temperature,
+                preset_key=options.preset_key,
+                preset_label=options.preset_label,
+                fallback_reason=", ".join(fallback_keywords[:10]) if fallback_keywords else "",
+                fallback_keywords=fallback_keywords,
+                auto_retry_enabled=options.auto_retry_enabled,
+                quality_retry_threshold=options.quality_retry_threshold,
+            ),
+            options=options,
+            allow_auto_retry=used_mode in {"ai", "ai_with_template_fallback"} and options.auto_retry_enabled,
+        )
 
 
 def _normalize_input_items(items: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -218,15 +226,16 @@ def _auto_retry_low_quality_results(
     enriched_results: list[TitleOutputItem],
     options: TitleGenerationOptions,
 ) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any]]:
+    retry_threshold = _resolve_quality_retry_threshold(options.quality_retry_threshold)
     retry_keywords = [
         normalize_text(item.get("keyword"))
         for item in enriched_results
-        if item.get("quality_report", {}).get("retry_recommended")
+        if _should_retry_for_quality(item.get("quality_report", {}), retry_threshold)
     ]
     retry_keywords = [keyword for keyword in retry_keywords if keyword]
     if not retry_keywords:
         quality_summary = _build_quality_summary_from_items(enriched_results)
-        return enriched_results, quality_summary, _build_auto_retry_meta()
+        return enriched_results, quality_summary, _build_auto_retry_meta(retry_threshold=retry_threshold)
 
     retried_by_keyword: dict[str, TitleOutputItem] = {}
     retry_error_messages: list[str] = []
@@ -238,7 +247,7 @@ def _auto_retry_low_quality_results(
     retry_options = replace(
         options,
         batch_size=max(1, min(options.batch_size, 4)),
-        system_prompt=_build_quality_retry_prompt(options.system_prompt),
+        system_prompt=_build_quality_retry_prompt(options.system_prompt, retry_threshold),
     )
     retry_input_items = [{"keyword": keyword} for keyword in retry_keywords]
 
@@ -300,8 +309,17 @@ def _auto_retry_low_quality_results(
         accepted_keywords=accepted_retry_keywords,
         remaining_retry_count=int(quality_summary.get("retry_count", 0)),
         error_messages=retry_error_messages,
+        retry_threshold=retry_threshold,
     )
     return final_enriched_results, quality_summary, auto_retry_meta
+
+
+def _should_retry_for_quality(report: dict[str, Any], retry_threshold: int) -> bool:
+    if not isinstance(report, dict):
+        return False
+    if bool(report.get("retry_recommended")):
+        return True
+    return int(report.get("bundle_score") or 0) < retry_threshold
 
 
 def _should_accept_retry(current_report: dict[str, Any], retry_report: dict[str, Any]) -> bool:
@@ -322,7 +340,7 @@ def _should_accept_retry(current_report: dict[str, Any], retry_report: dict[str,
     return retry_score >= current_score and retry_issue_count < current_issue_count
 
 
-def _build_quality_retry_prompt(existing_prompt: str) -> str:
+def _build_quality_retry_prompt(existing_prompt: str, retry_threshold: int) -> str:
     retry_guidance = (
         "Quality retry guidance:\n"
         "- Keep the exact keyword at the front of each title when natural.\n"
@@ -330,7 +348,7 @@ def _build_quality_retry_prompt(existing_prompt: str) -> str:
         "- Make the 2 blog titles clearly different from each other.\n"
         f"- Keep every naver_home title within {NAVER_HOME_MAX_LENGTH} characters.\n"
         "- Avoid exaggerated words such as 무조건, 충격, 레전드, 미쳤다, 대박.\n"
-        f"- Aim for a bundle quality score of at least {TITLE_QUALITY_PASS_SCORE}."
+        f"- Aim for a bundle quality score of at least {retry_threshold}."
     )
     base_prompt = str(existing_prompt or "").strip()
     if not base_prompt:
@@ -370,6 +388,7 @@ def _build_auto_retry_meta(
     accepted_keywords: list[str] | None = None,
     remaining_retry_count: int = 0,
     error_messages: list[str] | None = None,
+    retry_threshold: int = TITLE_QUALITY_PASS_SCORE,
 ) -> dict[str, Any]:
     attempted_keywords = attempted_keywords or []
     accepted_keywords = accepted_keywords or []
@@ -381,7 +400,16 @@ def _build_auto_retry_meta(
         "accepted_keywords": accepted_keywords,
         "remaining_retry_count": remaining_retry_count,
         "error_messages": error_messages[:3],
+        "retry_threshold": retry_threshold,
     }
+
+
+def _resolve_quality_retry_threshold(value: int | float | None) -> int:
+    try:
+        number = int(value or TITLE_QUALITY_PASS_SCORE)
+    except (TypeError, ValueError):
+        return TITLE_QUALITY_PASS_SCORE
+    return max(70, min(100, number))
 
 
 def _build_meta(
@@ -395,6 +423,8 @@ def _build_meta(
     preset_label: str = "",
     fallback_reason: str = "",
     fallback_keywords: list[str] | None = None,
+    auto_retry_enabled: bool = False,
+    quality_retry_threshold: int = TITLE_QUALITY_PASS_SCORE,
 ) -> dict[str, Any]:
     return {
         "requested_mode": requested_mode,
@@ -406,4 +436,6 @@ def _build_meta(
         "preset_label": preset_label,
         "fallback_reason": fallback_reason,
         "fallback_keywords": fallback_keywords or [],
+        "auto_retry_enabled": auto_retry_enabled,
+        "quality_retry_threshold": _resolve_quality_retry_threshold(quality_retry_threshold),
     }

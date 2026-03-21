@@ -90,6 +90,7 @@ const TITLE_TEMPERATURE_PRESETS = [
     },
 ];
 const TITLE_TEMPERATURE_DEFAULT = "0.7";
+const TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT = 84;
 const TITLE_PRESET_LIBRARY = Array.isArray(window.KEYWORD_FORGE_TITLE_PRESETS)
     ? window.KEYWORD_FORGE_TITLE_PRESETS
     : [];
@@ -929,6 +930,26 @@ function normalizeError(error, extra = {}) {
     };
 }
 
+function createUserNoticeError(message, extra = {}) {
+    const error = new Error(message || "안내할 내용이 없습니다.");
+    error.code = extra.code || "user_notice";
+    error.stageKey = extra.stageKey || "";
+    error.userNotice = true;
+    return error;
+}
+
+function isUserNoticeError(error) {
+    return Boolean(error?.userNotice || error?.code === "user_notice" || error?.code === "empty_selection_notice");
+}
+
+function showUserNotice(error) {
+    const message = String(error?.message || "").trim();
+    if (!message) {
+        return;
+    }
+    window.alert(message);
+}
+
 function buildResponseSummary(stageKey, result) {
     const stage = getStage(stageKey);
     const items = Array.isArray(result?.[stage.resultKey]) ? result[stage.resultKey] : [];
@@ -1064,6 +1085,8 @@ function buildTitleOptions() {
     return {
         mode,
         keyword_modes: formState.keyword_modes,
+        auto_retry_enabled: formState.auto_retry_enabled,
+        quality_retry_threshold: formState.quality_retry_threshold,
         preset_key: formState.preset_key,
         provider,
         model,
@@ -1512,6 +1535,55 @@ function clearStageAndDownstream(stageKey) {
         state.stageStatus[nextStageKey] = createPendingStatus();
         state.diagnostics[nextStageKey] = null;
     });
+}
+
+function createEmptySelectedResult() {
+    return {
+        selected_keywords: [],
+        keyword_clusters: [],
+        longtail_suggestions: [],
+        longtail_summary: {
+            suggestion_count: 0,
+            cluster_count: 0,
+            pending_count: 0,
+            verified_count: 0,
+            pass_count: 0,
+            review_count: 0,
+            fail_count: 0,
+            error_count: 0,
+        },
+        content_map_summary: {},
+    };
+}
+
+function applyEmptySelectedResult(message) {
+    clearStageAndDownstream("selected");
+
+    const stage = getStage("selected");
+    const finishedAt = Date.now();
+    const result = createEmptySelectedResult();
+
+    state.results.selected = result;
+    state.stageStatus.selected = {
+        state: "success",
+        message: "조건 일치 0건",
+        startedAt: null,
+        finishedAt,
+        durationMs: 0,
+    };
+    state.diagnostics.selected = {
+        stageKey: "selected",
+        stageLabel: stage?.label || "선별",
+        status: "success",
+        endpoint: "/select",
+        requestId: "",
+        startedAt: "",
+        durationMs: 0,
+        request: null,
+        responseSummary: buildResponseSummary("selected", result),
+        backendDebug: null,
+        note: message,
+    };
 }
 
 function createEmptyResults() {
@@ -4582,6 +4654,9 @@ function bindElements() {
     elements.titleModeLongtailExploratory = document.getElementById("titleModeLongtailExploratory");
     elements.titleModeLongtailExperimental = document.getElementById("titleModeLongtailExperimental");
     elements.titleKeywordModeSummary = document.getElementById("titleKeywordModeSummary");
+    elements.titleAutoRetryEnabled = document.getElementById("titleAutoRetryEnabled");
+    elements.titleAutoRetryThreshold = document.getElementById("titleAutoRetryThreshold");
+    elements.titleAutoRetrySummary = document.getElementById("titleAutoRetrySummary");
     elements.titlePreset = document.getElementById("titlePreset");
     elements.titlePresetDescription = document.getElementById("titlePresetDescription");
     elements.titleProvider = document.getElementById("titleProvider");
@@ -4713,6 +4788,8 @@ function bindEvents() {
         elements.titleModeLongtailSelected,
         elements.titleModeLongtailExploratory,
         elements.titleModeLongtailExperimental,
+        elements.titleAutoRetryEnabled,
+        elements.titleAutoRetryThreshold,
         elements.titlePreset,
         elements.titleProvider,
         elements.titleModel,
@@ -6004,6 +6081,12 @@ async function runWithGuard(task, runningMessage) {
             state.lastError = null;
             setGlobalStatus("\uc911\uc9c0\ub428", "cancelled");
             addLog(error.message || "\uc2e4\uc2dc\uac04 \uc791\uc5c5\uc744 \uc911\uc9c0\ud588\uc2b5\ub2c8\ub2e4.", "info");
+        } else if (isUserNoticeError(error)) {
+            const normalizedError = normalizeError(error);
+            state.lastError = null;
+            setGlobalStatus("\uc870\uac74\uc5d0 \ub9de\ub294 \uacb0\uacfc \uc5c6\uc74c", "idle");
+            addLog(normalizedError.message, "info");
+            showUserNotice(normalizedError);
         } else {
             const normalizedError = normalizeError(error);
             state.lastError = normalizedError;
@@ -6181,10 +6264,14 @@ async function runSelectStage(options = {}) {
         : analyzedKeywords;
 
     if (!selectionCandidates.length) {
-        if (allowedGrades.length) {
-            throw new Error(`선택한 등급(${allowedGrades.join(", ")})에 맞는 분석 결과가 없습니다.`);
-        }
-        throw new Error("선별할 분석 결과가 없습니다.");
+        const noticeMessage = allowedGrades.length
+            ? `선택한 조건에 맞는 검색 결과가 없습니다.\n등급 조건(${allowedGrades.join(", ")})을 넓혀서 다시 시도해 주세요.`
+            : "선별할 검색 결과가 없습니다.\n먼저 수집/확장/분석 결과를 확인해 주세요.";
+        applyEmptySelectedResult(noticeMessage);
+        throw createUserNoticeError(noticeMessage, {
+            code: "empty_selection_notice",
+            stageKey: "selected",
+        });
     }
 
     addLog(
@@ -7541,6 +7628,14 @@ function normalizeTitleTemperatureValue(rawValue) {
     return TITLE_TEMPERATURE_DEFAULT;
 }
 
+function normalizeTitleQualityRetryThreshold(rawValue) {
+    const parsedValue = Number.parseInt(String(rawValue ?? "").trim(), 10);
+    if (!Number.isFinite(parsedValue)) {
+        return TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT;
+    }
+    return Math.max(70, Math.min(100, parsedValue));
+}
+
 function getTitleTemperaturePreset(value) {
     const normalizedValue = normalizeTitleTemperatureValue(value);
     return TITLE_TEMPERATURE_PRESETS.find((preset) => preset.value === normalizedValue) || TITLE_TEMPERATURE_PRESETS[0];
@@ -7655,6 +7750,96 @@ function updateTitleKeywordModeSummary() {
     elements.titleKeywordModeSummary.textContent = buildTitleKeywordModeSummary();
 }
 
+function buildTitleKeywordModeSummary() {
+    const modeState = getTitleKeywordModeState();
+    const enabledLabels = [];
+    if (modeState.single) enabledLabels.push("?⑥씪");
+    if (modeState.longtail_selected) enabledLabels.push("V1");
+    if (modeState.longtail_exploratory) enabledLabels.push("V2");
+    if (modeState.longtail_experimental) enabledLabels.push("V3");
+    if (!enabledLabels.length) {
+        return "理쒖냼 1媛쒕뒗 ?좏깮?댁빞 ?⑸땲?? ?꾩옱???먮룞?쇰줈 ?⑥씪 ?ㅼ썙?쒕? ?좎??⑸땲??";
+    }
+    return `?꾩옱 ?앹꽦 ??? ${enabledLabels.join(" + ")}`;
+}
+
+function updateTitleKeywordModeSummary() {
+    if (!elements.titleKeywordModeSummary) {
+        return;
+    }
+    elements.titleKeywordModeSummary.textContent = buildTitleKeywordModeSummary();
+}
+
+function buildTitleAutoRetrySummary() {
+    const isAiMode = String(elements.titleMode?.value || "template").trim() === "ai";
+    const isEnabled = Boolean(elements.titleAutoRetryEnabled?.checked);
+    const retryThreshold = normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold?.value);
+    if (!isAiMode) {
+        return "AI 紐⑤뱶?먯꽌留??ъ슜?⑸땲??";
+    }
+    if (!isEnabled) {
+        return "??먯닔 誘몃떖 ?쒕ぉ???먮룞 ?ъ옉?섏? ?딆뒿?덈떎.";
+    }
+    return `${retryThreshold}??誘몃쭔 ?쒕ぉ???먮룞?쇰줈 ??踰????앹꽦?⑸땲??`;
+}
+
+function updateTitleAutoRetrySummary() {
+    if (elements.titleAutoRetryThreshold) {
+        elements.titleAutoRetryThreshold.value = String(
+            normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold.value),
+        );
+    }
+    if (!elements.titleAutoRetrySummary) {
+        return;
+    }
+    elements.titleAutoRetrySummary.textContent = buildTitleAutoRetrySummary();
+}
+
+function buildTitleKeywordModeSummary() {
+    const modeState = getTitleKeywordModeState();
+    const enabledLabels = [];
+    if (modeState.single) enabledLabels.push("단일");
+    if (modeState.longtail_selected) enabledLabels.push("V1");
+    if (modeState.longtail_exploratory) enabledLabels.push("V2");
+    if (modeState.longtail_experimental) enabledLabels.push("V3");
+    if (!enabledLabels.length) {
+        return "선택: 단일";
+    }
+    return `선택: ${enabledLabels.join(" + ")}`;
+}
+
+function updateTitleKeywordModeSummary() {
+    if (!elements.titleKeywordModeSummary) {
+        return;
+    }
+    elements.titleKeywordModeSummary.textContent = buildTitleKeywordModeSummary();
+}
+
+function buildTitleAutoRetrySummary() {
+    const isAiMode = String(elements.titleMode?.value || "template").trim() === "ai";
+    const isEnabled = Boolean(elements.titleAutoRetryEnabled?.checked);
+    const retryThreshold = normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold?.value);
+    if (!isAiMode) {
+        return "AI 전용";
+    }
+    if (!isEnabled) {
+        return "자동 재작성 꺼짐";
+    }
+    return `${retryThreshold}점 미만만 자동 재작성`;
+}
+
+function updateTitleAutoRetrySummary() {
+    if (elements.titleAutoRetryThreshold) {
+        elements.titleAutoRetryThreshold.value = String(
+            normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold.value),
+        );
+    }
+    if (!elements.titleAutoRetrySummary) {
+        return;
+    }
+    elements.titleAutoRetrySummary.textContent = buildTitleAutoRetrySummary();
+}
+
 function setTitleModelOptions(provider, preferredValue = "") {
     if (!elements.titleModel) {
         return;
@@ -7719,12 +7904,9 @@ function setTitleSystemPromptValue(value) {
 function buildTitlePromptSummary(prompt) {
     const normalizedPrompt = String(prompt || "").replace(/\s+/g, " ").trim();
     if (!normalizedPrompt) {
-        return "기본 시스템 프롬프트만 사용 중입니다.";
+        return "추가 지침 없음";
     }
-    const preview = normalizedPrompt.length > TITLE_PROMPT_PREVIEW_LIMIT
-        ? `${normalizedPrompt.slice(0, TITLE_PROMPT_PREVIEW_LIMIT)}...`
-        : normalizedPrompt;
-    return `추가 지침 사용 중 · ${normalizedPrompt.length}자\n${preview}`;
+    return `추가 지침 ${normalizedPrompt.length}자`;
 }
 
 function updateTitlePromptSummary() {
@@ -7773,6 +7955,8 @@ function loadTitleSettings() {
     const defaults = {
         mode: "template",
         keyword_modes: ["single", "longtail_selected"],
+        auto_retry_enabled: true,
+        quality_retry_threshold: TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT,
         preset_key: DEFAULT_TITLE_PRESET_KEY,
         provider: "openai",
         model: TITLE_PROVIDER_DEFAULT_MODELS.openai,
@@ -7808,6 +7992,14 @@ function loadTitleSettings() {
     }
     elements.titleApiKey.value = settings.api_key || "";
     elements.titleFallback.checked = Boolean(settings.fallback_to_template);
+    if (elements.titleAutoRetryEnabled) {
+        elements.titleAutoRetryEnabled.checked = Boolean(settings.auto_retry_enabled ?? true);
+    }
+    if (elements.titleAutoRetryThreshold) {
+        elements.titleAutoRetryThreshold.value = String(
+            normalizeTitleQualityRetryThreshold(settings.quality_retry_threshold),
+        );
+    }
     setTitleSystemPromptValue(settings.system_prompt || "");
     applyTitleKeywordModes(settings.keyword_modes);
 
@@ -7872,6 +8064,12 @@ function handleTitleSettingsChange(event) {
         }
     }
 
+    if (event?.target === elements.titleAutoRetryThreshold && elements.titleAutoRetryThreshold) {
+        elements.titleAutoRetryThreshold.value = String(
+            normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold.value),
+        );
+    }
+
     persistTitleSettings();
     renderTitleSettingsState();
 }
@@ -7890,10 +8088,17 @@ function renderTitleSettingsState() {
     elements.titleApiKey.disabled = !isAiMode;
     elements.titleTemperature.disabled = !isAiMode;
     elements.titleFallback.disabled = !isAiMode;
+    if (elements.titleAutoRetryEnabled) {
+        elements.titleAutoRetryEnabled.disabled = !isAiMode;
+    }
+    if (elements.titleAutoRetryThreshold) {
+        elements.titleAutoRetryThreshold.disabled = !isAiMode || !Boolean(elements.titleAutoRetryEnabled?.checked);
+    }
     if (elements.openTitlePromptEditorButton) {
         elements.openTitlePromptEditorButton.disabled = !isAiMode;
     }
     updateTitleKeywordModeSummary();
+    updateTitleAutoRetrySummary();
     updateTitlePresetDescription();
     updateTitleTemperatureDescription();
     updateTitlePromptSummary();
@@ -7913,6 +8118,8 @@ function getTitleSettingsFormState() {
             elements.titleModeLongtailExploratory?.checked ? "longtail_exploratory" : "",
             elements.titleModeLongtailExperimental?.checked ? "longtail_experimental" : "",
         ]),
+        auto_retry_enabled: Boolean(elements.titleAutoRetryEnabled?.checked),
+        quality_retry_threshold: normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold?.value),
         preset_key: presetKey,
         provider,
         model,

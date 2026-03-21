@@ -1,0 +1,1569 @@
+﻿.dockerignore
+.env.example
+.gitignore
+.local/naver_playwright/chrome/BrowserMetrics/BrowserMetrics-69BBB30C-8BF4.pma
+.local/naver_playwright/chrome/Crashpad/metadata
+.local/naver_playwright/chrome/Crashpad/settings.dat
+.local/naver_playwright/chrome/CrashpadMetrics-active.pma
+.local/naver_playwright/chrome/CrashpadMetrics.pma
+.local/naver_playwright/chrome/Default/Account Web Data
+.local/naver_playwright/chrome/Default/Account Web Data-journal
+.local/naver_playwright/chrome/Default/Affiliation Database
+.local/naver_playwright/chrome/Default/Affiliation Database-journal
+.local/naver_playwright/chrome/Default/AutofillAiModelCache/LOCK
+.local/naver_playwright/chrome/Default/AutofillAiModelCache/LOG
+.local/naver_playwright/chrome/Default/AutofillAiModelCache/LOG.old
+.local/naver_playwright/chrome/Default/AutofillStrikeDatabase/LOCK
+.local/naver_playwright/chrome/Default/AutofillStrikeDatabase/LOG
+.local/naver_playwright/chrome/Default/AutofillStrikeDatabase/LOG.old
+.local/naver_playwright/chrome/Default/BookmarkMergedSurfaceOrdering
+.local/naver_playwright/chrome/Default/BudgetDatabase/LOCK
+.local/naver_playwright/chrome/Default/BudgetDatabase/LOG
+.local/naver_playwright/chrome/Default/BudgetDatabase/LOG.old
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/data_0
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/data_1
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/data_2
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/data_3
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/f_000001
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/f_000002
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/f_000003
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/f_000004
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/f_000005
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/f_000006
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/f_000007
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/f_000008
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/f_000009
+.local/naver_playwright/chrome/Default/Cache/Cache_Data/index
+.local/naver_playwright/chrome/Default/Cache/No_Vary_Search/journal.baj
+.local/naver_playwright/chrome/Default/Cache/No_Vary_Search/snapshot.baf
+.local/naver_playwright/chrome/Default/ClientCertificates/LOCK
+.local/naver_playwright/chrome/Default/ClientCertificates/LOG
+.local/naver_playwright/chrome/Default/ClientCertificates/LOG.old
+.local/naver_playwright/chrome/Default/Code Cache/js/0cf7ba01f67c84b7_0
+.local/naver_playwright/chrome/Default/Code Cache/js/1288bbdc0729a8af_0
+.local/naver_playwright/chrome/Default/Code Cache/js/19b4cd8920de154d_0
+.local/naver_playwright/chrome/Default/Code Cache/js/1dbee8145896a0c9_0
+.local/naver_playwright/chrome/Default/Code Cache/js/1ffdd4d9e33a90a6_0
+.local/naver_playwright/chrome/Default/Code Cache/js/2b1e30d41569b90c_0
+.local/naver_playwright/chrome/Default/Code Cache/js/415976cccf4b61f8_0
+.local/naver_playwright/chrome/Default/Code Cache/js/46d3b469dd7b38b8_0
+.local/naver_playwright/chrome/Default/Code Cache/js/4b29b2f1e794734c_0
+.local/naver_playwright/chrome/Default/Code Cache/js/4c5e8e455a3264ef_0
+.local/naver_playwright/chrome/Default/Code Cache/js/4c654ef868146222_0
+.local/naver_playwright/chrome/Default/Code Cache/js/51b20286b7f5e7bd_0
+.local/naver_playwright/chrome/Default/Code Cache/js/5231b0abd0b020ac_0
+.local/naver_playwright/chrome/Default/Code Cache/js/52352386b94033b5_0
+.local/naver_playwright/chrome/Default/Code Cache/js/5352499e0b27a787_0
+.local/naver_playwright/chrome/Default/Code Cache/js/64273e7ce8c5cc1b_0
+.local/naver_playwright/chrome/Default/Code Cache/js/6514bed9a4656dbc_0
+.local/naver_playwright/chrome/Default/Code Cache/js/65689c852e41a1a2_0
+.local/naver_playwright/chrome/Default/Code Cache/js/671e64992d552b14_0
+.local/naver_playwright/chrome/Default/Code Cache/js/6827fef3ad1e2622_0
+.local/naver_playwright/chrome/Default/Code Cache/js/7f657b4ecb517dd3_0
+.local/naver_playwright/chrome/Default/Code Cache/js/8c26070b759f1eae_0
+.local/naver_playwright/chrome/Default/Code Cache/js/8c5e60080a6e4c9f_0
+.local/naver_playwright/chrome/Default/Code Cache/js/9561aa83ebecc4a6_0
+.local/naver_playwright/chrome/Default/Code Cache/js/977aa230b777793d_0
+.local/naver_playwright/chrome/Default/Code Cache/js/9aaa24521c33d2e9_0
+.local/naver_playwright/chrome/Default/Code Cache/js/a89d7113c4ed3f99_0
+.local/naver_playwright/chrome/Default/Code Cache/js/afc20be29c12d2cb_0
+.local/naver_playwright/chrome/Default/Code Cache/js/b423b066a8ec44a6_0
+.local/naver_playwright/chrome/Default/Code Cache/js/ba875e97878e4d13_0
+.local/naver_playwright/chrome/Default/Code Cache/js/cd430d89f4dd7c04_0
+.local/naver_playwright/chrome/Default/Code Cache/js/d1e40f2d8ea44906_0
+.local/naver_playwright/chrome/Default/Code Cache/js/d42d51bb1ecc4efb_0
+.local/naver_playwright/chrome/Default/Code Cache/js/db5a6cf237e44698_0
+.local/naver_playwright/chrome/Default/Code Cache/js/e306194ca6968ef5_0
+.local/naver_playwright/chrome/Default/Code Cache/js/e32a53b6ba3687fc_0
+.local/naver_playwright/chrome/Default/Code Cache/js/e52c7376344a8099_0
+.local/naver_playwright/chrome/Default/Code Cache/js/e7bab0b30c39209e_0
+.local/naver_playwright/chrome/Default/Code Cache/js/f51d7a3d3e5e271d_0
+.local/naver_playwright/chrome/Default/Code Cache/js/fe400e458c0a316c_0
+.local/naver_playwright/chrome/Default/Code Cache/js/index
+.local/naver_playwright/chrome/Default/Code Cache/js/index-dir/the-real-index
+.local/naver_playwright/chrome/Default/Code Cache/wasm/index
+.local/naver_playwright/chrome/Default/Code Cache/wasm/index-dir/the-real-index
+.local/naver_playwright/chrome/Default/DIPS
+.local/naver_playwright/chrome/Default/DawnGraphiteCache/data_0
+.local/naver_playwright/chrome/Default/DawnGraphiteCache/data_1
+.local/naver_playwright/chrome/Default/DawnGraphiteCache/data_2
+.local/naver_playwright/chrome/Default/DawnGraphiteCache/data_3
+.local/naver_playwright/chrome/Default/DawnGraphiteCache/index
+.local/naver_playwright/chrome/Default/DawnWebGPUCache/data_0
+.local/naver_playwright/chrome/Default/DawnWebGPUCache/data_1
+.local/naver_playwright/chrome/Default/DawnWebGPUCache/data_2
+.local/naver_playwright/chrome/Default/DawnWebGPUCache/data_3
+.local/naver_playwright/chrome/Default/DawnWebGPUCache/index
+.local/naver_playwright/chrome/Default/Extension Rules/000003.log
+.local/naver_playwright/chrome/Default/Extension Rules/CURRENT
+.local/naver_playwright/chrome/Default/Extension Rules/LOCK
+.local/naver_playwright/chrome/Default/Extension Rules/LOG
+.local/naver_playwright/chrome/Default/Extension Rules/LOG.old
+.local/naver_playwright/chrome/Default/Extension Rules/MANIFEST-000001
+.local/naver_playwright/chrome/Default/Extension Scripts/000003.log
+.local/naver_playwright/chrome/Default/Extension Scripts/CURRENT
+.local/naver_playwright/chrome/Default/Extension Scripts/LOCK
+.local/naver_playwright/chrome/Default/Extension Scripts/LOG
+.local/naver_playwright/chrome/Default/Extension Scripts/LOG.old
+.local/naver_playwright/chrome/Default/Extension Scripts/MANIFEST-000001
+.local/naver_playwright/chrome/Default/Extension State/000003.log
+.local/naver_playwright/chrome/Default/Extension State/CURRENT
+.local/naver_playwright/chrome/Default/Extension State/LOCK
+.local/naver_playwright/chrome/Default/Extension State/LOG
+.local/naver_playwright/chrome/Default/Extension State/LOG.old
+.local/naver_playwright/chrome/Default/Extension State/MANIFEST-000001
+.local/naver_playwright/chrome/Default/Favicons
+.local/naver_playwright/chrome/Default/Favicons-journal
+.local/naver_playwright/chrome/Default/Feature Engagement Tracker/AvailabilityDB/LOCK
+.local/naver_playwright/chrome/Default/Feature Engagement Tracker/AvailabilityDB/LOG
+.local/naver_playwright/chrome/Default/Feature Engagement Tracker/AvailabilityDB/LOG.old
+.local/naver_playwright/chrome/Default/Feature Engagement Tracker/EventDB/LOCK
+.local/naver_playwright/chrome/Default/Feature Engagement Tracker/EventDB/LOG
+.local/naver_playwright/chrome/Default/Feature Engagement Tracker/EventDB/LOG.old
+.local/naver_playwright/chrome/Default/GCM Store/000003.log
+.local/naver_playwright/chrome/Default/GCM Store/CURRENT
+.local/naver_playwright/chrome/Default/GCM Store/LOCK
+.local/naver_playwright/chrome/Default/GCM Store/LOG
+.local/naver_playwright/chrome/Default/GCM Store/LOG.old
+.local/naver_playwright/chrome/Default/GCM Store/MANIFEST-000001
+.local/naver_playwright/chrome/Default/GPUCache/data_0
+.local/naver_playwright/chrome/Default/GPUCache/data_1
+.local/naver_playwright/chrome/Default/GPUCache/data_2
+.local/naver_playwright/chrome/Default/GPUCache/data_3
+.local/naver_playwright/chrome/Default/GPUCache/index
+.local/naver_playwright/chrome/Default/History
+.local/naver_playwright/chrome/Default/History-journal
+.local/naver_playwright/chrome/Default/LOCK
+.local/naver_playwright/chrome/Default/LOG
+.local/naver_playwright/chrome/Default/Local Storage/leveldb/000003.log
+.local/naver_playwright/chrome/Default/Local Storage/leveldb/CURRENT
+.local/naver_playwright/chrome/Default/Local Storage/leveldb/LOCK
+.local/naver_playwright/chrome/Default/Local Storage/leveldb/LOG
+.local/naver_playwright/chrome/Default/Local Storage/leveldb/LOG.old
+.local/naver_playwright/chrome/Default/Local Storage/leveldb/MANIFEST-000001
+.local/naver_playwright/chrome/Default/Login Data
+.local/naver_playwright/chrome/Default/Login Data For Account
+.local/naver_playwright/chrome/Default/Login Data For Account-journal
+.local/naver_playwright/chrome/Default/Login Data-journal
+.local/naver_playwright/chrome/Default/Network Action Predictor
+.local/naver_playwright/chrome/Default/Network Action Predictor-journal
+.local/naver_playwright/chrome/Default/Network/Cookies
+.local/naver_playwright/chrome/Default/Network/Cookies-journal
+.local/naver_playwright/chrome/Default/Network/Network Persistent State
+.local/naver_playwright/chrome/Default/Network/NetworkDataMigrated
+.local/naver_playwright/chrome/Default/Network/Reporting and NEL
+.local/naver_playwright/chrome/Default/Network/Reporting and NEL-journal
+.local/naver_playwright/chrome/Default/Network/TransportSecurity
+.local/naver_playwright/chrome/Default/Network/Trust Tokens
+.local/naver_playwright/chrome/Default/Network/Trust Tokens-journal
+.local/naver_playwright/chrome/Default/PersistentOriginTrials/LOCK
+.local/naver_playwright/chrome/Default/PersistentOriginTrials/LOG
+.local/naver_playwright/chrome/Default/PersistentOriginTrials/LOG.old
+.local/naver_playwright/chrome/Default/Preferences
+.local/naver_playwright/chrome/Default/PreferredApps
+.local/naver_playwright/chrome/Default/README
+.local/naver_playwright/chrome/Default/Safe Browsing Network/NetworkDataMigrated
+.local/naver_playwright/chrome/Default/Safe Browsing Network/Safe Browsing Cookies
+.local/naver_playwright/chrome/Default/Safe Browsing Network/Safe Browsing Cookies-journal
+.local/naver_playwright/chrome/Default/Secure Preferences
+.local/naver_playwright/chrome/Default/Segmentation Platform/SegmentInfoDB/LOCK
+.local/naver_playwright/chrome/Default/Segmentation Platform/SegmentInfoDB/LOG
+.local/naver_playwright/chrome/Default/Segmentation Platform/SegmentInfoDB/LOG.old
+.local/naver_playwright/chrome/Default/Segmentation Platform/SignalDB/LOCK
+.local/naver_playwright/chrome/Default/Segmentation Platform/SignalDB/LOG
+.local/naver_playwright/chrome/Default/Segmentation Platform/SignalDB/LOG.old
+.local/naver_playwright/chrome/Default/Segmentation Platform/SignalStorageConfigDB/LOCK
+.local/naver_playwright/chrome/Default/Segmentation Platform/SignalStorageConfigDB/LOG
+.local/naver_playwright/chrome/Default/Segmentation Platform/SignalStorageConfigDB/LOG.old
+.local/naver_playwright/chrome/Default/ServerCertificate
+.local/naver_playwright/chrome/Default/ServerCertificate-journal
+.local/naver_playwright/chrome/Default/Session Storage/000003.log
+.local/naver_playwright/chrome/Default/Session Storage/CURRENT
+.local/naver_playwright/chrome/Default/Session Storage/LOCK
+.local/naver_playwright/chrome/Default/Session Storage/LOG
+.local/naver_playwright/chrome/Default/Session Storage/LOG.old
+.local/naver_playwright/chrome/Default/Session Storage/MANIFEST-000001
+.local/naver_playwright/chrome/Default/Sessions/Session_13418343892194426
+.local/naver_playwright/chrome/Default/Sessions/Session_13418382350434172
+.local/naver_playwright/chrome/Default/Sessions/Tabs_13418343892416398
+.local/naver_playwright/chrome/Default/Sessions/Tabs_13418382350444192
+.local/naver_playwright/chrome/Default/Shared Dictionary/cache/index
+.local/naver_playwright/chrome/Default/Shared Dictionary/cache/index-dir/the-real-index
+.local/naver_playwright/chrome/Default/Shared Dictionary/db
+.local/naver_playwright/chrome/Default/Shared Dictionary/db-journal
+.local/naver_playwright/chrome/Default/SharedStorage
+.local/naver_playwright/chrome/Default/Shortcuts
+.local/naver_playwright/chrome/Default/Shortcuts-journal
+.local/naver_playwright/chrome/Default/Site Characteristics Database/000004.ldb
+.local/naver_playwright/chrome/Default/Site Characteristics Database/000006.log
+.local/naver_playwright/chrome/Default/Site Characteristics Database/CURRENT
+.local/naver_playwright/chrome/Default/Site Characteristics Database/LOCK
+.local/naver_playwright/chrome/Default/Site Characteristics Database/LOG
+.local/naver_playwright/chrome/Default/Site Characteristics Database/LOG.old
+.local/naver_playwright/chrome/Default/Site Characteristics Database/MANIFEST-000001
+.local/naver_playwright/chrome/Default/Site Characteristics Database/lost/000003.log
+.local/naver_playwright/chrome/Default/Site Characteristics Database/lost/MANIFEST-000001
+.local/naver_playwright/chrome/Default/Sync Data/LevelDB/000003.log
+.local/naver_playwright/chrome/Default/Sync Data/LevelDB/CURRENT
+.local/naver_playwright/chrome/Default/Sync Data/LevelDB/LOCK
+.local/naver_playwright/chrome/Default/Sync Data/LevelDB/LOG
+.local/naver_playwright/chrome/Default/Sync Data/LevelDB/LOG.old
+.local/naver_playwright/chrome/Default/Sync Data/LevelDB/MANIFEST-000001
+.local/naver_playwright/chrome/Default/Top Sites
+.local/naver_playwright/chrome/Default/Top Sites-journal
+.local/naver_playwright/chrome/Default/Web Data
+.local/naver_playwright/chrome/Default/Web Data-journal
+.local/naver_playwright/chrome/Default/WebStorage/QuotaManager
+.local/naver_playwright/chrome/Default/WebStorage/QuotaManager-journal
+.local/naver_playwright/chrome/Default/chrome_cart_db/LOCK
+.local/naver_playwright/chrome/Default/chrome_cart_db/LOG
+.local/naver_playwright/chrome/Default/chrome_cart_db/LOG.old
+.local/naver_playwright/chrome/Default/commerce_subscription_db/LOCK
+.local/naver_playwright/chrome/Default/commerce_subscription_db/LOG
+.local/naver_playwright/chrome/Default/commerce_subscription_db/LOG.old
+.local/naver_playwright/chrome/Default/discount_infos_db/LOCK
+.local/naver_playwright/chrome/Default/discount_infos_db/LOG
+.local/naver_playwright/chrome/Default/discount_infos_db/LOG.old
+.local/naver_playwright/chrome/Default/discounts_db/LOCK
+.local/naver_playwright/chrome/Default/discounts_db/LOG
+.local/naver_playwright/chrome/Default/discounts_db/LOG.old
+.local/naver_playwright/chrome/Default/heavy_ad_intervention_opt_out.db
+.local/naver_playwright/chrome/Default/heavy_ad_intervention_opt_out.db-journal
+.local/naver_playwright/chrome/Default/parcel_tracking_db/LOCK
+.local/naver_playwright/chrome/Default/parcel_tracking_db/LOG
+.local/naver_playwright/chrome/Default/parcel_tracking_db/LOG.old
+.local/naver_playwright/chrome/Default/shared_proto_db/000003.log
+.local/naver_playwright/chrome/Default/shared_proto_db/CURRENT
+.local/naver_playwright/chrome/Default/shared_proto_db/LOCK
+.local/naver_playwright/chrome/Default/shared_proto_db/LOG
+.local/naver_playwright/chrome/Default/shared_proto_db/LOG.old
+.local/naver_playwright/chrome/Default/shared_proto_db/MANIFEST-000001
+.local/naver_playwright/chrome/Default/shared_proto_db/metadata/000003.log
+.local/naver_playwright/chrome/Default/shared_proto_db/metadata/CURRENT
+.local/naver_playwright/chrome/Default/shared_proto_db/metadata/LOCK
+.local/naver_playwright/chrome/Default/shared_proto_db/metadata/LOG
+.local/naver_playwright/chrome/Default/shared_proto_db/metadata/LOG.old
+.local/naver_playwright/chrome/Default/shared_proto_db/metadata/MANIFEST-000001
+.local/naver_playwright/chrome/Default/trusted_vault.pb
+.local/naver_playwright/chrome/GrShaderCache/data_0
+.local/naver_playwright/chrome/GrShaderCache/data_1
+.local/naver_playwright/chrome/GrShaderCache/data_2
+.local/naver_playwright/chrome/GrShaderCache/data_3
+.local/naver_playwright/chrome/GrShaderCache/index
+.local/naver_playwright/chrome/GraphiteDawnCache/data_0
+.local/naver_playwright/chrome/GraphiteDawnCache/data_1
+.local/naver_playwright/chrome/GraphiteDawnCache/data_2
+.local/naver_playwright/chrome/GraphiteDawnCache/data_3
+.local/naver_playwright/chrome/GraphiteDawnCache/index
+.local/naver_playwright/chrome/Last Browser
+.local/naver_playwright/chrome/Last Version
+.local/naver_playwright/chrome/Local State
+.local/naver_playwright/chrome/ShaderCache/data_0
+.local/naver_playwright/chrome/ShaderCache/data_1
+.local/naver_playwright/chrome/ShaderCache/data_2
+.local/naver_playwright/chrome/ShaderCache/data_3
+.local/naver_playwright/chrome/ShaderCache/index
+.local/naver_playwright/chrome/Variations
+.local/naver_playwright/chrome/component_crx_cache/metadata.json
+.local/naver_playwright/chrome/extensions_crx_cache/metadata.json
+.local/naver_playwright/chrome/first_party_sets.db
+.local/naver_playwright/chrome/first_party_sets.db-journal
+.local/naver_playwright/chrome/ko-3-0.bdic
+.local/naver_playwright/chrome/old_GrShaderCache_000/data_0
+.local/naver_playwright/chrome/old_GrShaderCache_000/data_1
+.local/naver_playwright/chrome/old_GrShaderCache_000/data_2
+.local/naver_playwright/chrome/old_GrShaderCache_000/data_3
+.local/naver_playwright/chrome/old_GrShaderCache_000/f_000001
+.local/naver_playwright/chrome/old_GrShaderCache_000/f_000002
+.local/naver_playwright/chrome/old_GrShaderCache_000/f_000003
+.local/naver_playwright/chrome/old_GrShaderCache_000/f_000004
+.local/naver_playwright/chrome/old_GrShaderCache_000/index
+.local/naver_playwright/chrome/segmentation_platform/ukm_db
+.local/naver_playwright/chrome/segmentation_platform/ukm_db-wal
+.local/naver_playwright/chromium/BrowserMetrics/BrowserMetrics-69BBB30F-2F60.pma
+.local/naver_playwright/chromium/Crashpad/settings.dat
+.local/naver_playwright/chromium/Default/Account Web Data
+.local/naver_playwright/chromium/Default/Account Web Data-journal
+.local/naver_playwright/chromium/Default/Affiliation Database
+.local/naver_playwright/chromium/Default/Affiliation Database-journal
+.local/naver_playwright/chromium/Default/BookmarkMergedSurfaceOrdering
+.local/naver_playwright/chromium/Default/ClientCertificates/LOCK
+.local/naver_playwright/chromium/Default/ClientCertificates/LOG
+.local/naver_playwright/chromium/Default/Code Cache/js/index
+.local/naver_playwright/chromium/Default/Code Cache/js/index-dir/the-real-index
+.local/naver_playwright/chromium/Default/Code Cache/wasm/index
+.local/naver_playwright/chromium/Default/Code Cache/wasm/index-dir/the-real-index
+.local/naver_playwright/chromium/Default/DawnGraphiteCache/data_0
+.local/naver_playwright/chromium/Default/DawnGraphiteCache/data_1
+.local/naver_playwright/chromium/Default/DawnGraphiteCache/data_2
+.local/naver_playwright/chromium/Default/DawnGraphiteCache/data_3
+.local/naver_playwright/chromium/Default/DawnGraphiteCache/index
+.local/naver_playwright/chromium/Default/DawnWebGPUCache/data_0
+.local/naver_playwright/chromium/Default/DawnWebGPUCache/data_1
+.local/naver_playwright/chromium/Default/DawnWebGPUCache/data_2
+.local/naver_playwright/chromium/Default/DawnWebGPUCache/data_3
+.local/naver_playwright/chromium/Default/DawnWebGPUCache/index
+.local/naver_playwright/chromium/Default/Extension Rules/000003.log
+.local/naver_playwright/chromium/Default/Extension Rules/CURRENT
+.local/naver_playwright/chromium/Default/Extension Rules/LOCK
+.local/naver_playwright/chromium/Default/Extension Rules/LOG
+.local/naver_playwright/chromium/Default/Extension Rules/MANIFEST-000001
+.local/naver_playwright/chromium/Default/Extension Scripts/000003.log
+.local/naver_playwright/chromium/Default/Extension Scripts/CURRENT
+.local/naver_playwright/chromium/Default/Extension Scripts/LOCK
+.local/naver_playwright/chromium/Default/Extension Scripts/LOG
+.local/naver_playwright/chromium/Default/Extension Scripts/MANIFEST-000001
+.local/naver_playwright/chromium/Default/Extension State/000003.log
+.local/naver_playwright/chromium/Default/Extension State/CURRENT
+.local/naver_playwright/chromium/Default/Extension State/LOCK
+.local/naver_playwright/chromium/Default/Extension State/LOG
+.local/naver_playwright/chromium/Default/Extension State/MANIFEST-000001
+.local/naver_playwright/chromium/Default/Favicons
+.local/naver_playwright/chromium/Default/Favicons-journal
+.local/naver_playwright/chromium/Default/GPUCache/data_0
+.local/naver_playwright/chromium/Default/GPUCache/data_1
+.local/naver_playwright/chromium/Default/GPUCache/data_2
+.local/naver_playwright/chromium/Default/GPUCache/data_3
+.local/naver_playwright/chromium/Default/GPUCache/index
+.local/naver_playwright/chromium/Default/History
+.local/naver_playwright/chromium/Default/History-journal
+.local/naver_playwright/chromium/Default/LOCK
+.local/naver_playwright/chromium/Default/LOG
+.local/naver_playwright/chromium/Default/Local Storage/leveldb/000003.log
+.local/naver_playwright/chromium/Default/Local Storage/leveldb/CURRENT
+.local/naver_playwright/chromium/Default/Local Storage/leveldb/LOCK
+.local/naver_playwright/chromium/Default/Local Storage/leveldb/LOG
+.local/naver_playwright/chromium/Default/Local Storage/leveldb/MANIFEST-000001
+.local/naver_playwright/chromium/Default/Login Data
+.local/naver_playwright/chromium/Default/Login Data For Account
+.local/naver_playwright/chromium/Default/Login Data For Account-journal
+.local/naver_playwright/chromium/Default/Login Data-journal
+.local/naver_playwright/chromium/Default/Network/Cookies
+.local/naver_playwright/chromium/Default/Network/Cookies-journal
+.local/naver_playwright/chromium/Default/Network/Network Persistent State
+.local/naver_playwright/chromium/Default/Network/NetworkDataMigrated
+.local/naver_playwright/chromium/Default/Network/Reporting and NEL
+.local/naver_playwright/chromium/Default/Network/Reporting and NEL-journal
+.local/naver_playwright/chromium/Default/Network/SCT Auditing Pending Reports
+.local/naver_playwright/chromium/Default/Network/Trust Tokens
+.local/naver_playwright/chromium/Default/Network/Trust Tokens-journal
+.local/naver_playwright/chromium/Default/PersistentOriginTrials/LOCK
+.local/naver_playwright/chromium/Default/PersistentOriginTrials/LOG
+.local/naver_playwright/chromium/Default/Preferences
+.local/naver_playwright/chromium/Default/README
+.local/naver_playwright/chromium/Default/Safe Browsing Network/NetworkDataMigrated
+.local/naver_playwright/chromium/Default/Safe Browsing Network/Safe Browsing Cookies
+.local/naver_playwright/chromium/Default/Safe Browsing Network/Safe Browsing Cookies-journal
+.local/naver_playwright/chromium/Default/Secure Preferences
+.local/naver_playwright/chromium/Default/Segmentation Platform/SegmentInfoDB/LOCK
+.local/naver_playwright/chromium/Default/Segmentation Platform/SegmentInfoDB/LOG
+.local/naver_playwright/chromium/Default/Segmentation Platform/SignalDB/LOCK
+.local/naver_playwright/chromium/Default/Segmentation Platform/SignalDB/LOG
+.local/naver_playwright/chromium/Default/Segmentation Platform/SignalStorageConfigDB/LOCK
+.local/naver_playwright/chromium/Default/Segmentation Platform/SignalStorageConfigDB/LOG
+.local/naver_playwright/chromium/Default/ServerCertificate
+.local/naver_playwright/chromium/Default/ServerCertificate-journal
+.local/naver_playwright/chromium/Default/Session Storage/000003.log
+.local/naver_playwright/chromium/Default/Session Storage/CURRENT
+.local/naver_playwright/chromium/Default/Session Storage/LOCK
+.local/naver_playwright/chromium/Default/Session Storage/LOG
+.local/naver_playwright/chromium/Default/Session Storage/MANIFEST-000001
+.local/naver_playwright/chromium/Default/Sessions/Session_13418382353433458
+.local/naver_playwright/chromium/Default/Sessions/Tabs_13418382353491214
+.local/naver_playwright/chromium/Default/Shared Dictionary/cache/index
+.local/naver_playwright/chromium/Default/Shared Dictionary/cache/index-dir/the-real-index
+.local/naver_playwright/chromium/Default/Shared Dictionary/db
+.local/naver_playwright/chromium/Default/Shared Dictionary/db-journal
+.local/naver_playwright/chromium/Default/Site Characteristics Database/000003.log
+.local/naver_playwright/chromium/Default/Site Characteristics Database/CURRENT
+.local/naver_playwright/chromium/Default/Site Characteristics Database/LOCK
+.local/naver_playwright/chromium/Default/Site Characteristics Database/LOG
+.local/naver_playwright/chromium/Default/Site Characteristics Database/MANIFEST-000001
+.local/naver_playwright/chromium/Default/Sync Data/LevelDB/000003.log
+.local/naver_playwright/chromium/Default/Sync Data/LevelDB/CURRENT
+.local/naver_playwright/chromium/Default/Sync Data/LevelDB/LOCK
+.local/naver_playwright/chromium/Default/Sync Data/LevelDB/LOG
+.local/naver_playwright/chromium/Default/Sync Data/LevelDB/MANIFEST-000001
+.local/naver_playwright/chromium/Default/Top Sites
+.local/naver_playwright/chromium/Default/Top Sites-journal
+.local/naver_playwright/chromium/Default/Web Data
+.local/naver_playwright/chromium/Default/Web Data-journal
+.local/naver_playwright/chromium/Default/chrome_cart_db/LOCK
+.local/naver_playwright/chromium/Default/chrome_cart_db/LOG
+.local/naver_playwright/chromium/Default/commerce_subscription_db/LOCK
+.local/naver_playwright/chromium/Default/commerce_subscription_db/LOG
+.local/naver_playwright/chromium/Default/discount_infos_db/LOCK
+.local/naver_playwright/chromium/Default/discount_infos_db/LOG
+.local/naver_playwright/chromium/Default/discounts_db/LOCK
+.local/naver_playwright/chromium/Default/discounts_db/LOG
+.local/naver_playwright/chromium/Default/parcel_tracking_db/LOCK
+.local/naver_playwright/chromium/Default/parcel_tracking_db/LOG
+.local/naver_playwright/chromium/Default/shared_proto_db/000003.log
+.local/naver_playwright/chromium/Default/shared_proto_db/CURRENT
+.local/naver_playwright/chromium/Default/shared_proto_db/LOCK
+.local/naver_playwright/chromium/Default/shared_proto_db/LOG
+.local/naver_playwright/chromium/Default/shared_proto_db/MANIFEST-000001
+.local/naver_playwright/chromium/Default/shared_proto_db/metadata/000003.log
+.local/naver_playwright/chromium/Default/shared_proto_db/metadata/CURRENT
+.local/naver_playwright/chromium/Default/shared_proto_db/metadata/LOCK
+.local/naver_playwright/chromium/Default/shared_proto_db/metadata/LOG
+.local/naver_playwright/chromium/Default/shared_proto_db/metadata/MANIFEST-000001
+.local/naver_playwright/chromium/GrShaderCache/data_0
+.local/naver_playwright/chromium/GrShaderCache/data_1
+.local/naver_playwright/chromium/GrShaderCache/data_2
+.local/naver_playwright/chromium/GrShaderCache/data_3
+.local/naver_playwright/chromium/GrShaderCache/index
+.local/naver_playwright/chromium/GraphiteDawnCache/data_0
+.local/naver_playwright/chromium/GraphiteDawnCache/data_1
+.local/naver_playwright/chromium/GraphiteDawnCache/data_2
+.local/naver_playwright/chromium/GraphiteDawnCache/data_3
+.local/naver_playwright/chromium/GraphiteDawnCache/index
+.local/naver_playwright/chromium/Last Version
+.local/naver_playwright/chromium/Local State
+.local/naver_playwright/chromium/ShaderCache/data_0
+.local/naver_playwright/chromium/ShaderCache/data_1
+.local/naver_playwright/chromium/ShaderCache/data_2
+.local/naver_playwright/chromium/ShaderCache/data_3
+.local/naver_playwright/chromium/ShaderCache/index
+.local/naver_playwright/chromium/Variations
+.local/naver_playwright/chromium/first_party_sets.db
+.local/naver_playwright/chromium/first_party_sets.db-journal
+.local/naver_playwright/chromium/segmentation_platform/ukm_db
+.local/naver_playwright/chromium/segmentation_platform/ukm_db-wal
+.local/naver_playwright/msedge/Ad Blocking/blocklist
+.local/naver_playwright/msedge/BrowserMetrics/BrowserMetrics-69BA707A-3168.pma
+.local/naver_playwright/msedge/BrowserMetrics/BrowserMetrics-69BA72AE-44A8.pma
+.local/naver_playwright/msedge/BrowserMetrics/BrowserMetrics-69BAB198-A01C.pma
+.local/naver_playwright/msedge/BrowserMetrics/BrowserMetrics-69BB5224-406C.pma
+.local/naver_playwright/msedge/BrowserMetrics/BrowserMetrics-69BBB309-8C80.pma
+.local/naver_playwright/msedge/Crashpad/metadata
+.local/naver_playwright/msedge/Crashpad/settings.dat
+.local/naver_playwright/msedge/Crashpad/throttle_store.dat
+.local/naver_playwright/msedge/Default/Asset Store/assets.db/000003.ldb
+.local/naver_playwright/msedge/Default/Asset Store/assets.db/000004.log
+.local/naver_playwright/msedge/Default/Asset Store/assets.db/CURRENT
+.local/naver_playwright/msedge/Default/Asset Store/assets.db/LOCK
+.local/naver_playwright/msedge/Default/Asset Store/assets.db/LOG
+.local/naver_playwright/msedge/Default/Asset Store/assets.db/LOG.old
+.local/naver_playwright/msedge/Default/Asset Store/assets.db/MANIFEST-000001
+.local/naver_playwright/msedge/Default/AutofillAiModelCache/LOCK
+.local/naver_playwright/msedge/Default/AutofillAiModelCache/LOG
+.local/naver_playwright/msedge/Default/AutofillAiModelCache/LOG.old
+.local/naver_playwright/msedge/Default/AutofillStrikeDatabase/LOCK
+.local/naver_playwright/msedge/Default/AutofillStrikeDatabase/LOG
+.local/naver_playwright/msedge/Default/AutofillStrikeDatabase/LOG.old
+.local/naver_playwright/msedge/Default/BookmarkMergedSurfaceOrdering
+.local/naver_playwright/msedge/Default/BudgetDatabase/LOCK
+.local/naver_playwright/msedge/Default/BudgetDatabase/LOG
+.local/naver_playwright/msedge/Default/BudgetDatabase/LOG.old
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/data_0
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/data_1
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/data_2
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/data_3
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000001
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000002
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000003
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000004
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000005
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000006
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000007
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000008
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000009
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_00000a
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_00000b
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_00000c
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_00000d
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_00000e
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_00000f
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000010
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000011
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000012
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000013
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000014
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000015
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000016
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/f_000017
+.local/naver_playwright/msedge/Default/Cache/Cache_Data/index
+.local/naver_playwright/msedge/Default/Cache/No_Vary_Search/journal.baj
+.local/naver_playwright/msedge/Default/Cache/No_Vary_Search/snapshot.baf
+.local/naver_playwright/msedge/Default/ClientCertificates/LOCK
+.local/naver_playwright/msedge/Default/ClientCertificates/LOG
+.local/naver_playwright/msedge/Default/ClientCertificates/LOG.old
+.local/naver_playwright/msedge/Default/Code Cache/js/030db2369397058c_0
+.local/naver_playwright/msedge/Default/Code Cache/js/08e35f117ab680e0_0
+.local/naver_playwright/msedge/Default/Code Cache/js/0cf7ba01f67c84b7_0
+.local/naver_playwright/msedge/Default/Code Cache/js/0f6c8dfbd81180f2_0
+.local/naver_playwright/msedge/Default/Code Cache/js/119c1b369036d077_0
+.local/naver_playwright/msedge/Default/Code Cache/js/11df0017725b581e_0
+.local/naver_playwright/msedge/Default/Code Cache/js/131e123945bea743_0
+.local/naver_playwright/msedge/Default/Code Cache/js/18dfd6da3f22b922_0
+.local/naver_playwright/msedge/Default/Code Cache/js/1d28b3d51301ad95_0
+.local/naver_playwright/msedge/Default/Code Cache/js/27cadf3100d3494a_0
+.local/naver_playwright/msedge/Default/Code Cache/js/29e637250962a268_0
+.local/naver_playwright/msedge/Default/Code Cache/js/2bac18e9b0165a51_0
+.local/naver_playwright/msedge/Default/Code Cache/js/30128e28a8a3e1e3_0
+.local/naver_playwright/msedge/Default/Code Cache/js/304f0d31cc35793d_0
+.local/naver_playwright/msedge/Default/Code Cache/js/36b287fd3aabaec8_0
+.local/naver_playwright/msedge/Default/Code Cache/js/389085fbe8ed650b_0
+.local/naver_playwright/msedge/Default/Code Cache/js/38dbebb6c44b41d8_0
+.local/naver_playwright/msedge/Default/Code Cache/js/3ebcd0eae1b2a723_0
+.local/naver_playwright/msedge/Default/Code Cache/js/41b195182157b89b_0
+.local/naver_playwright/msedge/Default/Code Cache/js/4c5e8e455a3264ef_0
+.local/naver_playwright/msedge/Default/Code Cache/js/512e469239c514ee_0
+.local/naver_playwright/msedge/Default/Code Cache/js/5b7a7e7bbff97963_0
+.local/naver_playwright/msedge/Default/Code Cache/js/62403cdb5492396c_0
+.local/naver_playwright/msedge/Default/Code Cache/js/63a0bc1b5ea47942_0
+.local/naver_playwright/msedge/Default/Code Cache/js/64273e7ce8c5cc1b_0
+.local/naver_playwright/msedge/Default/Code Cache/js/659cc3a36da33772_0
+.local/naver_playwright/msedge/Default/Code Cache/js/671e64992d552b14_0
+.local/naver_playwright/msedge/Default/Code Cache/js/79aa33c222298366_0
+.local/naver_playwright/msedge/Default/Code Cache/js/7fa183aec42b7859_0
+.local/naver_playwright/msedge/Default/Code Cache/js/8c5e60080a6e4c9f_0
+.local/naver_playwright/msedge/Default/Code Cache/js/955716aa0e0028e0_0
+.local/naver_playwright/msedge/Default/Code Cache/js/977aa230b777793d_0
+.local/naver_playwright/msedge/Default/Code Cache/js/9d5fd3254276efb3_0
+.local/naver_playwright/msedge/Default/Code Cache/js/a3df30267a1c51fd_0
+.local/naver_playwright/msedge/Default/Code Cache/js/b471963c5da5c8fc_0
+.local/naver_playwright/msedge/Default/Code Cache/js/b935af72b6de1e82_0
+.local/naver_playwright/msedge/Default/Code Cache/js/ba875e97878e4d13_0
+.local/naver_playwright/msedge/Default/Code Cache/js/be70d127b65f3c16_0
+.local/naver_playwright/msedge/Default/Code Cache/js/c27abf993ee80cea_0
+.local/naver_playwright/msedge/Default/Code Cache/js/cf1752cfe9fd6c26_0
+.local/naver_playwright/msedge/Default/Code Cache/js/d1e40f2d8ea44906_0
+.local/naver_playwright/msedge/Default/Code Cache/js/d42d51bb1ecc4efb_0
+.local/naver_playwright/msedge/Default/Code Cache/js/df1ae077b8b3bc17_0
+.local/naver_playwright/msedge/Default/Code Cache/js/e2a22d573f589f04_0
+.local/naver_playwright/msedge/Default/Code Cache/js/e32a53b6ba3687fc_0
+.local/naver_playwright/msedge/Default/Code Cache/js/e9fbeab297e6e5f7_0
+.local/naver_playwright/msedge/Default/Code Cache/js/f09c6a13c0877ad3_0
+.local/naver_playwright/msedge/Default/Code Cache/js/f44cadc47352a96a_0
+.local/naver_playwright/msedge/Default/Code Cache/js/fe400e458c0a316c_0
+.local/naver_playwright/msedge/Default/Code Cache/js/ff80afd5065c4a82_0
+.local/naver_playwright/msedge/Default/Code Cache/js/index
+.local/naver_playwright/msedge/Default/Code Cache/js/index-dir/the-real-index
+.local/naver_playwright/msedge/Default/Code Cache/wasm/index
+.local/naver_playwright/msedge/Default/Code Cache/wasm/index-dir/the-real-index
+.local/naver_playwright/msedge/Default/DIPS
+.local/naver_playwright/msedge/Default/DawnGraphiteCache/data_0
+.local/naver_playwright/msedge/Default/DawnGraphiteCache/data_1
+.local/naver_playwright/msedge/Default/DawnGraphiteCache/data_2
+.local/naver_playwright/msedge/Default/DawnGraphiteCache/data_3
+.local/naver_playwright/msedge/Default/DawnGraphiteCache/index
+.local/naver_playwright/msedge/Default/DawnWebGPUCache/data_0
+.local/naver_playwright/msedge/Default/DawnWebGPUCache/data_1
+.local/naver_playwright/msedge/Default/DawnWebGPUCache/data_2
+.local/naver_playwright/msedge/Default/DawnWebGPUCache/data_3
+.local/naver_playwright/msedge/Default/DawnWebGPUCache/index
+.local/naver_playwright/msedge/Default/DualEngine/SiteList-Consumer.json
+.local/naver_playwright/msedge/Default/DualEngine/SiteList-Enterprise.json
+.local/naver_playwright/msedge/Default/EdgeCoupons/coupons_data.db/000005.ldb
+.local/naver_playwright/msedge/Default/EdgeCoupons/coupons_data.db/000045.log
+.local/naver_playwright/msedge/Default/EdgeCoupons/coupons_data.db/000047.ldb
+.local/naver_playwright/msedge/Default/EdgeCoupons/coupons_data.db/000049.log
+.local/naver_playwright/msedge/Default/EdgeCoupons/coupons_data.db/000050.ldb
+.local/naver_playwright/msedge/Default/EdgeCoupons/coupons_data.db/CURRENT
+.local/naver_playwright/msedge/Default/EdgeCoupons/coupons_data.db/LOCK
+.local/naver_playwright/msedge/Default/EdgeCoupons/coupons_data.db/LOG
+.local/naver_playwright/msedge/Default/EdgeCoupons/coupons_data.db/LOG.old
+.local/naver_playwright/msedge/Default/EdgeCoupons/coupons_data.db/MANIFEST-000001
+.local/naver_playwright/msedge/Default/EdgeHubAppUsage/EdgeHubAppUsageSQLite.db
+.local/naver_playwright/msedge/Default/EdgeHubAppUsage/EdgeHubAppUsageSQLite.db-journal
+.local/naver_playwright/msedge/Default/EdgePushStorageWithConnectTokenAndKey/LOCK
+.local/naver_playwright/msedge/Default/EdgePushStorageWithConnectTokenAndKey/LOG
+.local/naver_playwright/msedge/Default/EdgePushStorageWithConnectTokenAndKey/LOG.old
+.local/naver_playwright/msedge/Default/EntityExtraction/EntityExtractionAssetStore.db/000003.log
+.local/naver_playwright/msedge/Default/EntityExtraction/EntityExtractionAssetStore.db/CURRENT
+.local/naver_playwright/msedge/Default/EntityExtraction/EntityExtractionAssetStore.db/LOCK
+.local/naver_playwright/msedge/Default/EntityExtraction/EntityExtractionAssetStore.db/LOG
+.local/naver_playwright/msedge/Default/EntityExtraction/EntityExtractionAssetStore.db/MANIFEST-000001
+.local/naver_playwright/msedge/Default/EntityExtraction/domains_config.json
+.local/naver_playwright/msedge/Default/Extension Rules/000003.log
+.local/naver_playwright/msedge/Default/Extension Rules/CURRENT
+.local/naver_playwright/msedge/Default/Extension Rules/LOCK
+.local/naver_playwright/msedge/Default/Extension Rules/LOG
+.local/naver_playwright/msedge/Default/Extension Rules/LOG.old
+.local/naver_playwright/msedge/Default/Extension Rules/MANIFEST-000001
+.local/naver_playwright/msedge/Default/Extension Scripts/000003.log
+.local/naver_playwright/msedge/Default/Extension Scripts/CURRENT
+.local/naver_playwright/msedge/Default/Extension Scripts/LOCK
+.local/naver_playwright/msedge/Default/Extension Scripts/LOG
+.local/naver_playwright/msedge/Default/Extension Scripts/LOG.old
+.local/naver_playwright/msedge/Default/Extension Scripts/MANIFEST-000001
+.local/naver_playwright/msedge/Default/Extension State/000003.log
+.local/naver_playwright/msedge/Default/Extension State/CURRENT
+.local/naver_playwright/msedge/Default/Extension State/LOCK
+.local/naver_playwright/msedge/Default/Extension State/LOG
+.local/naver_playwright/msedge/Default/Extension State/LOG.old
+.local/naver_playwright/msedge/Default/Extension State/MANIFEST-000001
+.local/naver_playwright/msedge/Default/ExtensionActivityComp
+.local/naver_playwright/msedge/Default/ExtensionActivityEdge
+.local/naver_playwright/msedge/Default/ExtensionActivityEdge-journal
+.local/naver_playwright/msedge/Default/Favicons
+.local/naver_playwright/msedge/Default/Favicons-journal
+.local/naver_playwright/msedge/Default/Feature Engagement Tracker/AvailabilityDB/LOCK
+.local/naver_playwright/msedge/Default/Feature Engagement Tracker/AvailabilityDB/LOG
+.local/naver_playwright/msedge/Default/Feature Engagement Tracker/AvailabilityDB/LOG.old
+.local/naver_playwright/msedge/Default/Feature Engagement Tracker/EventDB/LOCK
+.local/naver_playwright/msedge/Default/Feature Engagement Tracker/EventDB/LOG
+.local/naver_playwright/msedge/Default/Feature Engagement Tracker/EventDB/LOG.old
+.local/naver_playwright/msedge/Default/GPUCache/data_0
+.local/naver_playwright/msedge/Default/GPUCache/data_1
+.local/naver_playwright/msedge/Default/GPUCache/data_2
+.local/naver_playwright/msedge/Default/GPUCache/data_3
+.local/naver_playwright/msedge/Default/GPUCache/index
+.local/naver_playwright/msedge/Default/History
+.local/naver_playwright/msedge/Default/History-journal
+.local/naver_playwright/msedge/Default/HubApps
+.local/naver_playwright/msedge/Default/HubApps Icons
+.local/naver_playwright/msedge/Default/HubApps Icons-journal
+.local/naver_playwright/msedge/Default/LOCK
+.local/naver_playwright/msedge/Default/LOG
+.local/naver_playwright/msedge/Default/LOG.old
+.local/naver_playwright/msedge/Default/Local Storage/leveldb/000003.log
+.local/naver_playwright/msedge/Default/Local Storage/leveldb/CURRENT
+.local/naver_playwright/msedge/Default/Local Storage/leveldb/LOCK
+.local/naver_playwright/msedge/Default/Local Storage/leveldb/LOG
+.local/naver_playwright/msedge/Default/Local Storage/leveldb/LOG.old
+.local/naver_playwright/msedge/Default/Local Storage/leveldb/MANIFEST-000001
+.local/naver_playwright/msedge/Default/Login Data
+.local/naver_playwright/msedge/Default/Login Data For Account
+.local/naver_playwright/msedge/Default/Login Data For Account-journal
+.local/naver_playwright/msedge/Default/Login Data-journal
+.local/naver_playwright/msedge/Default/Network Action Predictor
+.local/naver_playwright/msedge/Default/Network Action Predictor-journal
+.local/naver_playwright/msedge/Default/Network/Cookies
+.local/naver_playwright/msedge/Default/Network/Cookies-journal
+.local/naver_playwright/msedge/Default/Network/Network Persistent State
+.local/naver_playwright/msedge/Default/Network/NetworkDataMigrated
+.local/naver_playwright/msedge/Default/Network/Reporting and NEL
+.local/naver_playwright/msedge/Default/Network/Reporting and NEL-journal
+.local/naver_playwright/msedge/Default/Network/SCT Auditing Pending Reports
+.local/naver_playwright/msedge/Default/Network/Sdch Dictionaries
+.local/naver_playwright/msedge/Default/Network/TransportSecurity
+.local/naver_playwright/msedge/Default/Network/Trust Tokens
+.local/naver_playwright/msedge/Default/Network/Trust Tokens-journal
+.local/naver_playwright/msedge/Default/Nurturing/campaign_history
+.local/naver_playwright/msedge/Default/Nurturing/campaign_history-journal
+.local/naver_playwright/msedge/Default/Password_Diagnostics/PMLog_13418293611100800
+.local/naver_playwright/msedge/Default/PersistentOriginTrials/LOCK
+.local/naver_playwright/msedge/Default/PersistentOriginTrials/LOG
+.local/naver_playwright/msedge/Default/PersistentOriginTrials/LOG.old
+.local/naver_playwright/msedge/Default/Preferences
+.local/naver_playwright/msedge/Default/PreferredApps
+.local/naver_playwright/msedge/Default/README
+.local/naver_playwright/msedge/Default/Safe Browsing Network/NetworkDataMigrated
+.local/naver_playwright/msedge/Default/Safe Browsing Network/Safe Browsing Cookies
+.local/naver_playwright/msedge/Default/Safe Browsing Network/Safe Browsing Cookies-journal
+.local/naver_playwright/msedge/Default/Secure Preferences
+.local/naver_playwright/msedge/Default/Segmentation Platform/SegmentInfoDB/LOCK
+.local/naver_playwright/msedge/Default/Segmentation Platform/SegmentInfoDB/LOG
+.local/naver_playwright/msedge/Default/Segmentation Platform/SegmentInfoDB/LOG.old
+.local/naver_playwright/msedge/Default/Segmentation Platform/SignalDB/LOCK
+.local/naver_playwright/msedge/Default/Segmentation Platform/SignalDB/LOG
+.local/naver_playwright/msedge/Default/Segmentation Platform/SignalDB/LOG.old
+.local/naver_playwright/msedge/Default/Segmentation Platform/SignalStorageConfigDB/LOCK
+.local/naver_playwright/msedge/Default/Segmentation Platform/SignalStorageConfigDB/LOG
+.local/naver_playwright/msedge/Default/Segmentation Platform/SignalStorageConfigDB/LOG.old
+.local/naver_playwright/msedge/Default/ServerCertificate
+.local/naver_playwright/msedge/Default/ServerCertificate-journal
+.local/naver_playwright/msedge/Default/Session Storage/000003.log
+.local/naver_playwright/msedge/Default/Session Storage/CURRENT
+.local/naver_playwright/msedge/Default/Session Storage/LOCK
+.local/naver_playwright/msedge/Default/Session Storage/LOG
+.local/naver_playwright/msedge/Default/Session Storage/LOG.old
+.local/naver_playwright/msedge/Default/Session Storage/MANIFEST-000001
+.local/naver_playwright/msedge/Default/Sessions/Session_13418357543689642
+.local/naver_playwright/msedge/Default/Sessions/Session_13418382347629090
+.local/naver_playwright/msedge/Default/Sessions/Tabs_13418357543906828
+.local/naver_playwright/msedge/Default/Sessions/Tabs_13418382347746947
+.local/naver_playwright/msedge/Default/Shared Dictionary/cache/index
+.local/naver_playwright/msedge/Default/Shared Dictionary/cache/index-dir/the-real-index
+.local/naver_playwright/msedge/Default/Shared Dictionary/db
+.local/naver_playwright/msedge/Default/Shared Dictionary/db-journal
+.local/naver_playwright/msedge/Default/SharedStorage
+.local/naver_playwright/msedge/Default/Shortcuts
+.local/naver_playwright/msedge/Default/Shortcuts-journal
+.local/naver_playwright/msedge/Default/Site Characteristics Database/000004.ldb
+.local/naver_playwright/msedge/Default/Site Characteristics Database/000006.log
+.local/naver_playwright/msedge/Default/Site Characteristics Database/CURRENT
+.local/naver_playwright/msedge/Default/Site Characteristics Database/LOCK
+.local/naver_playwright/msedge/Default/Site Characteristics Database/LOG
+.local/naver_playwright/msedge/Default/Site Characteristics Database/LOG.old
+.local/naver_playwright/msedge/Default/Site Characteristics Database/MANIFEST-000001
+.local/naver_playwright/msedge/Default/Site Characteristics Database/lost/000003.log
+.local/naver_playwright/msedge/Default/Site Characteristics Database/lost/MANIFEST-000001
+.local/naver_playwright/msedge/Default/Sync Data/LevelDB/000003.log
+.local/naver_playwright/msedge/Default/Sync Data/LevelDB/CURRENT
+.local/naver_playwright/msedge/Default/Sync Data/LevelDB/LOCK
+.local/naver_playwright/msedge/Default/Sync Data/LevelDB/LOG
+.local/naver_playwright/msedge/Default/Sync Data/LevelDB/LOG.old
+.local/naver_playwright/msedge/Default/Sync Data/LevelDB/MANIFEST-000001
+.local/naver_playwright/msedge/Default/Top Sites
+.local/naver_playwright/msedge/Default/Top Sites-journal
+.local/naver_playwright/msedge/Default/Vpn Tokens
+.local/naver_playwright/msedge/Default/Vpn Tokens-journal
+.local/naver_playwright/msedge/Default/Web Data
+.local/naver_playwright/msedge/Default/Web Data-journal
+.local/naver_playwright/msedge/Default/WebStorage/QuotaManager
+.local/naver_playwright/msedge/Default/WebStorage/QuotaManager-journal
+.local/naver_playwright/msedge/Default/Workspaces/Logs/Workspaces Internals Logs
+.local/naver_playwright/msedge/Default/arbitration_service_config.json
+.local/naver_playwright/msedge/Default/commerce_subscription_db/LOCK
+.local/naver_playwright/msedge/Default/commerce_subscription_db/LOG
+.local/naver_playwright/msedge/Default/commerce_subscription_db/LOG.old
+.local/naver_playwright/msedge/Default/discount_infos_db/LOCK
+.local/naver_playwright/msedge/Default/discount_infos_db/LOG
+.local/naver_playwright/msedge/Default/discount_infos_db/LOG.old
+.local/naver_playwright/msedge/Default/discounts_db/LOCK
+.local/naver_playwright/msedge/Default/discounts_db/LOG
+.local/naver_playwright/msedge/Default/discounts_db/LOG.old
+.local/naver_playwright/msedge/Default/favorites_diagnostic.log
+.local/naver_playwright/msedge/Default/heavy_ad_intervention_opt_out.db
+.local/naver_playwright/msedge/Default/heavy_ad_intervention_opt_out.db-journal
+.local/naver_playwright/msedge/Default/load_statistics.db
+.local/naver_playwright/msedge/Default/parcel_tracking_db/LOCK
+.local/naver_playwright/msedge/Default/parcel_tracking_db/LOG
+.local/naver_playwright/msedge/Default/parcel_tracking_db/LOG.old
+.local/naver_playwright/msedge/Default/shared_proto_db/000003.log
+.local/naver_playwright/msedge/Default/shared_proto_db/CURRENT
+.local/naver_playwright/msedge/Default/shared_proto_db/LOCK
+.local/naver_playwright/msedge/Default/shared_proto_db/LOG
+.local/naver_playwright/msedge/Default/shared_proto_db/LOG.old
+.local/naver_playwright/msedge/Default/shared_proto_db/MANIFEST-000001
+.local/naver_playwright/msedge/Default/shared_proto_db/metadata/000003.log
+.local/naver_playwright/msedge/Default/shared_proto_db/metadata/CURRENT
+.local/naver_playwright/msedge/Default/shared_proto_db/metadata/LOCK
+.local/naver_playwright/msedge/Default/shared_proto_db/metadata/LOG
+.local/naver_playwright/msedge/Default/shared_proto_db/metadata/LOG.old
+.local/naver_playwright/msedge/Default/shared_proto_db/metadata/MANIFEST-000001
+.local/naver_playwright/msedge/FirstLaunchAfterInstallation
+.local/naver_playwright/msedge/GrShaderCache/data_0
+.local/naver_playwright/msedge/GrShaderCache/data_1
+.local/naver_playwright/msedge/GrShaderCache/data_2
+.local/naver_playwright/msedge/GrShaderCache/data_3
+.local/naver_playwright/msedge/GrShaderCache/index
+.local/naver_playwright/msedge/GraphiteDawnCache/data_0
+.local/naver_playwright/msedge/GraphiteDawnCache/data_1
+.local/naver_playwright/msedge/GraphiteDawnCache/data_2
+.local/naver_playwright/msedge/GraphiteDawnCache/data_3
+.local/naver_playwright/msedge/GraphiteDawnCache/index
+.local/naver_playwright/msedge/Last Browser
+.local/naver_playwright/msedge/Last Version
+.local/naver_playwright/msedge/Local State
+.local/naver_playwright/msedge/Nurturing/campaign_history
+.local/naver_playwright/msedge/Nurturing/campaign_history-journal
+.local/naver_playwright/msedge/ShaderCache/data_0
+.local/naver_playwright/msedge/ShaderCache/data_1
+.local/naver_playwright/msedge/ShaderCache/data_2
+.local/naver_playwright/msedge/ShaderCache/data_3
+.local/naver_playwright/msedge/ShaderCache/index
+.local/naver_playwright/msedge/SmartScreen/RemoteData/customSettings
+.local/naver_playwright/msedge/SmartScreen/RemoteData/customSettings_F95BA787499AB4FA9EFFF472CE383A14
+.local/naver_playwright/msedge/SmartScreen/RemoteData/edgeSettings
+.local/naver_playwright/msedge/SmartScreen/RemoteData/edgeSettings_2.0-0
+.local/naver_playwright/msedge/SmartScreen/RemoteData/topTraffic
+.local/naver_playwright/msedge/SmartScreen/RemoteData/topTraffic_170540185939602997400506234197983529371
+.local/naver_playwright/msedge/Variations
+.local/naver_playwright/msedge/component_crx_cache/metadata.json
+.local/naver_playwright/msedge/extensions_crx_cache/metadata.json
+.local/naver_playwright/msedge/first_party_sets.db
+.local/naver_playwright/msedge/first_party_sets.db-journal
+.local/naver_playwright/msedge/ko-3-0.bdic
+.local/naver_playwright/naver_creator_session.json
+.tmp/searchad-apidoc
+.tmp/uvicorn.err.log
+.tmp/uvicorn.out.log
+.tmp_pw_chrome/BrowserMetrics/BrowserMetrics-69BA5864-8D3C.pma
+.tmp_pw_chrome/Crashpad/metadata
+.tmp_pw_chrome/Crashpad/settings.dat
+.tmp_pw_chrome/CrashpadMetrics-active.pma
+.tmp_pw_chrome/Default/Account Web Data
+.tmp_pw_chrome/Default/Account Web Data-journal
+.tmp_pw_chrome/Default/Affiliation Database
+.tmp_pw_chrome/Default/Affiliation Database-journal
+.tmp_pw_chrome/Default/ClientCertificates/LOCK
+.tmp_pw_chrome/Default/ClientCertificates/LOG
+.tmp_pw_chrome/Default/Code Cache/js/index
+.tmp_pw_chrome/Default/Code Cache/wasm/index
+.tmp_pw_chrome/Default/DawnGraphiteCache/data_0
+.tmp_pw_chrome/Default/DawnGraphiteCache/data_1
+.tmp_pw_chrome/Default/DawnGraphiteCache/data_2
+.tmp_pw_chrome/Default/DawnGraphiteCache/data_3
+.tmp_pw_chrome/Default/DawnGraphiteCache/index
+.tmp_pw_chrome/Default/DawnWebGPUCache/data_0
+.tmp_pw_chrome/Default/DawnWebGPUCache/data_1
+.tmp_pw_chrome/Default/DawnWebGPUCache/data_2
+.tmp_pw_chrome/Default/DawnWebGPUCache/data_3
+.tmp_pw_chrome/Default/DawnWebGPUCache/index
+.tmp_pw_chrome/Default/Extension Rules/000003.log
+.tmp_pw_chrome/Default/Extension Rules/CURRENT
+.tmp_pw_chrome/Default/Extension Rules/LOCK
+.tmp_pw_chrome/Default/Extension Rules/LOG
+.tmp_pw_chrome/Default/Extension Rules/MANIFEST-000001
+.tmp_pw_chrome/Default/Extension Scripts/000003.log
+.tmp_pw_chrome/Default/Extension Scripts/CURRENT
+.tmp_pw_chrome/Default/Extension Scripts/LOCK
+.tmp_pw_chrome/Default/Extension Scripts/LOG
+.tmp_pw_chrome/Default/Extension Scripts/MANIFEST-000001
+.tmp_pw_chrome/Default/Extension State/000003.log
+.tmp_pw_chrome/Default/Extension State/CURRENT
+.tmp_pw_chrome/Default/Extension State/LOCK
+.tmp_pw_chrome/Default/Extension State/LOG
+.tmp_pw_chrome/Default/Extension State/MANIFEST-000001
+.tmp_pw_chrome/Default/Favicons
+.tmp_pw_chrome/Default/Favicons-journal
+.tmp_pw_chrome/Default/GPUCache/data_0
+.tmp_pw_chrome/Default/GPUCache/data_1
+.tmp_pw_chrome/Default/GPUCache/data_2
+.tmp_pw_chrome/Default/GPUCache/data_3
+.tmp_pw_chrome/Default/GPUCache/index
+.tmp_pw_chrome/Default/History
+.tmp_pw_chrome/Default/History-journal
+.tmp_pw_chrome/Default/LOCK
+.tmp_pw_chrome/Default/LOG
+.tmp_pw_chrome/Default/Local Storage/leveldb/000003.log
+.tmp_pw_chrome/Default/Local Storage/leveldb/CURRENT
+.tmp_pw_chrome/Default/Local Storage/leveldb/LOCK
+.tmp_pw_chrome/Default/Local Storage/leveldb/LOG
+.tmp_pw_chrome/Default/Local Storage/leveldb/MANIFEST-000001
+.tmp_pw_chrome/Default/Login Data
+.tmp_pw_chrome/Default/Login Data For Account
+.tmp_pw_chrome/Default/Login Data For Account-journal
+.tmp_pw_chrome/Default/Login Data-journal
+.tmp_pw_chrome/Default/Network/NetworkDataMigrated
+.tmp_pw_chrome/Default/PersistentOriginTrials/LOCK
+.tmp_pw_chrome/Default/PersistentOriginTrials/LOG
+.tmp_pw_chrome/Default/Preferences
+.tmp_pw_chrome/Default/README
+.tmp_pw_chrome/Default/Safe Browsing Network/NetworkDataMigrated
+.tmp_pw_chrome/Default/Secure Preferences
+.tmp_pw_chrome/Default/Segmentation Platform/SegmentInfoDB/LOCK
+.tmp_pw_chrome/Default/Segmentation Platform/SegmentInfoDB/LOG
+.tmp_pw_chrome/Default/Segmentation Platform/SignalDB/LOCK
+.tmp_pw_chrome/Default/Segmentation Platform/SignalDB/LOG
+.tmp_pw_chrome/Default/Segmentation Platform/SignalStorageConfigDB/LOCK
+.tmp_pw_chrome/Default/Segmentation Platform/SignalStorageConfigDB/LOG
+.tmp_pw_chrome/Default/ServerCertificate
+.tmp_pw_chrome/Default/ServerCertificate-journal
+.tmp_pw_chrome/Default/Session Storage/000003.log
+.tmp_pw_chrome/Default/Session Storage/CURRENT
+.tmp_pw_chrome/Default/Session Storage/LOCK
+.tmp_pw_chrome/Default/Session Storage/LOG
+.tmp_pw_chrome/Default/Session Storage/MANIFEST-000001
+.tmp_pw_chrome/Default/Sessions/Session_13418293605355009
+.tmp_pw_chrome/Default/Sessions/Tabs_13418293605355028
+.tmp_pw_chrome/Default/Site Characteristics Database/000003.log
+.tmp_pw_chrome/Default/Site Characteristics Database/CURRENT
+.tmp_pw_chrome/Default/Site Characteristics Database/LOCK
+.tmp_pw_chrome/Default/Site Characteristics Database/LOG
+.tmp_pw_chrome/Default/Site Characteristics Database/MANIFEST-000001
+.tmp_pw_chrome/Default/Sync Data/LevelDB/000003.log
+.tmp_pw_chrome/Default/Sync Data/LevelDB/CURRENT
+.tmp_pw_chrome/Default/Sync Data/LevelDB/LOCK
+.tmp_pw_chrome/Default/Sync Data/LevelDB/LOG
+.tmp_pw_chrome/Default/Sync Data/LevelDB/MANIFEST-000001
+.tmp_pw_chrome/Default/Top Sites
+.tmp_pw_chrome/Default/Top Sites-journal
+.tmp_pw_chrome/Default/Web Data
+.tmp_pw_chrome/Default/Web Data-journal
+.tmp_pw_chrome/Default/chrome_cart_db/LOCK
+.tmp_pw_chrome/Default/chrome_cart_db/LOG
+.tmp_pw_chrome/Default/commerce_subscription_db/LOCK
+.tmp_pw_chrome/Default/commerce_subscription_db/LOG
+.tmp_pw_chrome/Default/discount_infos_db/LOCK
+.tmp_pw_chrome/Default/discount_infos_db/LOG
+.tmp_pw_chrome/Default/discounts_db/LOCK
+.tmp_pw_chrome/Default/discounts_db/LOG
+.tmp_pw_chrome/Default/parcel_tracking_db/LOCK
+.tmp_pw_chrome/Default/parcel_tracking_db/LOG
+.tmp_pw_chrome/GrShaderCache/data_0
+.tmp_pw_chrome/GrShaderCache/data_1
+.tmp_pw_chrome/GrShaderCache/data_2
+.tmp_pw_chrome/GrShaderCache/data_3
+.tmp_pw_chrome/GrShaderCache/index
+.tmp_pw_chrome/GraphiteDawnCache/data_0
+.tmp_pw_chrome/GraphiteDawnCache/data_1
+.tmp_pw_chrome/GraphiteDawnCache/data_2
+.tmp_pw_chrome/GraphiteDawnCache/data_3
+.tmp_pw_chrome/GraphiteDawnCache/index
+.tmp_pw_chrome/Last Version
+.tmp_pw_chrome/Local State
+.tmp_pw_chrome/ShaderCache/data_0
+.tmp_pw_chrome/ShaderCache/data_1
+.tmp_pw_chrome/ShaderCache/data_2
+.tmp_pw_chrome/ShaderCache/data_3
+.tmp_pw_chrome/ShaderCache/index
+.tmp_pw_chrome/Variations
+.tmp_pw_chrome/first_party_sets.db
+.tmp_pw_chrome/first_party_sets.db-journal
+.tmp_pw_chrome/segmentation_platform/ukm_db
+.tmp_pw_chrome/segmentation_platform/ukm_db-wal
+.tmp_pw_chrome2/BrowserMetrics/BrowserMetrics-69BA58A5-2A90.pma
+.tmp_pw_chrome2/Crashpad/metadata
+.tmp_pw_chrome2/Crashpad/settings.dat
+.tmp_pw_chrome2/CrashpadMetrics-active.pma
+.tmp_pw_chrome2/Default/Account Web Data
+.tmp_pw_chrome2/Default/Account Web Data-journal
+.tmp_pw_chrome2/Default/Affiliation Database
+.tmp_pw_chrome2/Default/Affiliation Database-journal
+.tmp_pw_chrome2/Default/BookmarkMergedSurfaceOrdering
+.tmp_pw_chrome2/Default/Cache/Cache_Data/data_0
+.tmp_pw_chrome2/Default/Cache/Cache_Data/data_1
+.tmp_pw_chrome2/Default/Cache/Cache_Data/data_2
+.tmp_pw_chrome2/Default/Cache/Cache_Data/data_3
+.tmp_pw_chrome2/Default/Cache/Cache_Data/f_000001
+.tmp_pw_chrome2/Default/Cache/Cache_Data/f_000002
+.tmp_pw_chrome2/Default/Cache/Cache_Data/f_000003
+.tmp_pw_chrome2/Default/Cache/Cache_Data/f_000004
+.tmp_pw_chrome2/Default/Cache/Cache_Data/index
+.tmp_pw_chrome2/Default/Cache/No_Vary_Search/journal.baj
+.tmp_pw_chrome2/Default/Cache/No_Vary_Search/snapshot.baf
+.tmp_pw_chrome2/Default/ClientCertificates/LOCK
+.tmp_pw_chrome2/Default/ClientCertificates/LOG
+.tmp_pw_chrome2/Default/Code Cache/js/7fa183aec42b7859_0
+.tmp_pw_chrome2/Default/Code Cache/js/d3d3c7d98fd04be9_0
+.tmp_pw_chrome2/Default/Code Cache/js/e32a53b6ba3687fc_0
+.tmp_pw_chrome2/Default/Code Cache/js/index
+.tmp_pw_chrome2/Default/Code Cache/js/index-dir/the-real-index
+.tmp_pw_chrome2/Default/Code Cache/wasm/index
+.tmp_pw_chrome2/Default/Code Cache/wasm/index-dir/the-real-index
+.tmp_pw_chrome2/Default/DawnGraphiteCache/data_0
+.tmp_pw_chrome2/Default/DawnGraphiteCache/data_1
+.tmp_pw_chrome2/Default/DawnGraphiteCache/data_2
+.tmp_pw_chrome2/Default/DawnGraphiteCache/data_3
+.tmp_pw_chrome2/Default/DawnGraphiteCache/index
+.tmp_pw_chrome2/Default/DawnWebGPUCache/data_0
+.tmp_pw_chrome2/Default/DawnWebGPUCache/data_1
+.tmp_pw_chrome2/Default/DawnWebGPUCache/data_2
+.tmp_pw_chrome2/Default/DawnWebGPUCache/data_3
+.tmp_pw_chrome2/Default/DawnWebGPUCache/index
+.tmp_pw_chrome2/Default/Extension Rules/000003.log
+.tmp_pw_chrome2/Default/Extension Rules/CURRENT
+.tmp_pw_chrome2/Default/Extension Rules/LOCK
+.tmp_pw_chrome2/Default/Extension Rules/LOG
+.tmp_pw_chrome2/Default/Extension Rules/MANIFEST-000001
+.tmp_pw_chrome2/Default/Extension Scripts/000003.log
+.tmp_pw_chrome2/Default/Extension Scripts/CURRENT
+.tmp_pw_chrome2/Default/Extension Scripts/LOCK
+.tmp_pw_chrome2/Default/Extension Scripts/LOG
+.tmp_pw_chrome2/Default/Extension Scripts/MANIFEST-000001
+.tmp_pw_chrome2/Default/Extension State/000003.log
+.tmp_pw_chrome2/Default/Extension State/CURRENT
+.tmp_pw_chrome2/Default/Extension State/LOCK
+.tmp_pw_chrome2/Default/Extension State/LOG
+.tmp_pw_chrome2/Default/Extension State/MANIFEST-000001
+.tmp_pw_chrome2/Default/Favicons
+.tmp_pw_chrome2/Default/Favicons-journal
+.tmp_pw_chrome2/Default/GPUCache/data_0
+.tmp_pw_chrome2/Default/GPUCache/data_1
+.tmp_pw_chrome2/Default/GPUCache/data_2
+.tmp_pw_chrome2/Default/GPUCache/data_3
+.tmp_pw_chrome2/Default/GPUCache/index
+.tmp_pw_chrome2/Default/History
+.tmp_pw_chrome2/Default/History-journal
+.tmp_pw_chrome2/Default/LOCK
+.tmp_pw_chrome2/Default/LOG
+.tmp_pw_chrome2/Default/Local Storage/leveldb/000003.log
+.tmp_pw_chrome2/Default/Local Storage/leveldb/CURRENT
+.tmp_pw_chrome2/Default/Local Storage/leveldb/LOCK
+.tmp_pw_chrome2/Default/Local Storage/leveldb/LOG
+.tmp_pw_chrome2/Default/Local Storage/leveldb/MANIFEST-000001
+.tmp_pw_chrome2/Default/Login Data
+.tmp_pw_chrome2/Default/Login Data For Account
+.tmp_pw_chrome2/Default/Login Data For Account-journal
+.tmp_pw_chrome2/Default/Login Data-journal
+.tmp_pw_chrome2/Default/Network/Cookies
+.tmp_pw_chrome2/Default/Network/Cookies-journal
+.tmp_pw_chrome2/Default/Network/Network Persistent State
+.tmp_pw_chrome2/Default/Network/NetworkDataMigrated
+.tmp_pw_chrome2/Default/Network/Reporting and NEL
+.tmp_pw_chrome2/Default/Network/Reporting and NEL-journal
+.tmp_pw_chrome2/Default/Network/TransportSecurity
+.tmp_pw_chrome2/Default/Network/Trust Tokens
+.tmp_pw_chrome2/Default/Network/Trust Tokens-journal
+.tmp_pw_chrome2/Default/PersistentOriginTrials/LOCK
+.tmp_pw_chrome2/Default/PersistentOriginTrials/LOG
+.tmp_pw_chrome2/Default/Preferences
+.tmp_pw_chrome2/Default/README
+.tmp_pw_chrome2/Default/Safe Browsing Network/NetworkDataMigrated
+.tmp_pw_chrome2/Default/Safe Browsing Network/Safe Browsing Cookies
+.tmp_pw_chrome2/Default/Safe Browsing Network/Safe Browsing Cookies-journal
+.tmp_pw_chrome2/Default/Secure Preferences
+.tmp_pw_chrome2/Default/Segmentation Platform/SegmentInfoDB/LOCK
+.tmp_pw_chrome2/Default/Segmentation Platform/SegmentInfoDB/LOG
+.tmp_pw_chrome2/Default/Segmentation Platform/SignalDB/LOCK
+.tmp_pw_chrome2/Default/Segmentation Platform/SignalDB/LOG
+.tmp_pw_chrome2/Default/Segmentation Platform/SignalStorageConfigDB/LOCK
+.tmp_pw_chrome2/Default/Segmentation Platform/SignalStorageConfigDB/LOG
+.tmp_pw_chrome2/Default/ServerCertificate
+.tmp_pw_chrome2/Default/ServerCertificate-journal
+.tmp_pw_chrome2/Default/Session Storage/000003.log
+.tmp_pw_chrome2/Default/Session Storage/CURRENT
+.tmp_pw_chrome2/Default/Session Storage/LOCK
+.tmp_pw_chrome2/Default/Session Storage/LOG
+.tmp_pw_chrome2/Default/Session Storage/MANIFEST-000001
+.tmp_pw_chrome2/Default/Sessions/Session_13418293672744905
+.tmp_pw_chrome2/Default/Sessions/Tabs_13418293677087489
+.tmp_pw_chrome2/Default/Shared Dictionary/cache/index
+.tmp_pw_chrome2/Default/Shared Dictionary/cache/index-dir/the-real-index
+.tmp_pw_chrome2/Default/Shared Dictionary/db
+.tmp_pw_chrome2/Default/Shared Dictionary/db-journal
+.tmp_pw_chrome2/Default/SharedStorage
+.tmp_pw_chrome2/Default/Site Characteristics Database/000003.log
+.tmp_pw_chrome2/Default/Site Characteristics Database/CURRENT
+.tmp_pw_chrome2/Default/Site Characteristics Database/LOCK
+.tmp_pw_chrome2/Default/Site Characteristics Database/LOG
+.tmp_pw_chrome2/Default/Site Characteristics Database/MANIFEST-000001
+.tmp_pw_chrome2/Default/Sync Data/LevelDB/000003.log
+.tmp_pw_chrome2/Default/Sync Data/LevelDB/CURRENT
+.tmp_pw_chrome2/Default/Sync Data/LevelDB/LOCK
+.tmp_pw_chrome2/Default/Sync Data/LevelDB/LOG
+.tmp_pw_chrome2/Default/Sync Data/LevelDB/MANIFEST-000001
+.tmp_pw_chrome2/Default/Top Sites
+.tmp_pw_chrome2/Default/Top Sites-journal
+.tmp_pw_chrome2/Default/Web Data
+.tmp_pw_chrome2/Default/Web Data-journal
+.tmp_pw_chrome2/Default/chrome_cart_db/LOCK
+.tmp_pw_chrome2/Default/chrome_cart_db/LOG
+.tmp_pw_chrome2/Default/commerce_subscription_db/LOCK
+.tmp_pw_chrome2/Default/commerce_subscription_db/LOG
+.tmp_pw_chrome2/Default/discount_infos_db/LOCK
+.tmp_pw_chrome2/Default/discount_infos_db/LOG
+.tmp_pw_chrome2/Default/discounts_db/LOCK
+.tmp_pw_chrome2/Default/discounts_db/LOG
+.tmp_pw_chrome2/Default/heavy_ad_intervention_opt_out.db
+.tmp_pw_chrome2/Default/heavy_ad_intervention_opt_out.db-journal
+.tmp_pw_chrome2/Default/parcel_tracking_db/LOCK
+.tmp_pw_chrome2/Default/parcel_tracking_db/LOG
+.tmp_pw_chrome2/Default/shared_proto_db/000003.log
+.tmp_pw_chrome2/Default/shared_proto_db/CURRENT
+.tmp_pw_chrome2/Default/shared_proto_db/LOCK
+.tmp_pw_chrome2/Default/shared_proto_db/LOG
+.tmp_pw_chrome2/Default/shared_proto_db/MANIFEST-000001
+.tmp_pw_chrome2/Default/shared_proto_db/metadata/000003.log
+.tmp_pw_chrome2/Default/shared_proto_db/metadata/CURRENT
+.tmp_pw_chrome2/Default/shared_proto_db/metadata/LOCK
+.tmp_pw_chrome2/Default/shared_proto_db/metadata/LOG
+.tmp_pw_chrome2/Default/shared_proto_db/metadata/MANIFEST-000001
+.tmp_pw_chrome2/Default/trusted_vault.pb
+.tmp_pw_chrome2/GrShaderCache/data_0
+.tmp_pw_chrome2/GrShaderCache/data_1
+.tmp_pw_chrome2/GrShaderCache/data_2
+.tmp_pw_chrome2/GrShaderCache/data_3
+.tmp_pw_chrome2/GrShaderCache/index
+.tmp_pw_chrome2/GraphiteDawnCache/data_0
+.tmp_pw_chrome2/GraphiteDawnCache/data_1
+.tmp_pw_chrome2/GraphiteDawnCache/data_2
+.tmp_pw_chrome2/GraphiteDawnCache/data_3
+.tmp_pw_chrome2/GraphiteDawnCache/index
+.tmp_pw_chrome2/Last Version
+.tmp_pw_chrome2/Local State
+.tmp_pw_chrome2/ShaderCache/data_0
+.tmp_pw_chrome2/ShaderCache/data_1
+.tmp_pw_chrome2/ShaderCache/data_2
+.tmp_pw_chrome2/ShaderCache/data_3
+.tmp_pw_chrome2/ShaderCache/index
+.tmp_pw_chrome2/Variations
+.tmp_pw_chrome2/extensions_crx_cache/metadata.json
+.tmp_pw_chrome2/first_party_sets.db
+.tmp_pw_chrome2/first_party_sets.db-journal
+.tmp_pw_chrome2/segmentation_platform/ukm_db
+.tmp_pw_chrome2/segmentation_platform/ukm_db-wal
+.tmp_pw_edge2/BrowserMetrics/BrowserMetrics-69BA58A5-7684.pma
+.tmp_pw_edge2/Crashpad/metadata
+.tmp_pw_edge2/Crashpad/settings.dat
+.tmp_pw_edge2/Crashpad/throttle_store.dat
+.tmp_pw_edge2/Default/Asset Store/assets.db/000003.log
+.tmp_pw_edge2/Default/Asset Store/assets.db/CURRENT
+.tmp_pw_edge2/Default/Asset Store/assets.db/LOCK
+.tmp_pw_edge2/Default/Asset Store/assets.db/LOG
+.tmp_pw_edge2/Default/Asset Store/assets.db/MANIFEST-000001
+.tmp_pw_edge2/Default/BookmarkMergedSurfaceOrdering
+.tmp_pw_edge2/Default/Cache/Cache_Data/data_0
+.tmp_pw_edge2/Default/Cache/Cache_Data/data_1
+.tmp_pw_edge2/Default/Cache/Cache_Data/data_2
+.tmp_pw_edge2/Default/Cache/Cache_Data/data_3
+.tmp_pw_edge2/Default/Cache/Cache_Data/f_000001
+.tmp_pw_edge2/Default/Cache/Cache_Data/f_000002
+.tmp_pw_edge2/Default/Cache/Cache_Data/f_000003
+.tmp_pw_edge2/Default/Cache/Cache_Data/f_000004
+.tmp_pw_edge2/Default/Cache/Cache_Data/f_000005
+.tmp_pw_edge2/Default/Cache/Cache_Data/index
+.tmp_pw_edge2/Default/Cache/No_Vary_Search/journal.baj
+.tmp_pw_edge2/Default/Cache/No_Vary_Search/snapshot.baf
+.tmp_pw_edge2/Default/ClientCertificates/LOCK
+.tmp_pw_edge2/Default/ClientCertificates/LOG
+.tmp_pw_edge2/Default/Code Cache/js/3ebcd0eae1b2a723_0
+.tmp_pw_edge2/Default/Code Cache/js/7fa183aec42b7859_0
+.tmp_pw_edge2/Default/Code Cache/js/e32a53b6ba3687fc_0
+.tmp_pw_edge2/Default/Code Cache/js/index
+.tmp_pw_edge2/Default/Code Cache/js/index-dir/the-real-index
+.tmp_pw_edge2/Default/Code Cache/wasm/index
+.tmp_pw_edge2/Default/Code Cache/wasm/index-dir/the-real-index
+.tmp_pw_edge2/Default/DawnGraphiteCache/data_0
+.tmp_pw_edge2/Default/DawnGraphiteCache/data_1
+.tmp_pw_edge2/Default/DawnGraphiteCache/data_2
+.tmp_pw_edge2/Default/DawnGraphiteCache/data_3
+.tmp_pw_edge2/Default/DawnGraphiteCache/index
+.tmp_pw_edge2/Default/DawnWebGPUCache/data_0
+.tmp_pw_edge2/Default/DawnWebGPUCache/data_1
+.tmp_pw_edge2/Default/DawnWebGPUCache/data_2
+.tmp_pw_edge2/Default/DawnWebGPUCache/data_3
+.tmp_pw_edge2/Default/DawnWebGPUCache/index
+.tmp_pw_edge2/Default/DualEngine/SiteList-Consumer.json
+.tmp_pw_edge2/Default/DualEngine/SiteList-Enterprise.json
+.tmp_pw_edge2/Default/EdgeCoupons/coupons_data.db/000003.log
+.tmp_pw_edge2/Default/EdgeCoupons/coupons_data.db/CURRENT
+.tmp_pw_edge2/Default/EdgeCoupons/coupons_data.db/LOCK
+.tmp_pw_edge2/Default/EdgeCoupons/coupons_data.db/LOG
+.tmp_pw_edge2/Default/EdgeCoupons/coupons_data.db/MANIFEST-000001
+.tmp_pw_edge2/Default/EdgePushStorageWithConnectTokenAndKey/LOCK
+.tmp_pw_edge2/Default/EdgePushStorageWithConnectTokenAndKey/LOG
+.tmp_pw_edge2/Default/EntityExtraction/EntityExtractionAssetStore.db/000003.log
+.tmp_pw_edge2/Default/EntityExtraction/EntityExtractionAssetStore.db/CURRENT
+.tmp_pw_edge2/Default/EntityExtraction/EntityExtractionAssetStore.db/LOCK
+.tmp_pw_edge2/Default/EntityExtraction/EntityExtractionAssetStore.db/LOG
+.tmp_pw_edge2/Default/EntityExtraction/EntityExtractionAssetStore.db/MANIFEST-000001
+.tmp_pw_edge2/Default/EntityExtraction/domains_config.json
+.tmp_pw_edge2/Default/Extension Rules/000003.log
+.tmp_pw_edge2/Default/Extension Rules/CURRENT
+.tmp_pw_edge2/Default/Extension Rules/LOCK
+.tmp_pw_edge2/Default/Extension Rules/LOG
+.tmp_pw_edge2/Default/Extension Rules/MANIFEST-000001
+.tmp_pw_edge2/Default/Extension Scripts/000003.log
+.tmp_pw_edge2/Default/Extension Scripts/CURRENT
+.tmp_pw_edge2/Default/Extension Scripts/LOCK
+.tmp_pw_edge2/Default/Extension Scripts/LOG
+.tmp_pw_edge2/Default/Extension Scripts/MANIFEST-000001
+.tmp_pw_edge2/Default/Extension State/000003.log
+.tmp_pw_edge2/Default/Extension State/CURRENT
+.tmp_pw_edge2/Default/Extension State/LOCK
+.tmp_pw_edge2/Default/Extension State/LOG
+.tmp_pw_edge2/Default/Extension State/MANIFEST-000001
+.tmp_pw_edge2/Default/ExtensionActivityEdge
+.tmp_pw_edge2/Default/ExtensionActivityEdge-journal
+.tmp_pw_edge2/Default/Favicons
+.tmp_pw_edge2/Default/Favicons-journal
+.tmp_pw_edge2/Default/GPUCache/data_0
+.tmp_pw_edge2/Default/GPUCache/data_1
+.tmp_pw_edge2/Default/GPUCache/data_2
+.tmp_pw_edge2/Default/GPUCache/data_3
+.tmp_pw_edge2/Default/GPUCache/index
+.tmp_pw_edge2/Default/History
+.tmp_pw_edge2/Default/History-journal
+.tmp_pw_edge2/Default/HubApps Icons
+.tmp_pw_edge2/Default/HubApps Icons-journal
+.tmp_pw_edge2/Default/LOCK
+.tmp_pw_edge2/Default/LOG
+.tmp_pw_edge2/Default/Local Storage/leveldb/000003.log
+.tmp_pw_edge2/Default/Local Storage/leveldb/CURRENT
+.tmp_pw_edge2/Default/Local Storage/leveldb/LOCK
+.tmp_pw_edge2/Default/Local Storage/leveldb/LOG
+.tmp_pw_edge2/Default/Local Storage/leveldb/MANIFEST-000001
+.tmp_pw_edge2/Default/Login Data
+.tmp_pw_edge2/Default/Login Data For Account
+.tmp_pw_edge2/Default/Login Data For Account-journal
+.tmp_pw_edge2/Default/Login Data-journal
+.tmp_pw_edge2/Default/Network/Cookies
+.tmp_pw_edge2/Default/Network/Cookies-journal
+.tmp_pw_edge2/Default/Network/Network Persistent State
+.tmp_pw_edge2/Default/Network/NetworkDataMigrated
+.tmp_pw_edge2/Default/Network/Reporting and NEL
+.tmp_pw_edge2/Default/Network/Reporting and NEL-journal
+.tmp_pw_edge2/Default/Network/SCT Auditing Pending Reports
+.tmp_pw_edge2/Default/Network/Sdch Dictionaries
+.tmp_pw_edge2/Default/Network/Trust Tokens
+.tmp_pw_edge2/Default/Network/Trust Tokens-journal
+.tmp_pw_edge2/Default/Nurturing/campaign_history
+.tmp_pw_edge2/Default/Nurturing/campaign_history-journal
+.tmp_pw_edge2/Default/PersistentOriginTrials/LOCK
+.tmp_pw_edge2/Default/PersistentOriginTrials/LOG
+.tmp_pw_edge2/Default/Preferences
+.tmp_pw_edge2/Default/README
+.tmp_pw_edge2/Default/Safe Browsing Network/NetworkDataMigrated
+.tmp_pw_edge2/Default/Safe Browsing Network/Safe Browsing Cookies
+.tmp_pw_edge2/Default/Safe Browsing Network/Safe Browsing Cookies-journal
+.tmp_pw_edge2/Default/Secure Preferences
+.tmp_pw_edge2/Default/ServerCertificate
+.tmp_pw_edge2/Default/ServerCertificate-journal
+.tmp_pw_edge2/Default/Session Storage/000003.log
+.tmp_pw_edge2/Default/Session Storage/CURRENT
+.tmp_pw_edge2/Default/Session Storage/LOCK
+.tmp_pw_edge2/Default/Session Storage/LOG
+.tmp_pw_edge2/Default/Session Storage/MANIFEST-000001
+.tmp_pw_edge2/Default/Sessions/Session_13418293672760129
+.tmp_pw_edge2/Default/Sessions/Tabs_13418293678622542
+.tmp_pw_edge2/Default/Shared Dictionary/cache/index
+.tmp_pw_edge2/Default/Shared Dictionary/cache/index-dir/the-real-index
+.tmp_pw_edge2/Default/Shared Dictionary/db
+.tmp_pw_edge2/Default/Shared Dictionary/db-journal
+.tmp_pw_edge2/Default/SharedStorage
+.tmp_pw_edge2/Default/Shortcuts
+.tmp_pw_edge2/Default/Shortcuts-journal
+.tmp_pw_edge2/Default/Site Characteristics Database/000003.log
+.tmp_pw_edge2/Default/Site Characteristics Database/CURRENT
+.tmp_pw_edge2/Default/Site Characteristics Database/LOCK
+.tmp_pw_edge2/Default/Site Characteristics Database/LOG
+.tmp_pw_edge2/Default/Site Characteristics Database/MANIFEST-000001
+.tmp_pw_edge2/Default/Sync Data/LevelDB/000003.log
+.tmp_pw_edge2/Default/Sync Data/LevelDB/CURRENT
+.tmp_pw_edge2/Default/Sync Data/LevelDB/LOCK
+.tmp_pw_edge2/Default/Sync Data/LevelDB/LOG
+.tmp_pw_edge2/Default/Sync Data/LevelDB/MANIFEST-000001
+.tmp_pw_edge2/Default/Top Sites
+.tmp_pw_edge2/Default/Top Sites-journal
+.tmp_pw_edge2/Default/Vpn Tokens
+.tmp_pw_edge2/Default/Vpn Tokens-journal
+.tmp_pw_edge2/Default/Web Data
+.tmp_pw_edge2/Default/Web Data-journal
+.tmp_pw_edge2/Default/arbitration_service_config.json
+.tmp_pw_edge2/Default/commerce_subscription_db/LOCK
+.tmp_pw_edge2/Default/commerce_subscription_db/LOG
+.tmp_pw_edge2/Default/discount_infos_db/LOCK
+.tmp_pw_edge2/Default/discount_infos_db/LOG
+.tmp_pw_edge2/Default/discounts_db/LOCK
+.tmp_pw_edge2/Default/discounts_db/LOG
+.tmp_pw_edge2/Default/heavy_ad_intervention_opt_out.db
+.tmp_pw_edge2/Default/heavy_ad_intervention_opt_out.db-journal
+.tmp_pw_edge2/Default/load_statistics.db
+.tmp_pw_edge2/Default/parcel_tracking_db/LOCK
+.tmp_pw_edge2/Default/parcel_tracking_db/LOG
+.tmp_pw_edge2/Default/shared_proto_db/000003.log
+.tmp_pw_edge2/Default/shared_proto_db/CURRENT
+.tmp_pw_edge2/Default/shared_proto_db/LOCK
+.tmp_pw_edge2/Default/shared_proto_db/LOG
+.tmp_pw_edge2/Default/shared_proto_db/MANIFEST-000001
+.tmp_pw_edge2/Default/shared_proto_db/metadata/000003.log
+.tmp_pw_edge2/Default/shared_proto_db/metadata/CURRENT
+.tmp_pw_edge2/Default/shared_proto_db/metadata/LOCK
+.tmp_pw_edge2/Default/shared_proto_db/metadata/LOG
+.tmp_pw_edge2/Default/shared_proto_db/metadata/MANIFEST-000001
+.tmp_pw_edge2/FirstLaunchAfterInstallation
+.tmp_pw_edge2/GrShaderCache/data_0
+.tmp_pw_edge2/GrShaderCache/data_1
+.tmp_pw_edge2/GrShaderCache/data_2
+.tmp_pw_edge2/GrShaderCache/data_3
+.tmp_pw_edge2/GrShaderCache/index
+.tmp_pw_edge2/GraphiteDawnCache/data_0
+.tmp_pw_edge2/GraphiteDawnCache/data_1
+.tmp_pw_edge2/GraphiteDawnCache/data_2
+.tmp_pw_edge2/GraphiteDawnCache/data_3
+.tmp_pw_edge2/GraphiteDawnCache/index
+.tmp_pw_edge2/Last Version
+.tmp_pw_edge2/Local State
+.tmp_pw_edge2/Nurturing/campaign_history
+.tmp_pw_edge2/Nurturing/campaign_history-journal
+.tmp_pw_edge2/ShaderCache/data_0
+.tmp_pw_edge2/ShaderCache/data_1
+.tmp_pw_edge2/ShaderCache/data_2
+.tmp_pw_edge2/ShaderCache/data_3
+.tmp_pw_edge2/ShaderCache/index
+.tmp_pw_edge2/SmartScreen/RemoteData/customSettings
+.tmp_pw_edge2/SmartScreen/RemoteData/customSettings_F95BA787499AB4FA9EFFF472CE383A14
+.tmp_pw_edge2/SmartScreen/RemoteData/edgeSettings
+.tmp_pw_edge2/SmartScreen/RemoteData/edgeSettings_2.0-0
+.tmp_pw_edge2/SmartScreen/RemoteData/topTraffic
+.tmp_pw_edge2/SmartScreen/RemoteData/topTraffic_170540185939602997400506234197983529371
+.tmp_pw_edge2/Variations
+.tmp_pw_edge2/first_party_sets.db
+.tmp_pw_edge2/first_party_sets.db-journal
+.tmp_pw_msedge/BrowserMetrics/BrowserMetrics-69BA585F-6754.pma
+.tmp_pw_msedge/Crashpad/metadata
+.tmp_pw_msedge/Crashpad/settings.dat
+.tmp_pw_msedge/Crashpad/throttle_store.dat
+.tmp_pw_msedge/Default/ClientCertificates/LOCK
+.tmp_pw_msedge/Default/ClientCertificates/LOG
+.tmp_pw_msedge/Default/Code Cache/js/index
+.tmp_pw_msedge/Default/Code Cache/wasm/index
+.tmp_pw_msedge/Default/DawnGraphiteCache/data_0
+.tmp_pw_msedge/Default/DawnGraphiteCache/data_1
+.tmp_pw_msedge/Default/DawnGraphiteCache/data_2
+.tmp_pw_msedge/Default/DawnGraphiteCache/data_3
+.tmp_pw_msedge/Default/DawnGraphiteCache/index
+.tmp_pw_msedge/Default/DawnWebGPUCache/data_0
+.tmp_pw_msedge/Default/DawnWebGPUCache/data_1
+.tmp_pw_msedge/Default/DawnWebGPUCache/data_2
+.tmp_pw_msedge/Default/DawnWebGPUCache/data_3
+.tmp_pw_msedge/Default/DawnWebGPUCache/index
+.tmp_pw_msedge/Default/DualEngine/SiteList-Consumer.json
+.tmp_pw_msedge/Default/DualEngine/SiteList-Enterprise.json
+.tmp_pw_msedge/Default/EdgeCoupons/coupons_data.db/000003.log
+.tmp_pw_msedge/Default/EdgeCoupons/coupons_data.db/CURRENT
+.tmp_pw_msedge/Default/EdgeCoupons/coupons_data.db/LOCK
+.tmp_pw_msedge/Default/EdgeCoupons/coupons_data.db/LOG
+.tmp_pw_msedge/Default/EdgeCoupons/coupons_data.db/MANIFEST-000001
+.tmp_pw_msedge/Default/EdgePushStorageWithConnectTokenAndKey/LOCK
+.tmp_pw_msedge/Default/EdgePushStorageWithConnectTokenAndKey/LOG
+.tmp_pw_msedge/Default/Extension Rules/000003.log
+.tmp_pw_msedge/Default/Extension Rules/CURRENT
+.tmp_pw_msedge/Default/Extension Rules/LOCK
+.tmp_pw_msedge/Default/Extension Rules/LOG
+.tmp_pw_msedge/Default/Extension Rules/MANIFEST-000001
+.tmp_pw_msedge/Default/Extension Scripts/000003.log
+.tmp_pw_msedge/Default/Extension Scripts/CURRENT
+.tmp_pw_msedge/Default/Extension Scripts/LOCK
+.tmp_pw_msedge/Default/Extension Scripts/LOG
+.tmp_pw_msedge/Default/Extension Scripts/MANIFEST-000001
+.tmp_pw_msedge/Default/Favicons
+.tmp_pw_msedge/Default/Favicons-journal
+.tmp_pw_msedge/Default/GPUCache/data_0
+.tmp_pw_msedge/Default/GPUCache/data_1
+.tmp_pw_msedge/Default/GPUCache/data_2
+.tmp_pw_msedge/Default/GPUCache/data_3
+.tmp_pw_msedge/Default/GPUCache/index
+.tmp_pw_msedge/Default/History
+.tmp_pw_msedge/Default/History-journal
+.tmp_pw_msedge/Default/HubApps Icons
+.tmp_pw_msedge/Default/HubApps Icons-journal
+.tmp_pw_msedge/Default/LOCK
+.tmp_pw_msedge/Default/LOG
+.tmp_pw_msedge/Default/Local Storage/leveldb/LOG
+.tmp_pw_msedge/Default/Login Data
+.tmp_pw_msedge/Default/Login Data For Account
+.tmp_pw_msedge/Default/Login Data For Account-journal
+.tmp_pw_msedge/Default/Login Data-journal
+.tmp_pw_msedge/Default/Network/NetworkDataMigrated
+.tmp_pw_msedge/Default/PersistentOriginTrials/LOCK
+.tmp_pw_msedge/Default/PersistentOriginTrials/LOG
+.tmp_pw_msedge/Default/Preferences
+.tmp_pw_msedge/Default/README
+.tmp_pw_msedge/Default/Safe Browsing Network/NetworkDataMigrated
+.tmp_pw_msedge/Default/Secure Preferences
+.tmp_pw_msedge/Default/ServerCertificate
+.tmp_pw_msedge/Default/ServerCertificate-journal
+.tmp_pw_msedge/Default/Sessions/Session_13418293601015322
+.tmp_pw_msedge/Default/Sessions/Tabs_13418293600765539
+.tmp_pw_msedge/Default/Site Characteristics Database/000003.log
+.tmp_pw_msedge/Default/Site Characteristics Database/CURRENT
+.tmp_pw_msedge/Default/Site Characteristics Database/LOCK
+.tmp_pw_msedge/Default/Site Characteristics Database/LOG
+.tmp_pw_msedge/Default/Site Characteristics Database/MANIFEST-000001
+.tmp_pw_msedge/Default/Sync Data/LevelDB/000003.log
+.tmp_pw_msedge/Default/Sync Data/LevelDB/CURRENT
+.tmp_pw_msedge/Default/Sync Data/LevelDB/LOCK
+.tmp_pw_msedge/Default/Sync Data/LevelDB/LOG
+.tmp_pw_msedge/Default/Sync Data/LevelDB/MANIFEST-000001
+.tmp_pw_msedge/Default/Top Sites
+.tmp_pw_msedge/Default/Top Sites-journal
+.tmp_pw_msedge/Default/Vpn Tokens
+.tmp_pw_msedge/Default/Vpn Tokens-journal
+.tmp_pw_msedge/Default/Web Data
+.tmp_pw_msedge/Default/Web Data-journal
+.tmp_pw_msedge/Default/arbitration_service_config.json
+.tmp_pw_msedge/Default/commerce_subscription_db/LOCK
+.tmp_pw_msedge/Default/commerce_subscription_db/LOG
+.tmp_pw_msedge/Default/discount_infos_db/LOCK
+.tmp_pw_msedge/Default/discount_infos_db/LOG
+.tmp_pw_msedge/Default/discounts_db/LOCK
+.tmp_pw_msedge/Default/discounts_db/LOG
+.tmp_pw_msedge/Default/load_statistics.db
+.tmp_pw_msedge/Default/parcel_tracking_db/LOCK
+.tmp_pw_msedge/Default/parcel_tracking_db/LOG
+.tmp_pw_msedge/Default/shared_proto_db/metadata/000003.log
+.tmp_pw_msedge/Default/shared_proto_db/metadata/CURRENT
+.tmp_pw_msedge/Default/shared_proto_db/metadata/LOCK
+.tmp_pw_msedge/Default/shared_proto_db/metadata/LOG
+.tmp_pw_msedge/Default/shared_proto_db/metadata/MANIFEST-000001
+.tmp_pw_msedge/FirstLaunchAfterInstallation
+.tmp_pw_msedge/GrShaderCache/data_0
+.tmp_pw_msedge/GrShaderCache/data_1
+.tmp_pw_msedge/GrShaderCache/data_2
+.tmp_pw_msedge/GrShaderCache/data_3
+.tmp_pw_msedge/GrShaderCache/index
+.tmp_pw_msedge/GraphiteDawnCache/data_0
+.tmp_pw_msedge/GraphiteDawnCache/data_1
+.tmp_pw_msedge/GraphiteDawnCache/data_2
+.tmp_pw_msedge/GraphiteDawnCache/data_3
+.tmp_pw_msedge/GraphiteDawnCache/index
+.tmp_pw_msedge/Last Version
+.tmp_pw_msedge/Local State
+.tmp_pw_msedge/Nurturing/campaign_history
+.tmp_pw_msedge/Nurturing/campaign_history-journal
+.tmp_pw_msedge/ShaderCache/data_0
+.tmp_pw_msedge/ShaderCache/data_1
+.tmp_pw_msedge/ShaderCache/data_2
+.tmp_pw_msedge/ShaderCache/data_3
+.tmp_pw_msedge/ShaderCache/index
+.tmp_pw_msedge/Variations
+.tmp_pw_msedge/first_party_sets.db
+.tmp_pw_msedge/first_party_sets.db-journal
+.tmp_uvicorn_debug.err
+.tmp_uvicorn_debug.log
+.tmp_uvicorn_local_naver.log
+.tmp_uvicorn_local_naver2.log
+DEVLOG.md
+Dockerfile
+PROJECT.md
+README.md
+"Status/\354\210\230\354\235\265\355\230\225 \355\202\244\354\233\214\353\223\234 \353\260\234\352\265\264&\354\240\234\353\252\251 \354\203\235\354\204\261\352\270\260-2026-03-20T07-45-50.html"
+"Status/\354\210\230\354\235\265\355\230\225 \355\202\244\354\233\214\353\223\234 \353\260\234\352\265\264&\354\240\234\353\252\251 \354\203\235\354\204\261\352\270\260-2026-03-20T07-52-01.html"
+"Study/CPC \353\206\222\354\235\200 \355\202\244\354\233\214\353\223\234 \354\260\276\353\212\224 \353\260\251\353\262\225 \352\264\221\352\263\240 \354\210\230\354\235\265 \352\267\271\353\214\200\355\231\224 \353\271\204\353\262\225 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-36.html"
+"Study/\352\262\200\354\203\211\353\237\211 \353\247\216\354\235\200 \355\202\244\354\233\214\353\223\234 \354\260\276\352\270\260 \355\212\270\353\236\230\355\224\275 \355\217\255\353\260\234\354\213\234\355\202\244\353\212\224 \353\271\204\352\262\260 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-26.html"
+"Study/\352\262\275\354\237\201\354\202\254 \355\202\244\354\233\214\353\223\234 \353\266\204\354\204\235 \353\260\251\353\262\225 \353\202\250\354\235\230 \354\240\204\353\236\265\354\235\204 \353\202\264 \353\254\264\352\270\260\353\241\234 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-51.html"
+"Study/\353\204\244\354\235\264\353\262\204 \353\270\224\353\241\234\352\267\270 \353\260\251\353\254\270\354\236\220 \353\212\230\353\246\254\352\270\260 \355\225\230\353\243\250 1000\353\252\205 \353\213\254\354\204\261 \355\202\244\354\233\214\353\223\234 \354\240\204\353\236\265 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-33.html"
+"Study/\353\204\244\354\235\264\353\262\204 \355\202\244\354\233\214\353\223\234 \352\262\200\354\203\211\353\237\211 \354\241\260\355\232\214, \354\240\225\355\231\225\355\225\230\352\262\214 \355\231\225\354\235\270\355\225\230\353\212\224 \353\260\251\353\262\225 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-08.html"
+"Study/\353\204\244\354\235\264\353\262\204 \355\202\244\354\233\214\353\223\234 \353\217\204\352\265\254 \354\266\224\354\262\234 TOP 5 \354\247\204\354\247\234 \354\223\270\353\247\214\355\225\234 \352\262\203\353\247\214 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-22.html"
+"Study/\353\204\244\354\235\264\353\262\204 \355\224\214\353\240\210\354\235\264\354\212\244 \354\203\201\354\234\204\353\205\270\354\266\234 \354\247\200\354\227\255 \355\202\244\354\233\214\353\223\234 \352\263\265\353\236\265 \354\231\204\353\262\275 \352\260\200\354\235\264\353\223\234 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-40-00.html"
+"Study/\353\241\261\355\205\214\354\235\274 \355\202\244\354\233\214\353\223\234 \354\260\276\353\212\224\353\262\225 \354\240\201\354\235\200 \353\205\270\353\240\245\354\234\274\353\241\234 \355\231\225\354\213\244\355\225\234 \354\234\240\354\236\205 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-29.html"
+"Study/\353\254\264\353\243\214 \355\202\244\354\233\214\353\223\234 \354\260\276\352\270\260, \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260 \355\225\230\353\202\230\353\241\234 \353\201\235\353\202\264\353\212\224 \353\262\225 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-06.html"
+"Study/\353\270\224\353\241\234\352\267\270 \352\270\200\354\223\260\352\270\260 SEO \354\265\234\354\240\201\355\231\224 \352\262\200\354\203\211 1\355\216\230\354\235\264\354\247\200\354\227\220 \353\205\270\354\266\234\353\220\230\353\212\224 \352\270\200 \354\236\221\354\204\261\353\262\225 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-42.html"
+"Study/\353\270\224\353\241\234\352\267\270 \354\203\201\354\234\204\353\205\270\354\266\234 \355\202\244\354\233\214\353\223\234 \354\240\204\353\236\265 \352\262\275\354\237\201 \355\224\274\355\225\230\352\263\240 1\355\216\230\354\235\264\354\247\200 \354\247\204\354\236\205 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-17.html"
+"Study/\353\270\224\353\241\234\352\267\270 \355\202\244\354\233\214\353\223\234 \354\260\276\353\212\224 \353\260\251\353\262\225 \354\210\230\354\235\265\355\230\225 \353\270\224\353\241\234\352\267\270\354\235\230 \354\213\234\354\236\221 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-10.html"
+"Study/\354\212\244\353\247\210\355\212\270\354\212\244\355\206\240\354\226\264 \355\202\244\354\233\214\353\223\234 \354\240\204\353\236\265 \353\247\244\354\266\234 \354\230\254\353\246\254\353\212\224 \354\203\201\355\222\210\353\252\205 \354\265\234\354\240\201\355\231\224 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-45.html"
+"Study/\354\213\234\354\246\214 \355\202\244\354\233\214\353\223\234 \354\272\230\353\246\260\353\215\224 \354\233\224\353\263\204 \353\214\200\353\260\225 \355\202\244\354\233\214\353\223\234 \354\264\235\354\240\225\353\246\254 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-55.html"
+"Study/\354\225\240\353\223\234\355\217\254\354\212\244\355\212\270 \354\210\230\354\235\265 \355\202\244\354\233\214\353\223\234 \354\240\204\353\236\265 \353\270\224\353\241\234\352\267\270 \354\210\230\354\235\265\355\231\224\354\235\230 \355\225\265\354\213\254 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-58.html"
+"Study/\354\227\260\352\264\200\352\262\200\354\203\211\354\226\264 \354\266\224\354\266\234 \353\260\251\353\262\225 \355\202\244\354\233\214\353\223\234 \355\231\225\354\236\245\354\235\230 \355\225\265\354\213\254 \354\240\204\353\236\265 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-14.html"
+"Study/\355\202\244\354\233\214\353\223\234 \352\264\221\352\263\240 \354\236\205\354\260\260\352\260\200 \353\266\204\354\204\235 CPC \353\271\204\354\232\251 \354\240\210\352\260\220 \354\213\244\354\240\204 \353\205\270\355\225\230\354\232\260 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-49.html"
+"Study/\355\202\244\354\233\214\353\223\234 \355\212\270\353\240\214\353\223\234 \353\266\204\354\204\235 \353\234\250\353\212\224 \355\202\244\354\233\214\353\223\234 \353\257\270\353\246\254 \354\204\240\354\240\220\355\225\230\353\212\224 \353\260\251\353\262\225 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-40-05.html"
+"Study/\355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260 \354\202\254\354\232\251\353\262\225 \354\231\204\353\262\275 \352\260\200\354\235\264\353\223\234 \354\264\210\353\263\264\353\217\204 5\353\266\204\354\235\264\353\251\264 \353\201\235 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-03.html"
+"Study/\355\231\251\352\270\210\355\202\244\354\233\214\353\223\234 \354\260\276\353\212\224\353\262\225 \353\202\250\353\223\244\354\235\264 \353\252\250\353\245\264\353\212\224 \352\263\240\354\210\230\354\235\265 \355\202\244\354\233\214\353\223\234 \353\260\234\352\265\264 - \355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T15-39-12.html"
+app/__init__.py
+app/analyzer/__init__.py
+app/analyzer/config.py
+app/analyzer/keyword_stats.py
+app/analyzer/keywordmaster_benchmark.py
+app/analyzer/main.py
+app/analyzer/metrics.py
+app/analyzer/naver_open_search.py
+app/analyzer/naver_searchad.py
+app/analyzer/rules.py
+app/analyzer/sample/guide_1.html
+app/analyzer/sample/guide_1.md
+app/analyzer/sample/guide_2.html
+app/analyzer/sample/guide_2.md
+app/analyzer/sample/guide_3.html
+app/analyzer/sample/guide_3.md
+app/analyzer/sample/guide_4.html
+app/analyzer/sample/guide_4.md
+app/analyzer/sample/site_analysis.json
+app/analyzer/scorer.py
+app/analyzer/service.py
+app/api/__init__.py
+app/api/dependencies.py
+app/api/errors.py
+app/api/router.py
+app/api/routes/__init__.py
+app/api/routes/analyze.py
+app/api/routes/collect.py
+app/api/routes/expand.py
+app/api/routes/generate_title.py
+app/api/routes/local_naver.py
+app/api/routes/pipeline.py
+app/api/routes/selector.py
+app/api/schemas.py
+app/collector/__init__.py
+app/collector/categories.py
+app/collector/main.py
+app/collector/naver_trend.py
+app/collector/sample/Naver Creator Advisor-2026-03-17T13-50-47.html
+app/collector/sample/Naver Creator Advisor-2026-03-17T13-50-53.html
+app/collector/sample/guide2_1.html
+app/collector/sample/guide2_1.md
+app/collector/sample/guide2_2.html
+app/collector/sample/guide2_2.md
+app/collector/sample/site_analysis.json
+app/collector/sample/site_analysis2.json
+"app/collector/sample/\355\202\244\354\233\214\353\223\234 \342\200\223 PRIME-2026-03-17T13-47-56.html"
+app/collector/service.py
+app/core/__init__.py
+app/core/config.py
+app/core/interfaces.py
+app/core/keyword_inputs.py
+app/db/__init__.py
+app/db/base.py
+app/db/models/__init__.py
+app/db/models/keyword.py
+app/db/session.py
+app/expander/__init__.py
+app/expander/engines/__init__.py
+app/expander/engines/autocomplete_engine.py
+app/expander/engines/combinator_engine.py
+app/expander/engines/related_engine.py
+app/expander/main.py
+app/expander/rules/__init__.py
+app/expander/rules/association.py
+app/expander/rules/combinator.py
+app/expander/rules/suffix.py
+app/expander/sample/guide_1.html
+app/expander/sample/guide_1.md
+app/expander/sample/guide_2.html
+app/expander/sample/guide_2.md
+app/expander/sample/site_analysis.json
+app/expander/service.py
+app/expander/sources/__init__.py
+app/expander/sources/naver_autocomplete.py
+app/expander/sources/naver_related.py
+app/expander/utils/__init__.py
+app/expander/utils/dedup.py
+app/expander/utils/filtering.py
+app/expander/utils/throttle.py
+app/expander/utils/tokenizer.py
+app/local/naver_login_browser.py
+app/local/naver_login_worker.py
+app/local/naver_session.py
+app/main.py
+app/pipeline/__init__.py
+app/pipeline/main.py
+app/pipeline/service.py
+app/selector/__init__.py
+app/selector/content_map.py
+app/selector/longtail.py
+app/selector/main.py
+app/selector/service.py
+app/title/__init__.py
+app/title/ai_client.py
+app/title/category_detector.py
+app/title/hooks.py
+app/title/main.py
+app/title/presets.py
+app/title/quality.py
+app/title/rules.py
+app/title/targets.py
+app/title/templates.py
+app/title/title_generator.py
+app/title/types.py
+app/title_gen/__init__.py
+app/title_gen/main.py
+app/title_gen/sample/input.html
+app/title_gen/sample/input.json
+app/title_gen/service.py
+app/web.py
+app/web_assets/app.css
+app/web_assets/app.js
+app/web_assets/app_overrides.js
+docker-compose.yml
+main.py
+naver_search.credentials.json
+requirements.txt
+run_local.bat
+"sample/\352\270\260\353\212\245 \353\251\224\353\211\264\354\226\274 (1).html"
+"sample/\352\270\260\353\212\245 \353\251\224\353\211\264\354\226\274 (10).html"
+"sample/\352\270\260\353\212\245 \353\251\224\353\211\264\354\226\274 (2).html"
+"sample/\352\270\260\353\212\245 \353\251\224\353\211\264\354\226\274 (3).html"
+"sample/\352\270\260\353\212\245 \353\251\224\353\211\264\354\226\274 (4).html"
+"sample/\352\270\260\353\212\245 \353\251\224\353\211\264\354\226\274 (5).html"
+"sample/\352\270\260\353\212\245 \353\251\224\353\211\264\354\226\274 (6).html"
+"sample/\352\270\260\353\212\245 \353\251\224\353\211\264\354\226\274 (7).html"
+"sample/\352\270\260\353\212\245 \353\251\224\353\211\264\354\226\274 (8).html"
+"sample/\352\270\260\353\212\245 \353\251\224\353\211\264\354\226\274 (9).html"
+"sample/\354\202\254\354\235\264\355\212\270 \354\202\254\354\232\251\353\262\225.html"
+"sample/\355\202\244\354\233\214\353\223\234\353\247\210\354\212\244\355\204\260-2026-03-18T12-19-10.html"
+"screenshot/\354\212\244\355\201\254\353\246\260\354\203\267 2026-03-19 163037.png"
+searchad.credentials.json
+tests/__init__.py
+tests/test_analyzer.py
+tests/test_analyzer_searchad.py
+tests/test_debug_api.py
+tests/test_expander_related.py
+tests/test_expander_throttle.py
+tests/test_health.py
+tests/test_keywordmaster_benchmark.py
+tests/test_local_naver.py
+tests/test_naver_open_search.py
+tests/test_naver_searchad.py
+tests/test_naver_trend.py
+tests/test_pipeline.py
+tests/test_selector.py
+tests/test_stage_entrypoints.py
+tests/test_title.py
+tests/test_web_routes.py

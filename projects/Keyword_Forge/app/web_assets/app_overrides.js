@@ -340,12 +340,14 @@ async function runSelectStage(options = {}) {
         : analyzedKeywords;
 
     if (!selectionCandidates.length) {
-        if (hasExplicitFilters) {
-            throw new Error(
-                `선택한 조합(수익성 ${allowedProfitabilityGrades.join(", ")} · 공략성 ${allowedAttackabilityGrades.join(", ")})에 맞는 분석 결과가 없습니다.`,
-            );
-        }
-        throw new Error("선별할 분석 결과가 없습니다.");
+        const noticeMessage = hasExplicitFilters
+            ? `선택한 조건에 맞는 검색 결과가 없습니다.\n수익성 ${allowedProfitabilityGrades.join(", ")} · 공략성 ${allowedAttackabilityGrades.join(", ")} 조합을 넓혀서 다시 시도해 주세요.`
+            : "선별할 검색 결과가 없습니다.\n먼저 수집/확장/분석 결과를 확인해 주세요.";
+        applyEmptySelectedResult(noticeMessage);
+        throw createUserNoticeError(noticeMessage, {
+            code: "empty_selection_notice",
+            stageKey: "selected",
+        });
     }
 
     addLog(
@@ -474,6 +476,8 @@ async function runLongtailVerification() {
         ...selectedResult,
         longtail_suggestions: verifiedSuggestions,
         longtail_summary: summary,
+        cannibalization_report: result.cannibalization_report || selectedResult.cannibalization_report || null,
+        serp_competition_summary: null,
         verified_longtail_keywords: Array.isArray(result.verified_longtail_keywords)
             ? result.verified_longtail_keywords
             : [],
@@ -481,6 +485,40 @@ async function runLongtailVerification() {
     };
     addLog(
         `롱테일 검증 완료: 통과 ${Number(summary.pass_count || 0)}건 · 검토 ${Number(summary.review_count || 0)}건 · 보류 ${Number(summary.fail_count || 0)}건`,
+        "success",
+    );
+    renderAll();
+    return state.results.selected;
+}
+
+async function runSerpCompetitionSummary() {
+    const selectedResult = state.results.selected || {};
+    const selectedKeywords = Array.isArray(selectedResult.selected_keywords)
+        ? selectedResult.selected_keywords
+        : [];
+    if (!selectedKeywords.length) {
+        throw new Error("선별 결과가 없습니다. 먼저 선별을 실행해 주세요.");
+    }
+
+    addLog("SERP 경쟁 요약 시작: 네이버 상위 제목 패턴을 확인합니다.");
+    const response = await postModule("/serp-competition-summary", {
+        selected_keywords: selectedKeywords,
+        longtail_suggestions: Array.isArray(selectedResult.longtail_suggestions)
+            ? selectedResult.longtail_suggestions
+            : [],
+        limit: 3,
+    });
+    const serpSummary = response?.result?.serp_competition_summary || {
+        summary: {},
+        queries: [],
+    };
+    state.results.selected = {
+        ...selectedResult,
+        serp_competition_summary: serpSummary,
+        serp_competition_summary_at: new Date().toISOString(),
+    };
+    addLog(
+        `SERP 경쟁 요약 완료: 성공 ${Number(serpSummary.summary?.success_count || 0)}개 · 실패 ${Number(serpSummary.summary?.error_count || 0)}개`,
         "success",
     );
     renderAll();
@@ -1265,6 +1303,270 @@ function renderLongtailBoard() {
     `;
 }
 
+function formatIntentKeyLabel(intentKey) {
+    const labelMap = {
+        commercial: "비교/추천",
+        info: "정보형",
+        review: "후기형",
+        action: "행동형",
+        problem: "문제 해결형",
+        location: "위치형",
+        policy: "정책형",
+        general: "일반형",
+    };
+    return labelMap[String(intentKey || "").trim()] || "일반형";
+}
+
+function formatCannibalizationRiskLabel(riskLevel) {
+    if (riskLevel === "high") {
+        return "고위험";
+    }
+    if (riskLevel === "medium") {
+        return "중간 위험";
+    }
+    return "낮은 위험";
+}
+
+function formatCannibalizationActionLabel(action) {
+    if (action === "merge") {
+        return "한 글로 병합 권장";
+    }
+    if (action === "split") {
+        return "메인/서브 분리";
+    }
+    return "수동 검토";
+}
+
+function renderCannibalizationBoard() {
+    const report = state.results.selected?.cannibalization_report || {};
+    const summary = report.summary || {};
+    const groups = Array.isArray(report.groups) ? report.groups : [];
+    const candidateCount = Number(summary.candidate_count || 0);
+
+    if (!candidateCount && !groups.length) {
+        return "";
+    }
+
+    return `
+        <section class="cannibalization-board">
+            <div class="cannibalization-head">
+                <div>
+                    <span class="field-label">카니벌라이제이션 검사</span>
+                    <p class="input-help compact-help">같은 토픽과 의도로 겹치는 후보를 묶어서, 따로 쓸지 합칠지 빠르게 판단할 수 있게 정리합니다.</p>
+                </div>
+                <div class="cannibalization-actions">
+                    <span class="analysis-source-pill type">후보 ${escapeHtml(String(candidateCount))}건 검사</span>
+                </div>
+            </div>
+            <div class="analysis-summary-strip cannibalization-summary-strip">
+                <div class="collector-stat-card">
+                    <span>충돌 묶음</span>
+                    <strong>${escapeHtml(String(summary.issue_group_count || 0))}</strong>
+                </div>
+                <div class="collector-stat-card">
+                    <span>고위험</span>
+                    <strong>${escapeHtml(String(summary.high_risk_count || 0))}</strong>
+                </div>
+                <div class="collector-stat-card">
+                    <span>중간 위험</span>
+                    <strong>${escapeHtml(String(summary.medium_risk_count || 0))}</strong>
+                </div>
+                <div class="collector-stat-card">
+                    <span>분리 가능</span>
+                    <strong>${escapeHtml(String(summary.safe_split_cluster_count || 0))}</strong>
+                </div>
+            </div>
+            ${groups.length
+                ? `
+                    <div class="cannibalization-grid">
+                        ${groups.map((group) => `
+                            <article class="cannibalization-card ${escapeHtml(group.risk_level || "medium")}">
+                                <div class="cannibalization-card-head">
+                                    <div class="cannibalization-card-copy">
+                                        <span class="content-map-kicker">
+                                            ${escapeHtml(group.cluster_id || "cluster")}
+                                            · ${escapeHtml(formatIntentKeyLabel(group.intent_key))}
+                                        </span>
+                                        <h4>${escapeHtml(group.representative_keyword || group.primary_keyword || "-")}</h4>
+                                        <p>${escapeHtml(group.primary_keyword || "-")} 중심 · 후보 ${escapeHtml(String(group.candidate_count || 0))}개 · 겹침 ${escapeHtml(String(group.overlap_score || 0))}%</p>
+                                    </div>
+                                    <div class="cannibalization-card-badges">
+                                        <span class="cannibalization-risk-pill ${escapeHtml(group.risk_level || "medium")}">${escapeHtml(formatCannibalizationRiskLabel(group.risk_level))}</span>
+                                        <span class="badge">${escapeHtml(formatCannibalizationActionLabel(group.recommended_action))}</span>
+                                    </div>
+                                </div>
+                                ${Array.isArray(group.shared_terms) && group.shared_terms.length
+                                    ? `
+                                        <div class="cannibalization-term-strip">
+                                            ${group.shared_terms.map((term) => `<span class="badge">${escapeHtml(term)}</span>`).join("")}
+                                        </div>
+                                    `
+                                    : ""}
+                                <div class="cannibalization-items">
+                                    ${(group.items || []).map((item) => `
+                                        <div class="cannibalization-item">
+                                            <div>
+                                                <strong>${escapeHtml(item.keyword || "-")}</strong>
+                                                <span>${escapeHtml(item.source_type === "longtail" ? "롱테일" : "선별")}</span>
+                                            </div>
+                                            <div class="cannibalization-item-meta">
+                                                ${item.is_primary ? '<span class="badge">메인 후보</span>' : ""}
+                                                <span class="badge">${escapeHtml(String(item.verification_status || item.source_type || ""))}</span>
+                                                <span class="badge">점수 ${escapeHtml(formatNumber(item.score))}</span>
+                                            </div>
+                                        </div>
+                                    `).join("")}
+                                </div>
+                            </article>
+                        `).join("")}
+                    </div>
+                `
+                : `
+                    <div class="collector-empty cannibalization-empty">
+                        현재 선별 결과 기준으로는 서로 잡아먹을 가능성이 큰 키워드 묶음이 없습니다.
+                    </div>
+                `}
+        </section>
+    `;
+}
+
+function formatSerpCompetitionLevelLabel(level) {
+    if (level === "high") {
+        return "경쟁 높음";
+    }
+    if (level === "medium") {
+        return "경쟁 보통";
+    }
+    return "경쟁 낮음";
+}
+
+function formatSerpCandidateTypeLabel(candidateType) {
+    return candidateType === "longtail" ? "롱테일 후보" : "선별 키워드";
+}
+
+function formatSerpSourceBucketLabel(bucket) {
+    const labelMap = {
+        ugc: "블로그/카페",
+        official: "공식/사전",
+        news: "뉴스",
+        store: "쇼핑/스토어",
+        community: "커뮤니티",
+        other: "기타",
+    };
+    return labelMap[String(bucket || "").trim()] || "기타";
+}
+
+function renderSerpCompetitionBoard() {
+    const selectedKeywords = Array.isArray(state.results.selected?.selected_keywords)
+        ? state.results.selected.selected_keywords
+        : [];
+    if (!selectedKeywords.length) {
+        return "";
+    }
+
+    const serpSummary = state.results.selected?.serp_competition_summary || null;
+    const summary = serpSummary?.summary || {};
+    const queries = Array.isArray(serpSummary?.queries) ? serpSummary.queries : [];
+
+    return `
+        <section class="serp-board">
+            <div class="serp-head">
+                <div>
+                    <span class="field-label">SERP 경쟁 요약</span>
+                    <p class="input-help compact-help">네이버 검색 상위 제목을 모아 의도 쏠림, 반복 용어, 도메인 편중을 빠르게 확인합니다.</p>
+                </div>
+                <div class="serp-actions">
+                    ${queries.length
+                        ? `<span class="analysis-source-pill type">최근 ${escapeHtml(String(summary.success_count || 0))}개 쿼리 성공</span>`
+                        : ""}
+                    <button
+                        type="button"
+                        class="subtle-btn"
+                        data-inline-action="run_serp_competition_summary"
+                        ${state.isBusy ? "disabled" : ""}
+                    >${queries.length ? "SERP 다시 요약" : "SERP 경쟁 요약 실행"}</button>
+                </div>
+            </div>
+            ${queries.length
+                ? `
+                    <div class="analysis-summary-strip serp-summary-strip">
+                        <div class="collector-stat-card">
+                            <span>분석 쿼리</span>
+                            <strong>${escapeHtml(String(summary.query_count || queries.length))}</strong>
+                        </div>
+                        <div class="collector-stat-card">
+                            <span>경쟁 높음</span>
+                            <strong>${escapeHtml(String(summary.high_competition_count || 0))}</strong>
+                        </div>
+                        <div class="collector-stat-card">
+                            <span>경쟁 보통</span>
+                            <strong>${escapeHtml(String(summary.medium_competition_count || 0))}</strong>
+                        </div>
+                        <div class="collector-stat-card">
+                            <span>경쟁 낮음</span>
+                            <strong>${escapeHtml(String(summary.low_competition_count || 0))}</strong>
+                        </div>
+                    </div>
+                    <div class="serp-grid">
+                        ${queries.map((query) => `
+                            <article class="serp-card ${escapeHtml(query.competition_level || "low")}">
+                                <div class="serp-card-head">
+                                    <div class="serp-card-copy">
+                                        <span class="content-map-kicker">${escapeHtml(formatSerpCandidateTypeLabel(query.candidate_type))}</span>
+                                        <h4>${escapeHtml(query.query || "-")}</h4>
+                                        <p>
+                                            ${query.status === "success"
+                                                ? `${escapeHtml(formatSerpCompetitionLevelLabel(query.competition_level))} · 점수 ${escapeHtml(String(query.competition_score || 0))}`
+                                                : "검색 결과를 요약하지 못했습니다."}
+                                        </p>
+                                    </div>
+                                    <div class="serp-card-badges">
+                                        <span class="serp-level-pill ${escapeHtml(query.competition_level || "low")}">${escapeHtml(formatSerpCompetitionLevelLabel(query.competition_level))}</span>
+                                        ${query.search_url
+                                            ? `<a class="ghost-btn serp-search-link" href="${escapeHtml(query.search_url)}" target="_blank" rel="noopener noreferrer">검색 열기</a>`
+                                            : ""}
+                                    </div>
+                                </div>
+                                ${query.status === "success"
+                                    ? `
+                                        <div class="serp-meta-strip">
+                                            <span class="badge">의도 ${escapeHtml((query.dominant_intents || []).map((item) => formatIntentKeyLabel(item.intent_key)).join(", ") || "혼합")}</span>
+                                            <span class="badge">공통어 ${escapeHtml((query.common_terms || []).join(", ") || "없음")}</span>
+                                            <span class="badge">도메인 ${escapeHtml((query.top_domains || []).map((item) => item.domain).join(", ") || "혼합")}</span>
+                                        </div>
+                                        <div class="serp-title-list">
+                                            ${(query.top_titles || []).map((item) => `
+                                                <div class="serp-title-item">
+                                                    <div>
+                                                        <strong>${escapeHtml(item.title || "-")}</strong>
+                                                        <span>${escapeHtml(item.domain || "-")}</span>
+                                                    </div>
+                                                    <div class="serp-title-meta">
+                                                        <span class="badge">#${escapeHtml(String(item.rank || 0))}</span>
+                                                        <span class="badge">${escapeHtml(formatSerpSourceBucketLabel(item.source_bucket))}</span>
+                                                    </div>
+                                                </div>
+                                            `).join("")}
+                                        </div>
+                                    `
+                                    : `
+                                        <div class="collector-empty serp-empty">
+                                            ${escapeHtml(query.error === "no_results" ? "읽을 수 있는 상위 제목을 찾지 못했습니다." : "SERP 수집 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")}
+                                        </div>
+                                    `}
+                            </article>
+                        `).join("")}
+                    </div>
+                `
+                : `
+                    <div class="collector-empty serp-empty">
+                        아직 SERP 경쟁 요약을 실행하지 않았습니다. 버튼을 누르면 상위 노출 제목 패턴을 바로 정리합니다.
+                    </div>
+                `}
+        </section>
+    `;
+}
+
 function renderSelectedList(items) {
     const goldCount = (items || []).filter((item) => resolveGoldenBucket(item) === "gold").length;
     const promisingCount = (items || []).filter((item) => resolveGoldenBucket(item) === "promising").length;
@@ -1288,6 +1590,8 @@ function renderSelectedList(items) {
         <div class="analysis-console">
             ${renderContentMapBoard()}
             ${renderLongtailBoard()}
+            ${renderCannibalizationBoard()}
+            ${renderSerpCompetitionBoard()}
             <div class="analysis-summary-strip">
                 <div class="collector-stat-card">
                     <span>선별 키워드</span>
@@ -1545,6 +1849,10 @@ function handleResultsGridClick(event) {
         }
         if (action === "verify_longtail_suggestions") {
             runWithGuard(runLongtailVerification, "롱테일 검증 실행 중");
+            return;
+        }
+        if (action === "run_serp_competition_summary") {
+            runWithGuard(runSerpCompetitionSummary, "SERP 경쟁 요약 실행 중");
             return;
         }
     }

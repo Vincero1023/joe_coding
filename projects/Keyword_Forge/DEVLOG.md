@@ -33,6 +33,34 @@
 ---
 
 ## Date
+- 2026-03-21 10:02 (KST)
+
+## What changed (변경점)
+- `app/selector/cannibalization.py`, `app/selector/service.py`, `app/selector/longtail.py`, `app/pipeline/service.py`에 카니벌라이제이션 리포트를 추가해 선별 키워드와 롱테일 후보의 토픽/의도 충돌을 자동 집계하도록 연결했다.
+- `app/selector/serp_summary.py`, `app/api/routes/selector.py`, `app/web_assets/app_overrides.js`, `app/web_assets/app.css`에 네이버 SERP 경쟁 요약 기능을 추가해 상위 제목, 반복 용어, 도메인 편중을 버튼 한 번으로 확인할 수 있게 했다.
+- 선별 결과 카드에 `카니벌라이제이션 검사`와 `SERP 경쟁 요약` 보드를 붙였고, 롱테일 재검증 시 카니벌라이제이션은 즉시 갱신하고 SERP 요약은 stale 방지를 위해 다시 실행하도록 정리했다.
+
+## Why (원인/배경)
+- 롱테일과 제목 모드까지 붙은 뒤에는 “이걸 따로 글로 써도 되는지”와 “실제 검색결과가 이미 어떻게 굳어 있는지”를 툴 안에서 바로 판단할 수 있어야 다음 실험이 빨라진다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `node --check app/web_assets/app_overrides.js`
+- [x] `python -m py_compile app/pipeline/service.py app/selector/cannibalization.py app/selector/serp_summary.py app/api/routes/selector.py app/web.py`
+- [x] `python -m pytest -q` (`101 passed`)
+- [x] 회귀(기존 기능) 이상 없음
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 선별 결과에서 비슷한 키워드를 따로 써야 할지 합쳐야 할지 판단 근거가 부족했고, 상위 노출 제목 패턴도 수동 검색 없이 확인할 수 없었다.
+- 원인: selector가 콘텐츠 맵과 롱테일까지만 보여주고, 중복 위험 판단과 실시간 SERP 요약 레이어는 없었다.
+- 해결: 토픽/의도 기반 카니벌라이제이션 리포트와 온디맨드 SERP 경쟁 요약 API/UI를 추가해 선별 단계에서 바로 병합/분리 판단과 경쟁 패턴 확인이 가능해졌다.
+
+## Next (다음 작업)
+- 카니벌라이제이션 결과를 제목/발행 워크플로우에 더 직접 연결할지 검토
+- 예약 기반 자동 순차 작업은 별도 기능으로 후순위 설계
+
+---
+
+## Date
 - 2026-03-20 17:22 (KST)
 
 ## What changed (변경점)
