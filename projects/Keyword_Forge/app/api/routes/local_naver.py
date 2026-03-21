@@ -1,7 +1,11 @@
 from fastapi import APIRouter, HTTPException
 
 from app.api.schemas import ModuleRequest, ModuleResponse
-from app.local.naver_login_browser import LocalLoginBrowserError, LocalNaverLoginBrowserService
+from app.local.naver_login_browser import (
+    LocalLoginBrowserError,
+    LocalNaverLoginBrowserService,
+    read_cached_session_summary,
+)
 from app.local.naver_session import LocalBrowserCookieError, LocalNaverSessionService
 
 
@@ -44,3 +48,8 @@ def open_local_naver_login_browser(payload: ModuleRequest) -> ModuleResponse:
                 **exc.to_detail(),
             },
         ) from exc
+
+
+@router.get("/local/naver-session-cache", response_model=ModuleResponse)
+def read_cached_local_naver_session() -> ModuleResponse:
+    return ModuleResponse(result=read_cached_session_summary())

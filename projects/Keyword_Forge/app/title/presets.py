@@ -89,6 +89,20 @@ TITLE_PRESETS: tuple[TitlePreset, ...] = (
         ),
     ),
     TitlePreset(
+        key="vertex_fast",
+        label="Vertex 빠른 실험형",
+        description="Vertex AI Express Mode로 빠르게 비교할 때 쓰는 프리셋입니다.",
+        provider="vertex",
+        model="gemini-2.5-flash-lite",
+        temperature=0.5,
+        prompt_guidance=(
+            "Preset focus:\n"
+            "- Generate clean first-pass titles quickly.\n"
+            "- Use direct phrasing and avoid long, winding clauses.\n"
+            "- Keep variation visible, but stay conservative on risky creativity."
+        ),
+    ),
+    TitlePreset(
         key="claude_variety",
         label="표현 확장형",
         description="블로그형과 에디터형 문장 골격을 더 넓게 탐색하는 확장 프리셋입니다.",

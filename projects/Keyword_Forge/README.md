@@ -24,8 +24,16 @@
   - 분석 결과 중 골든 키워드만 최종 선별합니다.
 - `title_gen`
   - 선별된 골든 키워드를 기반으로 네이버 홈형, 블로그형 제목을 생성합니다.
+  - `template` 모드와 `AI` 모드를 지원합니다.
+  - AI 모드는 `OpenAI`, `Gemini`, `Vertex AI Express Mode`, `Anthropic` provider를 지원합니다.
+  - `Vertex AI Express Mode`는 Google Cloud API key 기준으로 붙도록 구현했습니다.
+  - 롱테일 `가이드`, `체크리스트`는 기본 강제 후보가 아니라 선택형 의도 토큰으로 다시 조합합니다.
 - `pipeline`
   - 수집부터 제목 생성까지 전 단계를 서버에서 한 번에 실행합니다.
+- `scheduler / queue`
+  - 시드 키워드 배치를 Queue로 등록해 순차 실행할 수 있습니다.
+  - 일일 카테고리 루틴을 등록하면 정해진 시각에 Queue 작업을 자동 생성합니다.
+  - 실행 결과는 서버에서 `.xlsx` 파일로 내보내 `Status/queue_exports` 아래에 저장합니다.
 
 ## 처리 흐름
 
@@ -56,6 +64,15 @@
 - `POST /pipeline`
 - `POST /local/naver-session`
 - `POST /local/naver-login-browser`
+- `GET /queue/snapshot`
+- `POST /queue/jobs/seed-batch`
+- `GET /queue/jobs/{job_id}`
+- `GET /queue/jobs/{job_id}/artifact`
+- `POST /queue/jobs/{job_id}/cancel`
+- `POST /queue/runner/pause`
+- `POST /queue/runner/resume`
+- `POST /queue/routines/daily-category`
+- `DELETE /queue/routines/{routine_id}`
 
 ## 실행 메모
 
@@ -78,5 +95,5 @@
 
 ## 다음 작업
 
-- 로컬 브라우저 로그인 연동을 더 자연스럽게 다듬기
-- seed/search fallback 노이즈 필터 정교화
+- Vertex AI Express Mode API key로 실제 제목 생성과 fallback 동작을 수동 확인하기
+- Status HTML에 `used_mode`, `fallback_reason`, `provider` 표시를 더 명확히 남기기

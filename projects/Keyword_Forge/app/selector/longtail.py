@@ -14,6 +14,16 @@ from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize
 from app.selector.cannibalization import build_cannibalization_report
 
 
+_OPTIONAL_SUFFIX_LIBRARY: dict[str, dict[str, str]] = {
+    "guide": {
+        "label": "가이드",
+        "suffix": "가이드",
+    },
+    "checklist": {
+        "label": "체크리스트",
+        "suffix": "체크리스트",
+    },
+}
 _INTENT_TERMS: dict[str, tuple[str, ...]] = {
     "commercial": ("추천", "비교", "가격", "비용", "요금", "견적", "순위"),
     "review": ("후기", "리뷰", "평판", "영상", "인스타", "사진"),
@@ -36,13 +46,16 @@ _ATTACKABILITY_ORDER = ["1", "2", "3", "4"]
 def build_longtail_map(
     selected_items: list[dict[str, Any]],
     keyword_clusters: list[dict[str, Any]] | None = None,
+    longtail_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     selected_items = [item for item in selected_items if isinstance(item, dict) and normalize_text(item.get("keyword"))]
     clusters = [cluster for cluster in keyword_clusters or [] if isinstance(cluster, dict)]
+    resolved_options = resolve_longtail_options(longtail_options)
     if not selected_items:
         return {
             "longtail_suggestions": [],
             "longtail_summary": _build_longtail_summary([]),
+            "longtail_options": resolved_options,
         }
 
     if not clusters:
@@ -57,7 +70,11 @@ def build_longtail_map(
     seen_keywords: set[str] = set()
 
     for cluster in clusters:
-        cluster_suggestions = _build_cluster_longtail_suggestions(cluster, selected_by_keyword)
+        cluster_suggestions = _build_cluster_longtail_suggestions(
+            cluster,
+            selected_by_keyword,
+            resolved_options,
+        )
         for suggestion in cluster_suggestions:
             longtail_keyword = normalize_text(suggestion.get("longtail_keyword"))
             keyword_key = normalize_key(longtail_keyword)
@@ -72,19 +89,31 @@ def build_longtail_map(
     return {
         "longtail_suggestions": suggestions,
         "longtail_summary": _build_longtail_summary(suggestions),
+        "longtail_options": resolved_options,
     }
 
 
 def verify_longtail_candidates(input_data: dict[str, Any]) -> dict[str, Any]:
     selected_items = _coerce_items(input_data.get("selected_keywords"))
     keyword_clusters = _coerce_items(input_data.get("keyword_clusters"))
-    payload = build_longtail_map(selected_items, keyword_clusters)
-    suggestions = _coerce_items(input_data.get("longtail_suggestions")) or payload["longtail_suggestions"]
+    resolved_options = resolve_longtail_options(input_data.get("longtail_options"))
+    payload = build_longtail_map(
+        selected_items,
+        keyword_clusters,
+        longtail_options=resolved_options,
+    )
+    should_rebuild = bool(input_data.get("force_rebuild"))
+    suggestions = (
+        payload["longtail_suggestions"]
+        if should_rebuild
+        else (_coerce_items(input_data.get("longtail_suggestions")) or payload["longtail_suggestions"])
+    )
     if not suggestions:
         return {
             "verified_longtail_suggestions": [],
             "longtail_verification_summary": _build_longtail_summary([]),
             "verified_longtail_keywords": [],
+            "longtail_options": payload.get("longtail_options", resolved_options),
         }
 
     analyzer_options = input_data.get("analyzer_options")
@@ -125,12 +154,14 @@ def verify_longtail_candidates(input_data: dict[str, Any]) -> dict[str, Any]:
         "longtail_verification_summary": _build_longtail_summary(verified_suggestions),
         "verified_longtail_keywords": analyzed_items,
         "cannibalization_report": cannibalization_report,
+        "longtail_options": payload.get("longtail_options", resolved_options),
     }
 
 
 def _build_cluster_longtail_suggestions(
     cluster: dict[str, Any],
     selected_by_keyword: dict[str, dict[str, Any]],
+    longtail_options: dict[str, Any],
 ) -> list[dict[str, Any]]:
     representative_keyword = normalize_text(cluster.get("representative_keyword"))
     all_keywords = [
@@ -153,7 +184,13 @@ def _build_cluster_longtail_suggestions(
     for keyword in all_keywords:
         modifier_phrase = _extract_modifier_phrase(base_phrase, keyword)
         intent_key = _resolve_intent_key(keyword)
-        for candidate in _build_longtail_candidates(base_phrase, modifier_phrase, intent_key, representative_keyword):
+        for candidate in _build_longtail_candidates(
+            base_phrase,
+            modifier_phrase,
+            intent_key,
+            representative_keyword,
+            optional_suffix_keys=longtail_options.get("optional_suffix_keys", []),
+        ):
             normalized_candidate = normalize_text(candidate)
             candidate_key = normalize_key(normalized_candidate)
             if not normalized_candidate or not candidate_key or candidate_key in existing_keyword_keys:
@@ -238,6 +275,8 @@ def _build_longtail_candidates(
     modifier_phrase: str,
     intent_key: str,
     representative_keyword: str,
+    *,
+    optional_suffix_keys: list[str] | tuple[str, ...] = (),
 ) -> list[str]:
     base_phrase = normalize_text(base_phrase)
     modifier_phrase = normalize_text(modifier_phrase)
@@ -271,7 +310,7 @@ def _build_longtail_candidates(
     elif intent_key == "info":
         candidates.extend([
             f"{base_phrase} {normalized_modifier or '정보'} 핵심 정리",
-            f"{base_phrase} {normalized_modifier or '정보'} 가이드",
+            f"{base_phrase} {normalized_modifier} 확인 포인트" if normalized_modifier else f"{base_phrase} 최신 정보",
         ])
     elif intent_key == "location":
         candidates.extend([
@@ -284,10 +323,7 @@ def _build_longtail_candidates(
             f"{base_phrase} {normalized_modifier or '대상'} 확인 포인트",
         ])
 
-    candidates.extend([
-        f"{base_phrase} {normalized_modifier} 체크리스트" if normalized_modifier else f"{base_phrase} 체크리스트",
-        f"{base_phrase} {normalized_modifier} 가이드" if normalized_modifier else f"{base_phrase} 가이드",
-    ])
+    candidates.extend(_build_optional_suffix_candidates(base_phrase, normalized_modifier, optional_suffix_keys))
 
     normalized_candidates: list[str] = []
     seen: set[str] = set()
@@ -306,6 +342,34 @@ def _build_longtail_candidates(
         seen.add(candidate_key)
         normalized_candidates.append(cleaned)
     return normalized_candidates
+
+
+def _build_optional_suffix_candidates(
+    base_phrase: str,
+    normalized_modifier: str,
+    optional_suffix_keys: list[str] | tuple[str, ...],
+) -> list[str]:
+    base_phrase = normalize_text(base_phrase)
+    normalized_modifier = normalize_text(normalized_modifier)
+    if not base_phrase:
+        return []
+
+    candidates: list[str] = []
+    modifier_key = normalize_key(normalized_modifier)
+    for raw_key in optional_suffix_keys:
+        option = _OPTIONAL_SUFFIX_LIBRARY.get(str(raw_key or "").strip().lower())
+        if not option:
+            continue
+        suffix = option["suffix"]
+        suffix_key = normalize_key(suffix)
+        if normalized_modifier and modifier_key and modifier_key == suffix_key:
+            candidates.append(f"{base_phrase} {suffix}")
+            continue
+        if normalized_modifier:
+            candidates.append(f"{base_phrase} {normalized_modifier} {suffix}")
+            continue
+        candidates.append(f"{base_phrase} {suffix}")
+    return candidates
 
 
 def _is_awkward_longtail(keyword: str) -> bool:
@@ -480,6 +544,46 @@ def _coerce_items(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def resolve_longtail_options(value: Any) -> dict[str, Any]:
+    raw_keys: list[Any]
+    if isinstance(value, dict):
+        raw_keys = value.get("optional_suffix_keys") or value.get("optional_suffixes") or []
+    elif isinstance(value, list):
+        raw_keys = value
+    else:
+        raw_keys = []
+
+    normalized_keys: list[str] = []
+    seen: set[str] = set()
+    for raw_key in raw_keys:
+        key = _normalize_optional_suffix_key(raw_key)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        normalized_keys.append(key)
+
+    return {
+        "optional_suffix_keys": normalized_keys,
+        "optional_suffix_labels": [
+            _OPTIONAL_SUFFIX_LIBRARY[key]["label"]
+            for key in normalized_keys
+            if key in _OPTIONAL_SUFFIX_LIBRARY
+        ],
+    }
+
+
+def _normalize_optional_suffix_key(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in _OPTIONAL_SUFFIX_LIBRARY:
+        return normalized
+
+    token_key = normalize_key(value)
+    for option_key, option in _OPTIONAL_SUFFIX_LIBRARY.items():
+        if token_key == normalize_key(option["label"]) or token_key == normalize_key(option["suffix"]):
+            return option_key
+    return ""
 
 
 def _longtail_sort_key(item: dict[str, Any]) -> tuple[float, float, float]:

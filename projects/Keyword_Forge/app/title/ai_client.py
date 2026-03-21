@@ -4,8 +4,10 @@ from collections import Counter
 from datetime import datetime
 import json
 from dataclasses import dataclass
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
@@ -18,11 +20,15 @@ from app.title.rules import NAVER_HOME_MAX_LENGTH
 
 _OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 _GEMINI_URL_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+_VERTEX_EXPRESS_URL_TEMPLATE = (
+    "https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent?key={api_key}"
+)
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
 _DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
     "gemini": "gemini-2.5-flash-lite",
+    "vertex": "gemini-2.5-flash-lite",
     "anthropic": "claude-haiku-4-5",
 }
 _ISSUE_CONTEXT_MAX_LIMIT = 5
@@ -189,6 +195,9 @@ _DEFAULT_SYSTEM_PROMPT = (
     "You are a Korean SEO title generator for Naver-focused content.\n"
     "Return strict JSON only.\n"
     "Preserve each keyword exactly.\n"
+    "Every title must contain all meaningful keyword tokens from the input keyword.\n"
+    "Keep those keyword tokens in the same order, even when you insert short modifiers between them.\n"
+    "Do not drop or paraphrase modifier tokens such as 체크리스트, 비교, 후기, 가격, 일정, 신청방법, 원인, 부작용, 추천, or 가이드.\n"
     "For every keyword, generate exactly 2 naver_home titles and 2 blog titles.\n"
     f"Each naver_home title must be {NAVER_HOME_MAX_LENGTH} characters or fewer.\n"
     "Write natural Korean titles that sound like a real editor wrote them.\n"
@@ -309,6 +318,8 @@ def request_ai_titles(
         return _request_openai_titles(prompt, options)
     if options.provider == "gemini":
         return _request_gemini_titles(prompt, options)
+    if options.provider == "vertex":
+        return _request_vertex_titles(prompt, options)
     if options.provider == "anthropic":
         return _request_anthropic_titles(prompt, options)
 
@@ -340,38 +351,25 @@ def _request_openai_titles(prompt: str, options: TitleGenerationOptions) -> list
 
 
 def _request_gemini_titles(prompt: str, options: TitleGenerationOptions) -> list[dict[str, Any]]:
-    payload = {
-        "systemInstruction": {
-            "parts": [{"text": options.effective_system_prompt}],
-        },
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": prompt}],
-            }
-        ],
-        "generationConfig": {
-            "temperature": options.temperature,
-            "responseMimeType": "application/json",
-            "maxOutputTokens": options.max_output_tokens,
-        },
-    }
+    payload = _build_gemini_like_payload(prompt, options)
     headers = {
         "Content-Type": "application/json",
         "x-goog-api-key": options.api_key or "",
     }
     url = _GEMINI_URL_TEMPLATE.format(model=options.model)
-    response = _post_json(url, headers, payload)
-    parts = (
-        response.get("candidates", [{}])[0]
-        .get("content", {})
-        .get("parts", [])
-    )
-    content = "\n".join(
-        normalize_text(part.get("text"))
-        for part in parts
-        if isinstance(part, dict) and normalize_text(part.get("text"))
-    )
+    response = _post_json(url, headers, payload, max_retries=2)
+    content = _extract_gemini_like_text(response)
+    return _parse_title_items(content)
+
+
+def _request_vertex_titles(prompt: str, options: TitleGenerationOptions) -> list[dict[str, Any]]:
+    payload = _build_gemini_like_payload(prompt, options)
+    headers = {
+        "Content-Type": "application/json",
+    }
+    url = _VERTEX_EXPRESS_URL_TEMPLATE.format(model=options.model, api_key=quote(options.api_key or "", safe=""))
+    response = _post_json(url, headers, payload, max_retries=2)
+    content = _extract_gemini_like_text(response)
     return _parse_title_items(content)
 
 
@@ -403,25 +401,52 @@ def _request_anthropic_titles(prompt: str, options: TitleGenerationOptions) -> l
     return _parse_title_items(content)
 
 
-def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
-    request = Request(
-        url=url,
-        headers=headers,
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
-    )
+def _post_json(
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    *,
+    max_retries: int = 0,
+) -> dict[str, Any]:
+    raw_payload = json.dumps(payload).encode("utf-8")
+    last_error: Exception | None = None
 
-    try:
-        with urlopen(request, timeout=30.0) as response:
-            raw_text = response.read().decode("utf-8", errors="ignore")
-    except HTTPError as exc:
-        raw_text = exc.read().decode("utf-8", errors="ignore")
-        detail = _extract_error_message(raw_text) or raw_text or exc.reason
-        raise TitleProviderError(f"{exc.code} {detail}") from exc
-    except URLError as exc:
-        raise TitleProviderError(str(exc.reason)) from exc
-    except Exception as exc:  # pragma: no cover - network runtime guard
-        raise TitleProviderError(str(exc)) from exc
+    for attempt in range(max_retries + 1):
+        request = Request(
+            url=url,
+            headers=headers,
+            data=raw_payload,
+            method="POST",
+        )
+
+        try:
+            with urlopen(request, timeout=30.0) as response:
+                raw_text = response.read().decode("utf-8", errors="ignore")
+            break
+        except HTTPError as exc:
+            raw_text = exc.read().decode("utf-8", errors="ignore")
+            detail = _extract_error_message(raw_text) or raw_text or exc.reason
+            if attempt < max_retries and exc.code in {429, 500, 503}:
+                time.sleep(
+                    _resolve_retry_delay_seconds(
+                        detail,
+                        header_value=exc.headers.get("Retry-After") if exc.headers else "",
+                        attempt=attempt,
+                    )
+                )
+                last_error = exc
+                continue
+            raise TitleProviderError(f"{exc.code} {detail}") from exc
+        except URLError as exc:
+            if attempt < max_retries:
+                time.sleep(_resolve_retry_delay_seconds(str(exc.reason), attempt=attempt))
+                last_error = exc
+                continue
+            raise TitleProviderError(str(exc.reason)) from exc
+        except Exception as exc:  # pragma: no cover - network runtime guard
+            raise TitleProviderError(str(exc)) from exc
+    else:  # pragma: no cover - defensive guard
+        raise TitleProviderError(str(last_error) if last_error else "Provider request failed.")
 
     try:
         parsed = json.loads(raw_text)
@@ -431,6 +456,38 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any]) -> di
     if not isinstance(parsed, dict):
         raise TitleProviderError("Provider returned an unexpected payload.")
     return parsed
+
+
+def _build_gemini_like_payload(prompt: str, options: TitleGenerationOptions) -> dict[str, Any]:
+    return {
+        "systemInstruction": {
+            "parts": [{"text": options.effective_system_prompt}],
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": prompt}],
+            }
+        ],
+        "generationConfig": {
+            "temperature": options.temperature,
+            "responseMimeType": "application/json",
+            "maxOutputTokens": options.max_output_tokens,
+        },
+    }
+
+
+def _extract_gemini_like_text(response: dict[str, Any]) -> str:
+    parts = (
+        response.get("candidates", [{}])[0]
+        .get("content", {})
+        .get("parts", [])
+    )
+    return "\n".join(
+        normalize_text(part.get("text"))
+        for part in parts
+        if isinstance(part, dict) and normalize_text(part.get("text"))
+    )
 
 
 def _build_user_prompt(keywords: list[str]) -> str:
@@ -449,6 +506,8 @@ def _build_user_prompt(keywords: list[str]) -> str:
         "}\n\n"
         "Rules:\n"
         "- Preserve each keyword exactly.\n"
+        "- Every title must contain all meaningful keyword tokens from the input keyword.\n"
+        "- Keep keyword tokens in the same order. You may insert short modifiers between tokens, but do not drop or paraphrase any keyword token.\n"
         "- Write all titles in Korean.\n"
         "- naver_home and blog must each contain exactly 2 items.\n"
         "- Avoid duplicate titles within the same keyword.\n"
@@ -482,6 +541,9 @@ def _build_user_prompt_from_items(input_items: list[Any]) -> str:
         "}\n\n"
         "Rules:\n"
         "- Preserve each keyword exactly.\n"
+        "- Every title must contain all meaningful keyword tokens from the input keyword.\n"
+        "- Keep keyword tokens in the same order. You may insert short modifiers between tokens, but do not drop or paraphrase any keyword token.\n"
+        "- Pay extra attention to the last keyword token when it carries intent, such as 체크리스트, 후기, 비교, 가격, 일정, 신청방법, 원인, 부작용, 추천, or 가이드.\n"
         "- Write all titles in Korean.\n"
         "- Treat every input item independently on a 1:1 basis.\n"
         "- naver_home and blog must each contain exactly 2 items.\n"
@@ -534,6 +596,8 @@ def _normalize_prompt_items(input_items: list[Any]) -> list[dict[str, str]]:
         normalized_items.append(
             {
                 "keyword": keyword,
+                "keyword_tokens": _build_keyword_token_summary(keyword),
+                "keyword_coverage_rule": _build_keyword_coverage_rule(keyword),
                 "category_label": _PROMPT_CATEGORY_LABELS[category_key],
                 "overlay": _PROMPT_CATEGORY_OVERLAYS[category_key],
                 "pair_hint": _PROMPT_CATEGORY_HOME_ANGLE_HINTS[category_key],
@@ -554,6 +618,8 @@ def _format_prompt_item(index: int, item: dict[str, str]) -> str:
     lines = [
         f"Item {index}",
         f"- keyword: {item['keyword']}",
+        f"- required keyword tokens: {item['keyword_tokens']}",
+        f"- keyword coverage rule: {item['keyword_coverage_rule']}",
         f"- category overlay: {item['category_label']}",
         f"- category focus: {item['overlay']}",
         f"- preferred naver_home pair: {item['pair_hint']}",
@@ -603,6 +669,21 @@ def _infer_prompt_category(keyword: str, item: dict[str, Any]) -> str:
 
     detected_category = detect_category(keyword)
     return _DETECTED_CATEGORY_TO_PROMPT_CATEGORY.get(detected_category, "general")
+
+
+def _build_keyword_token_summary(keyword: str) -> str:
+    tokens = [token for token in tokenize_text(keyword) if normalize_key(token)]
+    return ", ".join(tokens) if tokens else normalize_text(keyword)
+
+
+def _build_keyword_coverage_rule(keyword: str) -> str:
+    tokens = [token for token in tokenize_text(keyword) if normalize_key(token)]
+    if len(tokens) <= 1:
+        return "Use the full keyword exactly as written in every title."
+    return (
+        f"Every title must include all tokens in order: {' -> '.join(tokens)}. "
+        "You may add short modifiers between tokens, but do not drop, replace, or paraphrase any token."
+    )
 
 
 def _map_explicit_prompt_category(value: Any) -> str:
@@ -986,6 +1067,39 @@ def _extract_error_message(raw_text: str) -> str:
 
     message = normalize_text(parsed.get("message"))
     return message
+
+
+def _resolve_retry_delay_seconds(
+    detail: str,
+    *,
+    header_value: str = "",
+    attempt: int = 0,
+) -> float:
+    header_text = normalize_text(header_value)
+    if header_text:
+        try:
+            return max(1.0, min(60.0, float(header_text)))
+        except ValueError:
+            pass
+
+    normalized_detail = normalize_text(detail)
+    marker = "Please retry in "
+    if marker in normalized_detail:
+        tail = normalized_detail.split(marker, 1)[1]
+        number_buffer: list[str] = []
+        for character in tail:
+            if character.isdigit() or character == ".":
+                number_buffer.append(character)
+                continue
+            if number_buffer:
+                break
+        if number_buffer:
+            try:
+                return max(1.0, min(60.0, float("".join(number_buffer))))
+            except ValueError:
+                pass
+
+    return min(8.0, 1.5 * (attempt + 1))
 
 
 def _normalize_provider(value: Any) -> str:

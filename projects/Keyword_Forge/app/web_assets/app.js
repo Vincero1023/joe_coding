@@ -68,9 +68,42 @@ const OPERATION_MODE_PRESET_FALLBACKS = [
         stop_on_auth_error: true,
     },
 ];
+const OPERATION_CUSTOM_TUNING_PRESETS = [
+    {
+        key: "safe",
+        label: "안전",
+        description: "간격을 넉넉하게 두고 하루 작업량도 적게 잡는 보수형입니다.",
+        naver_request_gap_seconds: 6.0,
+        daily_operation_limit: 18,
+        daily_naver_request_limit: 220,
+        max_continuous_minutes: 45,
+        stop_on_auth_error: true,
+    },
+    {
+        key: "balanced",
+        label: "추천",
+        description: "일반적인 수집/확장 작업 기준으로 가장 무난한 추천값입니다.",
+        naver_request_gap_seconds: 3.5,
+        daily_operation_limit: 40,
+        daily_naver_request_limit: 550,
+        max_continuous_minutes: 90,
+        stop_on_auth_error: true,
+    },
+    {
+        key: "fast",
+        label: "빠름",
+        description: "처리량을 조금 더 높인 값입니다. 속도는 빠르지만 보호 여유는 줄어듭니다.",
+        naver_request_gap_seconds: 2.5,
+        daily_operation_limit: 80,
+        daily_naver_request_limit: 1000,
+        max_continuous_minutes: 150,
+        stop_on_auth_error: true,
+    },
+];
 const TITLE_PROVIDER_DEFAULT_MODELS = {
     openai: "gpt-4o-mini",
     gemini: "gemini-2.5-flash-lite",
+    vertex: "gemini-2.5-flash-lite",
     anthropic: "claude-haiku-4-5",
 };
 const TITLE_PROVIDER_MODEL_OPTIONS = {
@@ -84,6 +117,11 @@ const TITLE_PROVIDER_MODEL_OPTIONS = {
         { value: "gemini-2.5-flash-lite", label: "(추천) Gemini 2.5 Flash-Lite" },
         { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
         { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+    ],
+    vertex: [
+        { value: "gemini-2.5-flash-lite", label: "(추천) Vertex Gemini 2.5 Flash-Lite" },
+        { value: "gemini-2.5-flash", label: "Vertex Gemini 2.5 Flash" },
+        { value: "gemini-2.5-pro", label: "Vertex Gemini 2.5 Pro" },
     ],
     anthropic: [
         { value: "claude-haiku-4-5", label: "(추천) Claude Haiku 4.5" },
@@ -168,6 +206,7 @@ const state = {
     results: createEmptyResults(),
     stageStatus: createInitialStageStatus(),
     diagnostics: createEmptyDiagnostics(),
+    trendSessionCache: null,
     selectedCollectedKeys: [],
     selectGradeFilters: [...PROFITABILITY_ORDER],
     selectAttackabilityFilters: [...ATTACKABILITY_ORDER],
@@ -180,6 +219,8 @@ const state = {
     titleSort: "mode_quality_desc",
     operationSettingsSnapshot: null,
     operationModePresets: [...OPERATION_MODE_PRESET_FALLBACKS],
+    operationCustomPresetKey: "balanced",
+    operationLastCustomSettings: null,
 };
 
 const elements = {};
@@ -188,6 +229,7 @@ let dashboardSessionSaveTimer = null;
 document.addEventListener("DOMContentLoaded", () => {
     bindElements();
     loadTrendSettings();
+    void loadTrendSessionCacheStatus({ silent: true });
     loadTitleSettings();
     void loadOperationSettings();
     const restoredDashboard = restoreDashboardSession();
@@ -404,14 +446,22 @@ async function runCollectStage() {
         const trendService = inputData.trend_options?.service || "naver_blog";
         const hasCookie = Boolean(inputData.trend_options?.auth_cookie);
         const usesFallback = Boolean(inputData.trend_options?.fallback_to_preset_search);
+        const trendSessionCache = hasCookie
+            ? state.trendSessionCache
+            : await loadTrendSessionCacheStatus({ silent: true });
+        const hasCachedSession = Boolean(trendSessionCache?.available);
 
-        if (!hasCookie && !usesFallback) {
+        if (!hasCookie && !hasCachedSession && !usesFallback) {
             throw new Error(
-                `Creator Advisor 쿠키가 없습니다. 실제 네이버 트렌드를 보려면 ${trendService} 쿠키를 입력하거나 fallback을 켜 주세요.`,
+                `Creator Advisor 세션이 없습니다. '전용 로그인 브라우저 열기'로 다시 로그인하거나 ${trendService} 수집을 위해 fallback을 켜 주세요.`,
             );
         }
 
-        if (!hasCookie && usesFallback) {
+        if (!hasCookie && hasCachedSession) {
+            addLog(
+                `입력 세션은 비어 있지만 저장된 ${trendSessionCache?.browser || "local"} 전용 로그인 세션으로 Creator Advisor ${trendService} 트렌드를 조회합니다.`,
+            );
+        } else if (!hasCookie && usesFallback) {
             addLog(
                 `Creator Advisor 쿠키가 없어 ${trendService} 트렌드 대신 preset 검색 fallback으로 내려갑니다.`,
                 "error",
@@ -514,6 +564,7 @@ async function runTitleStage() {
             selected_keywords: state.results.selected?.selected_keywords || [],
             keyword_clusters: state.results.selected?.keyword_clusters || [],
             longtail_suggestions: state.results.selected?.longtail_suggestions || [],
+            longtail_options: state.results.selected?.longtail_options || null,
             analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
             serp_competition_summary: state.results.selected?.serp_competition_summary || null,
             title_options: titleOptions,
@@ -1217,9 +1268,56 @@ function persistTrendSettings() {
     }
 }
 
+function normalizeTrendSessionCacheInfo(raw) {
+    const cookieCount = Number.parseInt(String(raw?.cookie_count ?? 0), 10);
+    const cookieNames = Array.isArray(raw?.cookie_names)
+        ? raw.cookie_names.map((value) => String(value || "").trim()).filter(Boolean)
+        : [];
+
+    return {
+        available: Boolean(raw?.available ?? raw?.cookie_header ?? cookieCount > 0),
+        browser: String(raw?.browser || "").trim(),
+        cookie_count: Number.isFinite(cookieCount) ? cookieCount : 0,
+        cookie_names: cookieNames,
+        saved_at: Number.parseInt(String(raw?.saved_at ?? 0), 10) || 0,
+        target_url: String(raw?.target_url || "").trim(),
+        profile_dir: String(raw?.profile_dir || "").trim(),
+    };
+}
+
+async function loadTrendSessionCacheStatus(options = {}) {
+    const silent = Boolean(options?.silent);
+    let response;
+
+    try {
+        response = await fetch("/local/naver-session-cache", { method: "GET" });
+    } catch (error) {
+        if (!silent) {
+            addLog("로컬 네이버 세션 캐시 상태를 확인하지 못했습니다.", "error");
+        }
+        return state.trendSessionCache;
+    }
+
+    const rawText = await response.text();
+    const payload = tryParseJson(rawText);
+    if (!response.ok) {
+        if (!silent) {
+            addLog("로컬 네이버 세션 캐시 상태 조회가 실패했습니다.", "error");
+        }
+        return state.trendSessionCache;
+    }
+
+    state.trendSessionCache = normalizeTrendSessionCacheInfo(payload?.result || {});
+    renderTrendSettingsState();
+    return state.trendSessionCache;
+}
+
 function renderTrendSettingsState() {
     const categoryMode = getCollectorMode() === "category";
     const usesTrendSource = categoryMode && elements.categorySourceInput.value === "naver_trend";
+    const hasInlineCookie = Boolean(elements.trendCookieInput.value.trim());
+    const trendSessionCache = state.trendSessionCache?.available ? state.trendSessionCache : null;
+    const hasCachedSession = Boolean(trendSessionCache);
 
     elements.trendServiceInput.disabled = !usesTrendSource;
     elements.trendDateInput.disabled = !usesTrendSource;
@@ -1231,22 +1329,25 @@ function renderTrendSettingsState() {
 
     if (elements.trendSourceHelp) {
         if (usesTrendSource) {
-            const hasCookie = Boolean(elements.trendCookieInput.value.trim());
             const service = elements.trendServiceInput.value || "naver_blog";
             const browser = elements.trendBrowserInput.value || "auto";
             const fallbackLabel = elements.trendFallbackInput.checked ? "켜짐" : "꺼짐";
-            elements.trendSourceHelp.textContent = hasCookie
+            elements.trendSourceHelp.textContent = hasInlineCookie
                 ? `현재 Creator Advisor ${service} 트렌드를 직접 조회합니다. /naver_blog/... 페이지를 기준으로 볼 때는 service를 naver_blog로 맞춰야 하며, 로컬 브라우저는 ${browser}, fallback은 ${fallbackLabel} 상태입니다.`
-                : `현재 Creator Advisor ${service} 쿠키가 비어 있습니다. 권장은 아래 '전용 로그인 브라우저 열기'로 앱 전용 세션을 만든 뒤 쓰는 방식이며, fallback이 꺼져 있으면 트렌드 수집은 멈춥니다.`;
+                : hasCachedSession
+                    ? `입력 칸은 비어 있지만 저장된 ${trendSessionCache?.browser || "local"} 전용 로그인 세션을 자동으로 사용합니다. 로컬 브라우저는 ${browser}, fallback은 ${fallbackLabel} 상태입니다.`
+                    : `현재 Creator Advisor ${service} 세션이 비어 있습니다. '전용 로그인 브라우저 열기'로 로컬 세션을 준비해 주세요. 저장된 전용 세션이 없고 fallback이 꺼져 있으면 트렌드 수집은 멈춥니다.`;
         } else {
             elements.trendSourceHelp.textContent = "seed 모드이거나 preset_search를 고른 경우에는 기존 공개 검색 수집 경로를 사용합니다.";
         }
     }
 
     if (elements.localCookieStatus && !elements.localCookieStatus.dataset.locked) {
-        elements.localCookieStatus.textContent = elements.trendCookieInput.value.trim()
+        elements.localCookieStatus.textContent = hasInlineCookie
             ? "브라우저에서 불러오거나 직접 붙여넣은 로컬 세션이 준비되어 있습니다."
-            : "아직 불러온 로컬 세션이 없습니다.";
+            : hasCachedSession
+                ? `저장된 ${trendSessionCache?.browser || "local"} 전용 로그인 세션이 있어 입력 칸이 비어도 수집 시 자동으로 사용합니다.`
+                : "아직 저장된 전용 로그인 세션이 없습니다.";
     }
 }
 
@@ -1276,6 +1377,7 @@ async function importLocalNaverCookie() {
         }
 
         elements.trendCookieInput.value = cookieHeader;
+        state.trendSessionCache = normalizeTrendSessionCacheInfo(result);
         if (elements.localCookieStatus) {
             elements.localCookieStatus.dataset.locked = "true";
             elements.localCookieStatus.textContent = `${result.browser || browser} 브라우저에서 쿠키 ${result.cookie_count || 0}개를 불러왔습니다.`;
@@ -1332,6 +1434,7 @@ async function openDedicatedLoginBrowser() {
         }
 
         elements.trendCookieInput.value = cookieHeader;
+        state.trendSessionCache = normalizeTrendSessionCacheInfo(result);
         if (elements.localCookieStatus) {
             elements.localCookieStatus.dataset.locked = "true";
             elements.localCookieStatus.textContent = `${result.browser || browser} 전용 프로필에서 쿠키 ${result.cookie_count || 0}개를 저장했습니다.`;
@@ -1632,6 +1735,10 @@ function createEmptySelectedResult() {
         selected_keywords: [],
         keyword_clusters: [],
         longtail_suggestions: [],
+        longtail_options: {
+            optional_suffix_keys: [],
+            optional_suffix_labels: [],
+        },
         longtail_summary: {
             suggestion_count: 0,
             cluster_count: 0,
@@ -3423,6 +3530,11 @@ function bindElements() {
     elements.operationMaxContinuousMinutes = document.getElementById("operationMaxContinuousMinutes");
     elements.operationStopOnAuthError = document.getElementById("operationStopOnAuthError");
     elements.operationModeDescription = document.getElementById("operationModeDescription");
+    elements.operationCustomModeGuide = document.getElementById("operationCustomModeGuide");
+    elements.operationGuardCard = document.getElementById("operationGuardCard");
+    elements.operationCustomPresetPanel = document.getElementById("operationCustomPresetPanel");
+    elements.operationCustomPresetButtons = Array.from(document.querySelectorAll("[data-operation-custom-preset]"));
+    elements.operationCustomPresetDescription = document.getElementById("operationCustomPresetDescription");
     elements.operationSettingsHint = document.getElementById("operationSettingsHint");
     elements.operationSettingsSyncStatus = document.getElementById("operationSettingsSyncStatus");
     elements.operationModeStatus = document.getElementById("operationModeStatus");
@@ -4930,6 +5042,11 @@ function bindEvents() {
         element?.addEventListener("input", handleOperationSettingsInputChange);
         element?.addEventListener("change", handleOperationSettingsInputChange);
     });
+    elements.operationCustomPresetButtons?.forEach((button) => {
+        button.addEventListener("click", () => {
+            applyOperationCustomPreset(button.dataset.operationCustomPreset || "balanced");
+        });
+    });
     elements.refreshOperationSettingsButton?.addEventListener("click", () => {
         void loadOperationSettings({ forceServer: true });
     });
@@ -5080,6 +5197,9 @@ function renderInputState() {
 function renderTrendSettingsState() {
     const categoryMode = getCollectorMode() === "category";
     const usesTrendSource = categoryMode && elements.categorySourceInput.value === "naver_trend";
+    const hasInlineCookie = Boolean(elements.trendCookieInput.value.trim());
+    const trendSessionCache = state.trendSessionCache?.available ? state.trendSessionCache : null;
+    const hasCachedSession = Boolean(trendSessionCache);
 
     elements.trendServiceInput.disabled = !usesTrendSource;
     elements.trendDateInput.disabled = !usesTrendSource;
@@ -5093,22 +5213,25 @@ function renderTrendSettingsState() {
 
     if (elements.trendSourceHelp) {
         if (usesTrendSource) {
-            const hasCookie = Boolean(elements.trendCookieInput.value.trim());
             const service = elements.trendServiceInput.value || "naver_blog";
             const browser = elements.trendBrowserInput.value || "auto";
             const fallbackLabel = elements.trendFallbackInput.checked ? "\ucf1c\uc9d0" : "\uaebc\uc9d0";
-            elements.trendSourceHelp.textContent = hasCookie
+            elements.trendSourceHelp.textContent = hasInlineCookie
                 ? `\ud604\uc7ac Creator Advisor ${service} \ud2b8\ub80c\ub4dc\ub97c \uc9c1\uc811 \uc870\ud68c\ud569\ub2c8\ub2e4. \ub85c\uceec \ube0c\ub77c\uc6b0\uc800\ub294 ${browser}, fallback\uc740 ${fallbackLabel} \uc0c1\ud0dc\uc785\ub2c8\ub2e4.`
-                : `\ud604\uc7ac Creator Advisor ${service} \uc138\uc158\uc774 \ube44\uc5b4 \uc788\uc2b5\ub2c8\ub2e4. '\uc804\uc6a9 \ub85c\uadf8\uc778 \ube0c\ub77c\uc6b0\uc800 \uc5f4\uae30'\ub85c \ub85c\uceec \uc138\uc158\uc744 \uc900\ube44\ud574 \uc8fc\uc138\uc694.`;
+                : hasCachedSession
+                    ? `\uc785\ub825 \uce78\uc740 \ube44\uc5b4 \uc788\uc9c0\ub9cc \uc800\uc7a5\ub41c ${trendSessionCache?.browser || "local"} \uc804\uc6a9 \ub85c\uadf8\uc778 \uc138\uc158\uc744 \uc790\ub3d9\uc73c\ub85c \uc0ac\uc6a9\ud569\ub2c8\ub2e4. \ub85c\uceec \ube0c\ub77c\uc6b0\uc800\ub294 ${browser}, fallback\uc740 ${fallbackLabel} \uc0c1\ud0dc\uc785\ub2c8\ub2e4.`
+                    : `\ud604\uc7ac Creator Advisor ${service} \uc138\uc158\uc774 \ube44\uc5b4 \uc788\uc2b5\ub2c8\ub2e4. '\uc804\uc6a9 \ub85c\uadf8\uc778 \ube0c\ub77c\uc6b0\uc800 \uc5f4\uae30'\ub85c \ub85c\uceec \uc138\uc158\uc744 \uc900\ube44\ud574 \uc8fc\uc138\uc694. \uc800\uc7a5\ub41c \uc804\uc6a9 \uc138\uc158\uc774 \uc5c6\uace0 fallback\uc774 \uaebc\uc838 \uc788\uc73c\uba74 \ud2b8\ub80c\ub4dc \uc218\uc9d1\uc740 \uba48\ucda5\ub2c8\ub2e4.`;
         } else {
             elements.trendSourceHelp.textContent = "\uce74\ud14c\uace0\ub9ac \uc218\uc9d1 \uc18c\uc2a4\uac00 preset fallback\uc774\uba74 \uae30\uc874 \uacf5\uac1c \uac80\uc0c9 \uacbd\ub85c\ub85c \ud0a4\uc6cc\ub4dc\ub97c \uc218\uc9d1\ud569\ub2c8\ub2e4.";
         }
     }
 
     if (elements.localCookieStatus && !elements.localCookieStatus.dataset.locked) {
-        elements.localCookieStatus.textContent = elements.trendCookieInput.value.trim()
-            ? "\ube0c\ub77c\uc6b0\uc800\uc5d0\uc11c \ubd88\ub7ec\uc624\uac70\ub098 \uc9c1\uc811 \ubd99\uc5ec\ub123\uc744 \ub85c\uceec \uc138\uc158\uc774 \uc900\ube44\ub418\uc5b4 \uc788\uc2b5\ub2c8\ub2e4."
-            : "\uc544\uc9c1 \ubd88\ub7ec\uc628 \ub85c\uceec \uc138\uc158\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.";
+        elements.localCookieStatus.textContent = hasInlineCookie
+            ? "\ube0c\ub77c\uc6b0\uc800\uc5d0\uc11c \ubd88\ub7ec\uc624\uac70\ub098 \uc9c1\uc811 \ubd99\uc5ec\ub123\uc740 \ub85c\uceec \uc138\uc158\uc774 \uc900\ube44\ub418\uc5b4 \uc788\uc2b5\ub2c8\ub2e4."
+            : hasCachedSession
+                ? `\uc800\uc7a5\ub41c ${trendSessionCache?.browser || "local"} \uc804\uc6a9 \ub85c\uadf8\uc778 \uc138\uc158\uc774 \uc788\uc5b4 \uc785\ub825 \uce78\uc774 \ube44\uc5b4\ub3c4 \uc218\uc9d1 \uc2dc \uc790\ub3d9\uc73c\ub85c \uc0ac\uc6a9\ud569\ub2c8\ub2e4.`
+                : "\uc544\uc9c1 \uc800\uc7a5\ub41c \uc804\uc6a9 \ub85c\uadf8\uc778 \uc138\uc158\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.";
     }
 }
 
@@ -7735,6 +7858,7 @@ function normalizeTitleProvider(provider) {
 function formatTitleProviderLabel(provider) {
     const normalized = normalizeTitleProvider(provider);
     if (normalized === "gemini") return "Gemini";
+    if (normalized === "vertex") return "Vertex AI";
     if (normalized === "anthropic") return "Anthropic";
     return "OpenAI";
 }
@@ -8442,6 +8566,71 @@ function getTitleSettingsFormState() {
     };
 }
 
+function normalizeOperationCustomPresetKey(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return OPERATION_CUSTOM_TUNING_PRESETS.some((preset) => preset.key === normalized)
+        ? normalized
+        : "balanced";
+}
+
+function findOperationCustomPreset(key) {
+    const normalizedKey = normalizeOperationCustomPresetKey(key);
+    return OPERATION_CUSTOM_TUNING_PRESETS.find((preset) => preset.key === normalizedKey)
+        || OPERATION_CUSTOM_TUNING_PRESETS[1];
+}
+
+function buildOperationCustomSettings(key) {
+    const preset = findOperationCustomPreset(key);
+    return {
+        mode: "custom",
+        naver_request_gap_seconds: preset.naver_request_gap_seconds,
+        daily_operation_limit: preset.daily_operation_limit,
+        daily_naver_request_limit: preset.daily_naver_request_limit,
+        max_continuous_minutes: preset.max_continuous_minutes,
+        stop_on_auth_error: Boolean(preset.stop_on_auth_error),
+    };
+}
+
+function describeOperationCustomSettings(settings) {
+    const matchingPreset = OPERATION_CUSTOM_TUNING_PRESETS.find((preset) => (
+        Number(settings?.naver_request_gap_seconds) === Number(preset.naver_request_gap_seconds)
+        && Number(settings?.daily_operation_limit) === Number(preset.daily_operation_limit)
+        && Number(settings?.daily_naver_request_limit) === Number(preset.daily_naver_request_limit)
+        && Number(settings?.max_continuous_minutes) === Number(preset.max_continuous_minutes)
+        && Boolean(settings?.stop_on_auth_error) === Boolean(preset.stop_on_auth_error)
+    ));
+    if (matchingPreset) {
+        return {
+            key: matchingPreset.key,
+            label: matchingPreset.label,
+            description: matchingPreset.description,
+        };
+    }
+    return {
+        key: "manual",
+        label: "직접 조정",
+        description: "추천값에서 벗어난 현재 사용자 조정값입니다. 필요한 값만 조금씩 조절하는 방식이 가장 안전합니다.",
+    };
+}
+
+function rememberOperationCustomSettings(settings) {
+    if (!settings || settings.mode !== "custom") {
+        return;
+    }
+    state.operationLastCustomSettings = normalizeOperationSettings(settings);
+    const description = describeOperationCustomSettings(state.operationLastCustomSettings);
+    state.operationCustomPresetKey = description.key;
+}
+
+function applyOperationCustomPreset(key) {
+    const customSettings = buildOperationCustomSettings(key);
+    state.operationCustomPresetKey = normalizeOperationCustomPresetKey(key);
+    state.operationLastCustomSettings = normalizeOperationSettings(customSettings);
+    applyOperationSettingsToForm(state.operationLastCustomSettings);
+    persistOperationSettingsDraft(state.operationLastCustomSettings);
+    renderOperationSettingsState();
+}
+
 function normalizeOperationMode(value) {
     const normalized = String(value || "").trim().toLowerCase();
     return ["daily_light", "always_on_slow", "custom"].includes(normalized)
@@ -8648,6 +8837,14 @@ function renderOperationSettingsState() {
     const settings = getOperationSettingsFormState();
     const preset = settings.mode === "custom" ? null : findOperationModePreset(settings.mode);
     const isCustomMode = settings.mode === "custom";
+    if (isCustomMode) {
+        rememberOperationCustomSettings(settings);
+    }
+    const customDescription = describeOperationCustomSettings(
+        isCustomMode
+            ? settings
+            : (state.operationLastCustomSettings || buildOperationCustomSettings(state.operationCustomPresetKey)),
+    );
 
     [
         elements.operationRequestGap,
@@ -8660,16 +8857,38 @@ function renderOperationSettingsState() {
             element.disabled = !isCustomMode;
         }
     });
+    if (elements.operationGuardCard) {
+        elements.operationGuardCard.classList.toggle("is-editable", isCustomMode);
+    }
+    if (elements.operationCustomPresetPanel) {
+        elements.operationCustomPresetPanel.hidden = !isCustomMode;
+    }
+    if (elements.operationCustomModeGuide) {
+        elements.operationCustomModeGuide.textContent = isCustomMode
+            ? "직접 설정 모드입니다. 새 창이 아니라 바로 아래 보호 옵션 숫자가 지금부터 편집 가능합니다. 먼저 `추천` 값을 불러오고 필요한 항목만 조절하세요."
+            : "프리셋 모드입니다. 값을 직접 바꾸고 싶다면 `직접 설정`으로 바꾸면 바로 아래 보호 옵션이 열립니다. 별도 창은 뜨지 않습니다.";
+    }
+    elements.operationCustomPresetButtons?.forEach((button) => {
+        const presetKey = normalizeOperationCustomPresetKey(button.dataset.operationCustomPreset || "");
+        const active = isCustomMode && customDescription.key === presetKey;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    if (elements.operationCustomPresetDescription) {
+        elements.operationCustomPresetDescription.textContent = isCustomMode
+            ? `${customDescription.label}: ${customDescription.description}`
+            : "직접 설정으로 바꾸면 여기에서 추천값을 불러올 수 있습니다.";
+    }
 
     if (elements.operationModeDescription) {
         elements.operationModeDescription.textContent = isCustomMode
-            ? "직접 설정 모드입니다. 숫자를 조정한 뒤 저장하면 현재 서버 런타임에 바로 반영됩니다."
+            ? "직접 설정 모드입니다. 아래 보호 옵션은 새로 뜨는 창이 아니라 바로 오른쪽 카드에서 수정합니다. 숫자를 전부 직접 정할 필요 없이 안전 / 추천 / 빠름 중 하나를 먼저 고른 뒤 저장하세요."
             : (preset?.description || "운영 모드 설명을 불러오지 못했습니다.");
     }
     if (elements.operationSettingsHint) {
         elements.operationSettingsHint.textContent = isCustomMode
-            ? "0을 넣으면 해당 상한은 해제됩니다. 저장 후 즉시 서버 런타임에 반영됩니다."
-            : `${preset?.label || "프리셋"} 값이 자동으로 채워집니다. 변경하려면 '직접 설정'으로 바꾼 뒤 저장하세요.`;
+            ? "추천값을 먼저 넣고 필요한 숫자만 미세 조정하세요. 0은 해당 상한 해제이며, 저장 후 즉시 서버 런타임에 반영됩니다."
+            : `${preset?.label || "프리셋"} 값이 자동으로 채워집니다. 더 자세히 조절하려면 직접 설정으로 바꾸면 아래 보호 옵션이 바로 편집 가능해집니다.`;
     }
 
     const snapshot = state.operationSettingsSnapshot?.state ? state.operationSettingsSnapshot : null;
@@ -8839,10 +9058,22 @@ function handleOperationSettingsInputChange(event) {
     }
 
     if (event?.target === elements.operationMode) {
-        applyOperationModePreset(elements.operationMode.value);
+        const nextMode = normalizeOperationMode(elements.operationMode.value);
+        if (nextMode === "custom") {
+            const customSettings = state.operationLastCustomSettings
+                ? normalizeOperationSettings(state.operationLastCustomSettings)
+                : normalizeOperationSettings(buildOperationCustomSettings(state.operationCustomPresetKey));
+            applyOperationSettingsToForm(customSettings);
+        } else {
+            applyOperationModePreset(nextMode);
+        }
     }
 
-    persistOperationSettingsDraft(getOperationSettingsFormState());
+    const settings = getOperationSettingsFormState();
+    if (settings.mode === "custom") {
+        rememberOperationCustomSettings(settings);
+    }
+    persistOperationSettingsDraft(settings);
     renderOperationSettingsState();
 }
 
@@ -9462,6 +9693,7 @@ async function rerunSingleTitle(keyword) {
             selected_keywords: [selectedItem],
             keyword_clusters: state.results.selected?.keyword_clusters || [],
             longtail_suggestions: state.results.selected?.longtail_suggestions || [],
+            longtail_options: state.results.selected?.longtail_options || null,
             analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
             serp_competition_summary: state.results.selected?.serp_competition_summary || null,
             title_options: titleOptions,
@@ -9511,6 +9743,7 @@ async function rerunFlaggedTitles() {
             selected_keywords: selectedItems,
             keyword_clusters: state.results.selected?.keyword_clusters || [],
             longtail_suggestions: state.results.selected?.longtail_suggestions || [],
+            longtail_options: state.results.selected?.longtail_options || null,
             analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
             serp_competition_summary: state.results.selected?.serp_competition_summary || null,
             title_options: titleOptions,

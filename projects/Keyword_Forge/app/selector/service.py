@@ -12,7 +12,7 @@ from app.analyzer.scorer import (
 )
 from app.selector.cannibalization import build_cannibalization_report
 from app.selector.content_map import build_content_map
-from app.selector.longtail import build_longtail_map
+from app.selector.longtail import build_longtail_map, resolve_longtail_options
 
 
 def is_golden_keyword(item: dict[str, Any]) -> bool:
@@ -45,7 +45,7 @@ class SelectorService:
             ]
             if isinstance(input_data, list):
                 return selected
-            return _build_selected_payload(selected)
+            return _build_selected_payload(selected, longtail_options=select_options.get("longtail_options"))
 
         if mode == "grade_filter" and allowed_grades:
             selected = [
@@ -55,7 +55,7 @@ class SelectorService:
             ]
             if isinstance(input_data, list):
                 return selected
-            return _build_selected_payload(selected)
+            return _build_selected_payload(selected, longtail_options=select_options.get("longtail_options"))
 
         selected = [_decorate_default_selected_item(item) for item in items if is_golden_keyword(item)]
         if not selected:
@@ -63,14 +63,20 @@ class SelectorService:
 
         if isinstance(input_data, list):
             return selected
-        return _build_selected_payload(selected)
+        return _build_selected_payload(selected, longtail_options=select_options.get("longtail_options"))
 
 
-def _build_selected_payload(selected: list[dict[str, Any]]) -> dict[str, Any]:
+def _build_selected_payload(
+    selected: list[dict[str, Any]],
+    *,
+    longtail_options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     content_map = build_content_map(selected)
+    resolved_longtail_options = resolve_longtail_options(longtail_options)
     longtail_map = build_longtail_map(
         selected,
         content_map.get("keyword_clusters") if isinstance(content_map, dict) else [],
+        longtail_options=resolved_longtail_options,
     )
     cannibalization_report = build_cannibalization_report(
         selected,

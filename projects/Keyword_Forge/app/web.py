@@ -45,6 +45,27 @@ def _render_category_options() -> str:
     return "".join(rendered_groups)
 
 
+def _render_queue_routine_category_picker() -> str:
+    rendered_groups: list[str] = []
+    for group_name, categories in CATEGORY_GROUPS:
+        chips = "".join(
+            (
+                '<label class="check-chip queue-category-chip">'
+                f'<input type="checkbox" value="{escape(category)}" data-queue-category />'
+                f"{escape(category)}"
+                "</label>"
+            )
+            for category in categories
+        )
+        rendered_groups.append(
+            '<div class="queue-category-group">'
+            f'<span class="queue-category-group-label">{escape(group_name)}</span>'
+            f'<div class="queue-category-chip-grid">{chips}</div>'
+            "</div>"
+        )
+    return "".join(rendered_groups)
+
+
 def _replace_sample_site_name(value: str) -> str:
     replaced = str(value or "")
     replaced = replaced.replace("키워드마스터", "본 사이트")
@@ -838,6 +859,7 @@ def _render_guide_detail(guide_slug: str) -> str:
 
 def _render_home() -> str:
     category_options = _render_category_options()
+    queue_routine_category_picker = _render_queue_routine_category_picker()
     category_source_options = "".join(
         f'<option value="{source}"{" selected" if source == DEFAULT_CATEGORY_SOURCE else ""}>'
         f'{"네이버 트렌드" if source == "naver_trend" else "검색 preset fallback"}'
@@ -860,7 +882,8 @@ def _render_home() -> str:
     title_preset_payload = json.dumps(title_presets, ensure_ascii=False).replace("</", "<\\/")
     title_mode_help = _render_help_tooltip(
         "template는 규칙 기반으로 바로 생성합니다.\n"
-        "AI는 provider/model을 사용해 더 유연하게 생성하고, 저점수 자동 재작성도 함께 쓸 수 있습니다."
+        "AI는 provider/model을 사용해 더 유연하게 생성하고, 저점수 자동 재작성도 함께 쓸 수 있습니다.\n"
+        "Vertex AI는 Express Mode API key로 붙이면 Google Cloud 크레딧/쿼터 체계로 운용할 수 있습니다."
     )
     title_keyword_modes_help = _render_help_tooltip(
         "단일은 안전형입니다.\n"
@@ -877,7 +900,8 @@ def _render_home() -> str:
         "조회 개수는 이번 호출에서 실시간 맥락을 붙일 키워드 수입니다. 높일수록 느려질 수 있습니다."
     )
     title_api_key_help = _render_help_tooltip(
-        "API 키는 서버에 저장하지 않고 현재 브라우저 localStorage에만 보관합니다."
+        "API 키는 서버에 저장하지 않고 현재 브라우저 localStorage에만 보관합니다.\n"
+        "Gemini는 Google AI Studio 키, Vertex AI는 Express Mode API key를 사용합니다."
     )
     title_prompt_help = _render_help_tooltip(
         "새 탭에서 제목 생성용 추가 지침을 수정합니다. 저장하면 현재 작업대에 바로 반영됩니다."
@@ -962,6 +986,23 @@ def _render_home() -> str:
                     </div>
                 </div>
                 <div id="resultsRail" class="results-rail"></div>
+            </section>
+
+            <div class="control-column">
+            <section class="panel settings-panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="panel-kicker">Popup</p>
+                        <h2>설정</h2>
+                    </div>
+                </div>
+                <p class="input-help compact-help settings-panel-note">
+                    운영 제한과 예약 작업은 팝업으로 열어 관리합니다. 실행 로그와 진단은 아래 작업대에서도 바로 확인할 수 있습니다.
+                </p>
+                <div class="settings-shortcut-row">
+                    <button type="button" class="ghost-chip" data-utility-open="settings" aria-pressed="false">운영 설정</button>
+                    <button type="button" class="ghost-chip" data-utility-open="queue" aria-pressed="false">예약 / Queue</button>
+                </div>
             </section>
 
             <section class="panel control-panel">
@@ -1049,6 +1090,9 @@ def _render_home() -> str:
                                 value=""
                             />
                             <button type="button" class="primary-btn session-helper-btn" id="launchLoginBrowserButton">로그인</button>
+                            <p class="input-help session-helper-status" id="localCookieStatus">
+                                저장된 전용 로그인 세션을 확인하는 중입니다.
+                            </p>
                         </div>
                     </div>
 
@@ -1085,7 +1129,7 @@ def _render_home() -> str:
 
                 <p class="input-help" id="trendSourceHelp" data-mode-visibility="category">
                     카테고리 모드에서 네이버 트렌드를 고르면 Creator Advisor 주제 기반 인기 키워드를 먼저 조회합니다.
-                    쿠키가 없거나 실패하면 아래 fallback 설정에 따라 검색 preset으로 전환합니다.
+                    입력 칸이 비어 있어도 저장된 전용 로그인 세션이 있으면 자동으로 사용하고, 세션이 없거나 실패하면 아래 fallback 설정에 따라 검색 preset으로 전환합니다.
                 </p>
 
                 </section>
@@ -1145,6 +1189,7 @@ def _render_home() -> str:
 
                 </div>
             </section>
+            </div>
 
             <section class="panel launcher-panel">
                 <div class="panel-head">
@@ -1316,6 +1361,20 @@ def _render_home() -> str:
                             </p>
                         </div>
 
+                        <div class="title-advanced-toggle-row">
+                            <button
+                                type="button"
+                                class="ghost-chip title-advanced-toggle"
+                                id="toggleTitleAdvancedButton"
+                                aria-expanded="false"
+                                aria-controls="titleAdvancedSettings"
+                            >추가설정</button>
+                            <p class="input-help compact-help title-advanced-copy">
+                                자동 재시도, AI 소스 반영, 모델, 프롬프트, API 설정을 펼쳐서 봅니다.
+                            </p>
+                        </div>
+
+                        <div id="titleAdvancedSettings" class="title-advanced-settings" hidden>
                         <div class="field-block field-block-wide">
                             <span class="field-label field-label-row">
                                 <span>저점수 자동 재작성</span>
@@ -1368,6 +1427,7 @@ def _render_home() -> str:
                             <select id="titleProvider">
                                 <option value="openai">OpenAI</option>
                                 <option value="gemini">Gemini</option>
+                                <option value="vertex">Vertex AI</option>
                                 <option value="anthropic">Anthropic</option>
                             </select>
                         </label>
@@ -1428,6 +1488,7 @@ def _render_home() -> str:
                             <div id="titlePromptSummary" class="title-prompt-summary">추가 지침 없음</div>
                             <input id="titleSystemPrompt" type="hidden" value="" />
                         </div>
+                        </div>
                     </div>
                 </section>
                 </div>
@@ -1442,7 +1503,6 @@ def _render_home() -> str:
                     </div>
                 </div>
                 <div class="results-panel-tools">
-                    <button type="button" class="ghost-chip" data-utility-open="settings" aria-pressed="false">운영 설정</button>
                     <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">오류 / 진단</button>
                     <button type="button" class="ghost-chip" data-utility-open="logs" aria-pressed="false">실행 로그</button>
                     <button type="button" class="ghost-chip" id="exportTitleCsvButton">제목 결과 CSV</button>
@@ -1456,6 +1516,7 @@ def _render_home() -> str:
                 <div class="utility-drawer-head">
                     <div class="utility-drawer-tabs">
                         <button type="button" class="ghost-chip" data-utility-tab="settings" aria-pressed="false">운영 설정</button>
+                        <button type="button" class="ghost-chip" data-utility-tab="queue" aria-pressed="false">예약 / Queue</button>
                         <button type="button" class="ghost-chip" data-utility-tab="diagnostics" aria-pressed="true">오류 / 진단</button>
                         <button type="button" class="ghost-chip" data-utility-tab="logs" aria-pressed="false">실행 로그</button>
                     </div>
@@ -1515,12 +1576,29 @@ def _render_home() -> str:
                                     <div id="operationModeDescription" class="collector-empty">
                                         상시 슬로우를 기본으로 두고, 작업 횟수나 요청 한도가 필요하면 다른 모드로 바꿉니다.
                                     </div>
+                                    <div id="operationCustomModeGuide" class="settings-hint">
+                                        `직접 설정`을 고르면 새 창이 뜨지 않고, 바로 오른쪽 `보호 옵션`이 편집 가능해집니다. 먼저 추천값을 불러온 뒤 필요한 부분만 조절하면 됩니다.
+                                    </div>
                                 </section>
-                                <section class="settings-card">
+                                <section class="settings-card" id="operationGuardCard">
                                     <div class="collector-panel-head">
                                         <div>
                                             <p class="panel-kicker">Guard</p>
                                             <h3>보호 옵션</h3>
+                                        </div>
+                                    </div>
+                                    <div id="operationCustomPresetPanel" class="operation-custom-panel" hidden>
+                                        <div class="operation-custom-head">
+                                            <strong>추천 조절</strong>
+                                            <span>숫자를 직접 다 정하지 말고 `안전 / 추천 / 빠름` 중 하나를 먼저 고른 뒤, 아래 값만 미세 조정하세요.</span>
+                                        </div>
+                                        <div class="operation-custom-chip-row">
+                                            <button type="button" class="ghost-chip" data-operation-custom-preset="safe">안전</button>
+                                            <button type="button" class="ghost-chip" data-operation-custom-preset="balanced">추천</button>
+                                            <button type="button" class="ghost-chip" data-operation-custom-preset="fast">빠름</button>
+                                        </div>
+                                        <div id="operationCustomPresetDescription" class="collector-empty">
+                                            추천값 설명을 불러오는 중입니다.
                                         </div>
                                     </div>
                                     <div class="settings-form-grid">
@@ -1555,6 +1633,168 @@ def _render_home() -> str:
                                         서버 런타임 상태를 불러오는 중입니다.
                                     </div>
                                 </section>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="utility-drawer-view" data-utility-panel="queue" hidden>
+                        <div class="queue-shell">
+                            <div class="settings-hero">
+                                <div>
+                                    <p class="panel-kicker">Queue</p>
+                                    <h2>예약 작업</h2>
+                                    <p class="settings-copy">
+                                        현재 화면의 수집, 확장, 분석, 제목 설정을 묶어서 시드 배치 Queue나 일일 카테고리 루틴으로 등록합니다.
+                                    </p>
+                                </div>
+                                <div class="settings-hero-actions">
+                                    <button type="button" class="ghost-chip" id="refreshQueueSnapshotButton">새로고침</button>
+                                    <button type="button" class="ghost-chip" id="pauseQueueRunnerButton">일시정지</button>
+                                    <button type="button" class="ghost-btn" id="resumeQueueRunnerButton">재개</button>
+                                </div>
+                            </div>
+                            <div class="settings-status-grid">
+                                <article class="collector-stat-card">
+                                    <span>Runner 상태</span>
+                                    <strong id="queueRunnerStateLabel">불러오는 중</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>현재 작업</span>
+                                    <strong id="queueRunnerJobLabel">대기 중</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>등록된 작업</span>
+                                    <strong id="queueJobCountLabel">0건</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>엑셀 출력 폴더</span>
+                                    <strong id="queueOutputDirLabel">-</strong>
+                                </article>
+                            </div>
+                            <div class="queue-panel-grid">
+                                <section class="settings-card">
+                                    <div class="collector-panel-head">
+                                        <div>
+                                            <p class="panel-kicker">Batch</p>
+                                            <h3>시드 배치 Queue</h3>
+                                        </div>
+                                    </div>
+                                    <div class="settings-form-grid">
+                                        <label class="field-block field-block-wide">
+                                            <span class="field-label">배치 이름</span>
+                                            <input id="queueSeedBatchNameInput" type="text" placeholder="예: 3월 4주차 보험 시드" />
+                                        </label>
+                                        <label class="field-block">
+                                            <span class="field-label">예약 시각</span>
+                                            <input id="queueSeedBatchScheduleInput" type="datetime-local" />
+                                        </label>
+                                        <label class="field-block field-block-wide">
+                                            <span class="field-label">시드 키워드</span>
+                                            <textarea
+                                                id="queueSeedBatchSeedsInput"
+                                                rows="7"
+                                                placeholder="줄바꿈으로 여러 시드를 넣으세요&#10;예:&#10;실비보험 추천&#10;운전자보험 비교"
+                                            ></textarea>
+                                        </label>
+                                    </div>
+                                    <div id="queueSeedBatchHint" class="settings-hint">
+                                        현재 수집, 확장, 분석, 제목 옵션을 그대로 묶어서 시드별 전체 파이프라인을 순차 실행합니다. API 키나 트렌드 쿠키가 있으면 상태 파일에도 함께 저장됩니다.
+                                    </div>
+                                    <div class="queue-form-actions">
+                                        <span id="queueSeedBatchCountLabel" class="queue-inline-meta">시드 0건</span>
+                                        <button type="button" class="ghost-btn" id="submitQueueSeedBatchButton">시드 배치 등록</button>
+                                    </div>
+                                </section>
+                                <section class="settings-card">
+                                    <div class="collector-panel-head">
+                                        <div>
+                                            <p class="panel-kicker">Routine</p>
+                                            <h3>일일 카테고리 루틴</h3>
+                                        </div>
+                                    </div>
+                                    <div class="settings-form-grid">
+                                        <label class="field-block field-block-wide">
+                                            <span class="field-label">루틴 이름</span>
+                                            <input id="queueRoutineNameInput" type="text" placeholder="예: 오전 카테고리 루틴" />
+                                        </label>
+                                        <label class="field-block">
+                                            <span class="field-label">실행 시각</span>
+                                            <input id="queueRoutineTimeInput" type="time" value="06:00" />
+                                        </label>
+                                        <div class="field-block field-block-wide">
+                                            <span class="field-label">실행 요일</span>
+                                            <div class="queue-weekday-grid">
+                                                <label class="check-chip queue-weekday-chip">
+                                                    <input type="checkbox" value="0" data-queue-weekday checked />
+                                                    월
+                                                </label>
+                                                <label class="check-chip queue-weekday-chip">
+                                                    <input type="checkbox" value="1" data-queue-weekday checked />
+                                                    화
+                                                </label>
+                                                <label class="check-chip queue-weekday-chip">
+                                                    <input type="checkbox" value="2" data-queue-weekday checked />
+                                                    수
+                                                </label>
+                                                <label class="check-chip queue-weekday-chip">
+                                                    <input type="checkbox" value="3" data-queue-weekday checked />
+                                                    목
+                                                </label>
+                                                <label class="check-chip queue-weekday-chip">
+                                                    <input type="checkbox" value="4" data-queue-weekday checked />
+                                                    금
+                                                </label>
+                                                <label class="check-chip queue-weekday-chip">
+                                                    <input type="checkbox" value="5" data-queue-weekday checked />
+                                                    토
+                                                </label>
+                                                <label class="check-chip queue-weekday-chip">
+                                                    <input type="checkbox" value="6" data-queue-weekday checked />
+                                                    일
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="field-block field-block-wide">
+                                            <span class="field-label">카테고리 선택</span>
+                                            <div class="queue-category-picker">
+                                                {queue_routine_category_picker}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div id="queueRoutineHint" class="settings-hint">
+                                        선택한 요일과 시각마다 카테고리 작업을 자동 생성합니다. 앱이 실행 중이어야 내부 예약이 동작하며, 현재 인증 설정도 상태 파일에 저장될 수 있습니다.
+                                    </div>
+                                    <div class="queue-form-actions">
+                                        <span id="queueRoutineCountLabel" class="queue-inline-meta">카테고리 0건</span>
+                                        <button type="button" class="ghost-btn" id="submitQueueRoutineButton">루틴 등록</button>
+                                    </div>
+                                </section>
+                            </div>
+                            <div class="queue-panel-grid">
+                                <section class="settings-card queue-list-card">
+                                    <div class="collector-panel-head">
+                                        <div>
+                                            <p class="panel-kicker">Jobs</p>
+                                            <h3>최근 작업</h3>
+                                        </div>
+                                    </div>
+                                    <div id="queueJobsList" class="queue-item-list">
+                                        <div class="collector-empty">등록된 작업이 없습니다.</div>
+                                    </div>
+                                </section>
+                                <section class="settings-card queue-list-card">
+                                    <div class="collector-panel-head">
+                                        <div>
+                                            <p class="panel-kicker">Routines</p>
+                                            <h3>등록된 루틴</h3>
+                                        </div>
+                                    </div>
+                                    <div id="queueRoutinesList" class="queue-item-list">
+                                        <div class="collector-empty">등록된 루틴이 없습니다.</div>
+                                    </div>
+                                </section>
+                            </div>
+                            <div id="queueSnapshotStatus" class="collector-empty">
+                                스케줄러 상태를 아직 불러오지 않았습니다.
                             </div>
                         </div>
                     </section>

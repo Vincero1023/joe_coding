@@ -33,6 +33,62 @@
 ---
 
 ## Date
+- 2026-03-22 01:25 (KST)
+
+## What changed (변경점)
+- `app/title/ai_client.py`, `app/title/presets.py`, `app/web.py`, `app/web_assets/app.js`에 `Vertex AI` 제목 provider를 추가했다. 현재 구현은 `Vertex AI Express Mode API key` 기준이다.
+- `app/selector/longtail.py`, `app/selector/service.py`, `app/title/targets.py`, `app/web_assets/app_overrides.js`, `app/web_assets/app.css`에서 롱테일 `가이드 / 체크리스트`를 기본 강제 후보에서 빼고 선택형 의도 토큰으로 바꿨다.
+- 관련 테스트를 갱신하고 `tests/test_selector.py`, `tests/test_title.py`, `tests/test_pipeline.py`, `tests/test_web_routes.py` 회귀를 다시 확인했다.
+
+## Why (원인/배경)
+- Gemini Developer API free tier는 짧은 시간 재생성 시 429에 자주 걸리고, Google Cloud 크레딧을 활용하려면 Vertex AI 경로가 필요했다.
+- 롱테일 조합에서 `가이드`, `체크리스트`가 너무 자주 섞여 템플릿처럼 보였고, 실제 의도형 후보와 구분이 어려웠다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `node --check app/web_assets/app.js`
+- [x] `node --check app/web_assets/app_overrides.js`
+- [x] `pytest -q tests/test_selector.py tests/test_title.py tests/test_web_routes.py tests/test_pipeline.py`
+- [x] `pytest -q` (`130 passed`)
+- [ ] 브라우저에서 Vertex AI key로 실제 제목 생성 수동 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: Gemini free tier 429가 잦고, 제목 생성 provider 선택지가 Google AI Studio API에 묶여 있었다.
+- 원인: 백엔드가 `generativelanguage.googleapis.com`만 직접 호출했고, Vertex AI 경로는 없었다.
+- 해결: `aiplatform.googleapis.com` 기반 Vertex AI Express Mode 호출을 추가하고, UI provider 선택과 프리셋/모델 목록을 함께 연결했다.
+
+## Next (다음 작업)
+- Vertex AI Express Mode API key로 실제 제목 생성과 fallback 동작을 수동 확인하기
+- 필요하면 다음 단계로 Full Vertex AI(service account) 경로를 별도 provider로 분리하기
+
+## Date
+- 2026-03-21 21:30 (KST)
+
+## What changed (변경점)
+- `app/scheduler/service.py`, `app/api/routes/scheduler.py`, `app/main.py`에 작업 Queue / 일일 카테고리 루틴 / 백그라운드 순차 실행기를 추가했다.
+- 시드 키워드 배치를 Queue에 넣으면 기존 `pipeline`을 항목별로 순차 실행하고, 결과를 `Status/queue_exports/...xlsx`로 저장하도록 연결했다.
+- `tests/test_scheduler_service.py`, `tests/test_scheduler_api.py`를 추가하고, 전체 테스트를 다시 돌려 회귀를 확인했다.
+
+## Why (원인/배경)
+- 예약모드는 `expander` 내부 큐가 아니라 상위 작업 오케스트레이터로 분리해야 시드 배치, 카테고리 루틴, 파일 출력, 런타임 가드를 한곳에서 일관되게 제어할 수 있다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/scheduler/service.py app/api/routes/scheduler.py app/main.py`
+- [x] `pytest -q tests/test_scheduler_service.py tests/test_scheduler_api.py`
+- [x] `pytest -q`
+- [x] 회귀(기존 기능) 이상 없음
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 시드 키워드를 여러 개 예약 실행하거나, 카테고리 루틴을 매일 자동 생성하는 상위 작업 계층이 없었다.
+- 원인: 기존 구조는 개별 API 실행과 `expander` 내부 확장 큐만 있었고, 배치 작업 상태 저장과 결과 파일 출력 계층이 없었다.
+- 해결: JSON 상태 저장 기반 스케줄러 서비스와 Queue API를 추가하고, 항목별 파이프라인 결과를 xlsx로 묶어 저장하도록 했다.
+
+## Next (다음 작업)
+- Queue / 루틴 UI를 메인 화면에 붙이고 상태 조회, 다운로드, 취소를 브라우저에서 직접 다루게 만들기
+- 예약 루틴이 실제 운영 설정과 충돌할 때 재시도/재개 정책을 더 정교화하기
+
+---
+
+## Date
 - 2026-03-21 10:02 (KST)
 
 ## What changed (변경점)

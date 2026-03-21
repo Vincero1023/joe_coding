@@ -1,17 +1,18 @@
 {
-  "browser": "msedge",
-  "cookie_header": "NID_AUT=fPmt9+i16OrLs/0NQhHcT27c9aWcKrPiVYaHtA/LBzwx2PFR7ON5AYydf5uCRFbp; NID_SES=AAABdDR9M5bCN3ilgp5AtljxcUjkgE/atRrUnODeAJ3auHRCra8sRKFTUp79RjoBOV7CyTsoRCrEKbwkyN9hfQ2Ojf7jWBCdR7T+uGOPnt1m3w8fLAc4vJlzChA/T3swD5W3zsNfV2/zr5JYVmdMfBM9sM2KO928ezwv0CGmdIUT+spJq4lWCAZWEng7nwVqYMUn8ZzPRRM/jfCdXECOWIe+L4644SNLe8x63qTT4uPZq85dXRFkZVE9yTW/zdRHdvOw68yftsWi1CSwUAJ8gBXTpjnaTS/W4IJBIH16Dk1Sy8kbG++FWwi/YpQMXzoiFEbTXaGTqTph+XASRTqvfn+JEIBoNPgJWlH+nn49whRohKbu43oWox051YwAZai0fqg+aB3I1ss7iLh8CLFjrN2Kr5ib3eSp8AbQbTez5iZVyaG2HT4vq+l78SJm7BypOK7j95qvSq0YzjIvt0FO/IQ1qnwRnq//k6WSfT2ZSd4iKud94CLgR0a53f1yv+dOO3unZQ==",
+  "browser": "chrome",
+  "cookie_header": "NID_AUT=3XTm5Fj4sYy9oVzy75eCUBZyJiM/9a66UAMkPftF7yWlFGNNY4L7DRigKUpmG1YK; NID_SES=AAABcsNYxyg+zSVhUAf8p34Hb26qyxqjLtBi10fRNpumhIrT3PTwhEm4BhMsXeacsnxHzHHqLOaMTPshSYfi2LQGCS+vTa5jh/525TvcOkh9wGrU0X61pM2msMkUnbtmRTzmr96vioYwb2bHLtOd2uqWJLJMv9GIXc3bWkz9ZdpTSDIGYPAd9p4FpZr8X6tmHKjrNTPvWlvocSJBslFhdrgAOVKW8gIcmgON3T1FULgOC4Euslu6ndamVlggLaZjAw8ZguS0y6wmqXDfzM9WRxp/ZAkWZ3eEjfFgx9LG4rA3hWi0A8rjTT95wACdrk9gkXeupqiInD/VZAHCy+esTLsL8c06UT92G6dti9PUKOsh3MKbepWmtcjF3OqIQ40OSsCjjebAufUjusiW8oGbxwgTDi+Ih2RppyezSeCKWyrEdXzpZ4BK5Sz654A2tTCnzKD/+ipd0sFiiTpA0zRVag0+swuW5d+wif/DyFbw8tnnQEjIuQ8IMMNbkC6FGp4eDXRn9g==; NNB=LJQY2DVQUK7GS",
   "cookie_names": [
     "NID_AUT",
-    "NID_SES"
+    "NID_SES",
+    "NNB"
   ],
-  "cookie_count": 2,
+  "cookie_count": 3,
   "target_url": "https://creator-advisor.naver.com/naver_blog/goodbuy40/trends",
-  "profile_dir": ".local\\naver_playwright\\msedge",
-  "saved_at": 1774065541,
+  "profile_dir": ".local\\naver_playwright\\chrome",
+  "saved_at": 1774101314,
   "attempts": [
     {
-      "browser": "msedge",
+      "browser": "chrome",
       "status": "success",
       "detail": "Loaded.",
       "hint": null

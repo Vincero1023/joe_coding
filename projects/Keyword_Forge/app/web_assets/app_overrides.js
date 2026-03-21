@@ -3,6 +3,24 @@ const originalBindEvents = typeof window.bindEvents === "function" ? window.bind
 const originalRunCollectStage = typeof window.runCollectStage === "function" ? window.runCollectStage : null;
 const originalRunExpandStage = typeof window.runExpandStage === "function" ? window.runExpandStage : null;
 const originalRunAnalyzeStage = typeof window.runAnalyzeStage === "function" ? window.runAnalyzeStage : null;
+const originalRenderTitleSettingsState = typeof window.renderTitleSettingsState === "function"
+    ? window.renderTitleSettingsState
+    : null;
+const QUEUE_UTILITY_TABS = ["settings", "queue", "diagnostics", "logs"];
+const QUEUE_WEEKDAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
+const QUEUE_AUTO_REFRESH_INTERVAL_MS = 15000;
+const LONGTAIL_OPTION_LIBRARY = [
+    {
+        key: "guide",
+        label: "가이드",
+        description: "정보형 정리나 안내 글에만 필요할 때 씁니다.",
+    },
+    {
+        key: "checklist",
+        label: "체크리스트",
+        description: "준비 단계나 확인 순서가 분명할 때만 씁니다.",
+    },
+];
 
 window.bindElements = function bindElementsOverride() {
     originalBindElements?.();
@@ -18,6 +36,31 @@ window.bindElements = function bindElementsOverride() {
     elements.utilityDrawerClose = document.getElementById("utilityDrawerClose");
     elements.utilityTabButtons = Array.from(document.querySelectorAll("[data-utility-tab]"));
     elements.utilityPanels = Array.from(document.querySelectorAll("[data-utility-panel]"));
+    elements.toggleTitleAdvancedButton = document.getElementById("toggleTitleAdvancedButton");
+    elements.titleAdvancedSettings = document.getElementById("titleAdvancedSettings");
+    elements.refreshQueueSnapshotButton = document.getElementById("refreshQueueSnapshotButton");
+    elements.pauseQueueRunnerButton = document.getElementById("pauseQueueRunnerButton");
+    elements.resumeQueueRunnerButton = document.getElementById("resumeQueueRunnerButton");
+    elements.queueRunnerStateLabel = document.getElementById("queueRunnerStateLabel");
+    elements.queueRunnerJobLabel = document.getElementById("queueRunnerJobLabel");
+    elements.queueJobCountLabel = document.getElementById("queueJobCountLabel");
+    elements.queueOutputDirLabel = document.getElementById("queueOutputDirLabel");
+    elements.queueSeedBatchNameInput = document.getElementById("queueSeedBatchNameInput");
+    elements.queueSeedBatchScheduleInput = document.getElementById("queueSeedBatchScheduleInput");
+    elements.queueSeedBatchSeedsInput = document.getElementById("queueSeedBatchSeedsInput");
+    elements.queueSeedBatchHint = document.getElementById("queueSeedBatchHint");
+    elements.queueSeedBatchCountLabel = document.getElementById("queueSeedBatchCountLabel");
+    elements.submitQueueSeedBatchButton = document.getElementById("submitQueueSeedBatchButton");
+    elements.queueRoutineNameInput = document.getElementById("queueRoutineNameInput");
+    elements.queueRoutineTimeInput = document.getElementById("queueRoutineTimeInput");
+    elements.queueRoutineWeekdayInputs = Array.from(document.querySelectorAll("[data-queue-weekday]"));
+    elements.queueRoutineCategoryInputs = Array.from(document.querySelectorAll("[data-queue-category]"));
+    elements.queueRoutineHint = document.getElementById("queueRoutineHint");
+    elements.queueRoutineCountLabel = document.getElementById("queueRoutineCountLabel");
+    elements.submitQueueRoutineButton = document.getElementById("submitQueueRoutineButton");
+    elements.queueJobsList = document.getElementById("queueJobsList");
+    elements.queueRoutinesList = document.getElementById("queueRoutinesList");
+    elements.queueSnapshotStatus = document.getElementById("queueSnapshotStatus");
 };
 
 window.bindEvents = function bindEventsOverride() {
@@ -69,7 +112,209 @@ window.bindEvents = function bindEventsOverride() {
             }
         });
     }
+    if (elements.toggleTitleAdvancedButton && elements.toggleTitleAdvancedButton.dataset.boundClick !== "true") {
+        elements.toggleTitleAdvancedButton.dataset.boundClick = "true";
+        elements.toggleTitleAdvancedButton.addEventListener("click", () => {
+            state.titleAdvancedOpen = !Boolean(state.titleAdvancedOpen);
+            renderTitleAdvancedState();
+        });
+    }
+
+    if (elements.refreshQueueSnapshotButton && elements.refreshQueueSnapshotButton.dataset.boundClick !== "true") {
+        elements.refreshQueueSnapshotButton.dataset.boundClick = "true";
+        elements.refreshQueueSnapshotButton.addEventListener("click", () => {
+            void refreshQueueSnapshot();
+        });
+    }
+    if (elements.pauseQueueRunnerButton && elements.pauseQueueRunnerButton.dataset.boundClick !== "true") {
+        elements.pauseQueueRunnerButton.dataset.boundClick = "true";
+        elements.pauseQueueRunnerButton.addEventListener("click", () => {
+            void pauseQueueRunner();
+        });
+    }
+    if (elements.resumeQueueRunnerButton && elements.resumeQueueRunnerButton.dataset.boundClick !== "true") {
+        elements.resumeQueueRunnerButton.dataset.boundClick = "true";
+        elements.resumeQueueRunnerButton.addEventListener("click", () => {
+            void resumeQueueRunner();
+        });
+    }
+    if (elements.submitQueueSeedBatchButton && elements.submitQueueSeedBatchButton.dataset.boundClick !== "true") {
+        elements.submitQueueSeedBatchButton.dataset.boundClick = "true";
+        elements.submitQueueSeedBatchButton.addEventListener("click", () => {
+            void submitQueueSeedBatch();
+        });
+    }
+    if (elements.submitQueueRoutineButton && elements.submitQueueRoutineButton.dataset.boundClick !== "true") {
+        elements.submitQueueRoutineButton.dataset.boundClick = "true";
+        elements.submitQueueRoutineButton.addEventListener("click", () => {
+            void submitQueueRoutine();
+        });
+    }
+    if (elements.queueSeedBatchSeedsInput && elements.queueSeedBatchSeedsInput.dataset.boundInput !== "true") {
+        elements.queueSeedBatchSeedsInput.dataset.boundInput = "true";
+        elements.queueSeedBatchSeedsInput.addEventListener("input", renderQueuePanel);
+    }
+    elements.queueRoutineWeekdayInputs?.forEach((input) => {
+        if (input.dataset.boundChange === "true") {
+            return;
+        }
+        input.dataset.boundChange = "true";
+        input.addEventListener("change", renderQueuePanel);
+    });
+    elements.queueRoutineCategoryInputs?.forEach((input) => {
+        if (input.dataset.boundChange === "true") {
+            return;
+        }
+        input.dataset.boundChange = "true";
+        input.addEventListener("change", renderQueuePanel);
+    });
+    if (elements.queueJobsList && elements.queueJobsList.dataset.boundClick !== "true") {
+        elements.queueJobsList.dataset.boundClick = "true";
+        elements.queueJobsList.addEventListener("click", handleQueueJobActionClick);
+    }
+    if (elements.queueRoutinesList && elements.queueRoutinesList.dataset.boundClick !== "true") {
+        elements.queueRoutinesList.dataset.boundClick = "true";
+        elements.queueRoutinesList.addEventListener("click", handleQueueRoutineActionClick);
+    }
+    if (!document.body.dataset.queueAutoRefreshBound) {
+        document.body.dataset.queueAutoRefreshBound = "true";
+        window.setInterval(() => {
+            if (elements.utilityDrawer?.hidden || getUtilityDrawerTab() !== "queue") {
+                return;
+            }
+            void refreshQueueSnapshot({ silent: true, background: true });
+        }, QUEUE_AUTO_REFRESH_INTERVAL_MS);
+    }
+    if (!state.queueSnapshotInitialized) {
+        state.queueSnapshotInitialized = true;
+        void refreshQueueSnapshot({ silent: true, background: true });
+    }
+    if (!Array.isArray(state.longtailOptionalSuffixKeys)) {
+        state.longtailOptionalSuffixKeys = [];
+    }
+    if (typeof state.titleAdvancedOpen !== "boolean") {
+        state.titleAdvancedOpen = false;
+    }
+    renderTitleAdvancedState();
+    renderQueuePanel();
 };
+
+window.renderTitleSettingsState = function renderTitleSettingsStateOverride(...args) {
+    const result = originalRenderTitleSettingsState?.(...args);
+    renderTitleAdvancedState();
+    return result;
+};
+renderTitleSettingsState = window.renderTitleSettingsState;
+
+function renderTitleAdvancedState() {
+    const isOpen = Boolean(state.titleAdvancedOpen);
+    if (elements.titleAdvancedSettings) {
+        elements.titleAdvancedSettings.hidden = !isOpen;
+    }
+    if (elements.toggleTitleAdvancedButton) {
+        elements.toggleTitleAdvancedButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        elements.toggleTitleAdvancedButton.textContent = isOpen ? "추가설정 닫기" : "추가설정";
+        elements.toggleTitleAdvancedButton.classList.toggle("active", isOpen);
+    }
+}
+
+function normalizeLongtailOptionalSuffixKey(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return LONGTAIL_OPTION_LIBRARY.some((option) => option.key === normalized)
+        ? normalized
+        : "";
+}
+
+function normalizeLongtailOptionalSuffixKeys(values) {
+    if (!Array.isArray(values)) {
+        return [];
+    }
+    const seen = new Set();
+    return values
+        .map((value) => normalizeLongtailOptionalSuffixKey(value))
+        .filter((value) => value && !seen.has(value) && seen.add(value));
+}
+
+function getLongtailOptionalSuffixKeys(selectedResult = null) {
+    if (!Array.isArray(state.longtailOptionalSuffixKeys)) {
+        state.longtailOptionalSuffixKeys = [];
+    }
+    if (!state.longtailOptionalSuffixKeys.length) {
+        const fallbackKeys = normalizeLongtailOptionalSuffixKeys(
+            selectedResult?.longtail_options?.optional_suffix_keys || [],
+        );
+        if (fallbackKeys.length) {
+            state.longtailOptionalSuffixKeys = fallbackKeys;
+        }
+    }
+    return normalizeLongtailOptionalSuffixKeys(state.longtailOptionalSuffixKeys);
+}
+
+function buildLongtailOptionsPayload(selectedResult = null) {
+    return {
+        optional_suffix_keys: getLongtailOptionalSuffixKeys(selectedResult),
+    };
+}
+
+function hasPendingLongtailOptionChanges(selectedResult = null) {
+    const currentKeys = buildLongtailOptionsPayload(selectedResult).optional_suffix_keys;
+    const appliedKeys = normalizeLongtailOptionalSuffixKeys(
+        selectedResult?.longtail_options?.optional_suffix_keys || [],
+    );
+    return currentKeys.join("|") !== appliedKeys.join("|");
+}
+
+function formatLongtailOptionLabels(optionKeys) {
+    const keySet = new Set(normalizeLongtailOptionalSuffixKeys(optionKeys));
+    return LONGTAIL_OPTION_LIBRARY
+        .filter((option) => keySet.has(option.key))
+        .map((option) => option.label);
+}
+
+function toggleLongtailOptionalSuffixKey(optionKey) {
+    const normalizedKey = normalizeLongtailOptionalSuffixKey(optionKey);
+    if (!normalizedKey) {
+        return;
+    }
+    const selectedKeys = new Set(getLongtailOptionalSuffixKeys(state.results.selected || {}));
+    if (selectedKeys.has(normalizedKey)) {
+        selectedKeys.delete(normalizedKey);
+    } else {
+        selectedKeys.add(normalizedKey);
+    }
+    state.longtailOptionalSuffixKeys = LONGTAIL_OPTION_LIBRARY
+        .map((option) => option.key)
+        .filter((key) => selectedKeys.has(key));
+}
+
+function renderLongtailOptionStrip(selectedResult) {
+    const optionKeys = getLongtailOptionalSuffixKeys(selectedResult);
+    const optionKeySet = new Set(optionKeys);
+    const optionLabels = formatLongtailOptionLabels(optionKeys);
+    const optionsChanged = hasPendingLongtailOptionChanges(selectedResult);
+    return `
+        <div class="longtail-option-strip">
+            <span class="badge">추가 의도 토큰</span>
+            ${LONGTAIL_OPTION_LIBRARY.map((option) => {
+                const isActive = optionKeySet.has(option.key);
+                return `
+                    <button
+                        type="button"
+                        class="ghost-chip longtail-option-chip ${isActive ? "active" : ""}"
+                        data-longtail-option-key="${escapeHtml(option.key)}"
+                        aria-pressed="${isActive ? "true" : "false"}"
+                        title="${escapeHtml(option.description)}"
+                    >${escapeHtml(option.label)}</button>
+                `;
+            }).join("")}
+            <span class="longtail-option-copy">
+                기본은 핵심 의도만 조합합니다.
+                추가 토큰 ${escapeHtml(optionLabels.length ? optionLabels.join(", ") : "없음")}
+                ${optionsChanged ? " · 다시 조합 필요" : ""}
+            </span>
+        </div>
+    `;
+}
 
 function normalizeProfitabilityValue(grade) {
     const safeGrade = String(grade || "").trim().toUpperCase();
@@ -434,6 +679,7 @@ async function runSelectStage(options = {}) {
         allowedAttackabilityGrades,
     );
     const analyzedKeywords = state.results.analyzed?.analyzed_keywords || [];
+    const longtailOptions = buildLongtailOptionsPayload(state.results.selected || {});
     const selectionCandidates = hasExplicitFilters
         ? analyzedKeywords.filter((item) => (
             allowedProfitabilityGrades.includes(resolveProfitabilityGrade(item))
@@ -463,16 +709,22 @@ async function runSelectStage(options = {}) {
         endpoint: "/select",
         inputData: {
             analyzed_keywords: selectionCandidates,
-            select_options: hasExplicitFilters
-                ? {
-                    allowed_profitability_grades: allowedProfitabilityGrades,
-                    allowed_attackability_grades: allowedAttackabilityGrades,
-                    mode: "combo_filter",
-                }
-                : {},
+            select_options: {
+                ...(hasExplicitFilters
+                    ? {
+                        allowed_profitability_grades: allowedProfitabilityGrades,
+                        allowed_attackability_grades: allowedAttackabilityGrades,
+                        mode: "combo_filter",
+                    }
+                    : {}),
+                longtail_options: longtailOptions,
+            },
         },
     });
 
+    state.longtailOptionalSuffixKeys = normalizeLongtailOptionalSuffixKeys(
+        result.longtail_options?.optional_suffix_keys || longtailOptions.optional_suffix_keys,
+    );
     state.results.selected = {
         ...result,
         selection_profile: {
@@ -521,6 +773,7 @@ async function runTitleStage() {
             selected_keywords: state.results.selected?.selected_keywords || [],
             keyword_clusters: state.results.selected?.keyword_clusters || [],
             longtail_suggestions: state.results.selected?.longtail_suggestions || [],
+            longtail_options: state.results.selected?.longtail_options || null,
             analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
             serp_competition_summary: state.results.selected?.serp_competition_summary || null,
             title_options: titleOptions,
@@ -557,28 +810,38 @@ async function runLongtailVerification() {
     const longtailSuggestions = Array.isArray(selectedResult.longtail_suggestions)
         ? selectedResult.longtail_suggestions
         : [];
+    const longtailOptions = buildLongtailOptionsPayload(selectedResult);
+    const shouldRebuild = hasPendingLongtailOptionChanges(selectedResult);
     addLog(
-        longtailSuggestions.length
-            ? `롱테일 검증 시작: 제안 ${countItems(longtailSuggestions)}건을 다시 분석합니다.`
-            : "롱테일 검증 시작: 선별 결과에서 새 롱테일 후보를 계산하고 분석합니다.",
+        shouldRebuild
+            ? `롱테일 검증 시작: ${formatLongtailOptionLabels(longtailOptions.optional_suffix_keys).join(", ") || "기본"} 기준으로 후보를 다시 조합합니다.`
+            : (longtailSuggestions.length
+                ? `롱테일 검증 시작: 제안 ${countItems(longtailSuggestions)}건을 다시 분석합니다.`
+                : "롱테일 검증 시작: 선별 결과에서 새 롱테일 후보를 계산하고 분석합니다."),
     );
 
     const response = await postModule("/verify-longtail", {
         selected_keywords: selectedKeywords,
         keyword_clusters: Array.isArray(selectedResult.keyword_clusters) ? selectedResult.keyword_clusters : [],
-        longtail_suggestions: longtailSuggestions,
+        longtail_suggestions: shouldRebuild ? [] : longtailSuggestions,
         analyzer_options: buildLongtailAnalyzerOptions(),
+        longtail_options: longtailOptions,
+        force_rebuild: shouldRebuild,
     });
     const result = response?.result || {};
     const verifiedSuggestions = Array.isArray(result.verified_longtail_suggestions)
         ? result.verified_longtail_suggestions
         : [];
     const summary = result.longtail_verification_summary || {};
+    state.longtailOptionalSuffixKeys = normalizeLongtailOptionalSuffixKeys(
+        result.longtail_options?.optional_suffix_keys || longtailOptions.optional_suffix_keys,
+    );
 
     state.results.selected = {
         ...selectedResult,
         longtail_suggestions: verifiedSuggestions,
         longtail_summary: summary,
+        longtail_options: result.longtail_options || longtailOptions,
         cannibalization_report: result.cannibalization_report || selectedResult.cannibalization_report || null,
         serp_competition_summary: null,
         verified_longtail_keywords: Array.isArray(result.verified_longtail_keywords)
@@ -810,13 +1073,623 @@ function restoreResultsDomState(snapshot) {
     });
 }
 
+function getQueueSnapshotState() {
+    const snapshot = state.queueSnapshot && typeof state.queueSnapshot === "object"
+        ? state.queueSnapshot
+        : {};
+    return {
+        runner: snapshot.runner && typeof snapshot.runner === "object" ? snapshot.runner : {},
+        jobs: Array.isArray(snapshot.jobs) ? snapshot.jobs : [],
+        routines: Array.isArray(snapshot.routines) ? snapshot.routines : [],
+        paths: snapshot.paths && typeof snapshot.paths === "object" ? snapshot.paths : {},
+    };
+}
+
+function getQueueSelectedWeekdays() {
+    const values = new Set();
+    elements.queueRoutineWeekdayInputs?.forEach((input) => {
+        if (!input.checked) {
+            return;
+        }
+        const value = Number.parseInt(String(input.value || "").trim(), 10);
+        if (Number.isInteger(value) && value >= 0 && value <= 6) {
+            values.add(value);
+        }
+    });
+    return Array.from(values).sort((left, right) => left - right);
+}
+
+function getQueueSelectedCategories() {
+    const values = [];
+    const seen = new Set();
+    elements.queueRoutineCategoryInputs?.forEach((input) => {
+        if (!input.checked) {
+            return;
+        }
+        const value = String(input.value || "").trim();
+        if (!value || seen.has(value)) {
+            return;
+        }
+        seen.add(value);
+        values.push(value);
+    });
+    return values;
+}
+
+function parseQueueListText(value) {
+    return parseKeywordText(String(value || "").trim());
+}
+
+function buildQueueCollectorConfig() {
+    const trendSettings = typeof getTrendSettingsFormState === "function"
+        ? getTrendSettingsFormState()
+        : {};
+    const categorySource = String(elements.categorySourceInput?.value || "naver_trend").trim() || "naver_trend";
+    return {
+        category_source: categorySource,
+        options: {
+            collect_related: Boolean(elements.optionRelated?.checked),
+            collect_autocomplete: Boolean(elements.optionAutocomplete?.checked),
+            collect_bulk: Boolean(elements.optionBulk?.checked),
+        },
+        trend_options: {
+            service: String(trendSettings.service || "naver_blog").trim() || "naver_blog",
+            content_type: "text",
+            date: String(trendSettings.date || "").trim(),
+            auth_cookie: String(trendSettings.auth_cookie || "").trim(),
+            fallback_to_preset_search: Boolean(trendSettings.fallback_to_preset_search),
+        },
+        debug: Boolean(elements.optionDebug?.checked),
+    };
+}
+
+function buildQueueExpanderConfig() {
+    const rawLimit = Number.parseInt(String(elements.expandMaxResultsInput?.value || "").trim(), 10);
+    return {
+        analysis_json_path: String(elements.expanderAnalysisPath?.value || "").trim(),
+        expand_options: {
+            enable_related: Boolean(elements.expandOptionRelated?.checked ?? true),
+            enable_autocomplete: Boolean(elements.expandOptionAutocomplete?.checked ?? true),
+            enable_seed_filter: Boolean(elements.expandOptionSeedFilter?.checked ?? true),
+            max_results: Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : null,
+        },
+    };
+}
+
+function buildQueueAnalyzerConfig() {
+    const keywordStatsText = String(elements.analyzeKeywordStatsInput?.value || "").trim();
+    const analyzerConfig = {
+        keywordmaster_benchmark: {
+            enabled: true,
+            max_workers: 6,
+            max_keywords: 60,
+        },
+    };
+    if (keywordStatsText) {
+        analyzerConfig.keyword_stats_text = keywordStatsText;
+    }
+    return analyzerConfig;
+}
+
+function buildQueuePipelineInput() {
+    const collectorConfig = buildQueueCollectorConfig();
+    return {
+        debug: Boolean(collectorConfig.debug),
+        collector: {
+            category_source: collectorConfig.category_source,
+            options: { ...collectorConfig.options },
+            trend_options: { ...collectorConfig.trend_options },
+        },
+        expander: buildQueueExpanderConfig(),
+        analyzer: buildQueueAnalyzerConfig(),
+        title_options: typeof buildTitleOptions === "function" ? buildTitleOptions() : {},
+    };
+}
+
+function formatQueueDateTime(value) {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+        return "-";
+    }
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) {
+        return normalized;
+    }
+    return new Intl.DateTimeFormat("ko-KR", {
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    }).format(date);
+}
+
+function formatQueueWeekdays(weekdays) {
+    const values = Array.isArray(weekdays) ? weekdays : [];
+    const labels = values
+        .map((value) => Number.parseInt(String(value), 10))
+        .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6)
+        .map((value) => QUEUE_WEEKDAY_LABELS[value]);
+    return labels.length ? labels.join(" / ") : "매일";
+}
+
+function formatQueueStatusLabel(status) {
+    const normalized = String(status || "").trim();
+    if (normalized === "pending") return "대기";
+    if (normalized === "running") return "실행 중";
+    if (normalized === "waiting_retry") return "재시도 대기";
+    if (normalized === "completed") return "완료";
+    if (normalized === "partial") return "부분 완료";
+    if (normalized === "failed") return "실패";
+    if (normalized === "blocked") return "차단";
+    if (normalized === "canceled") return "취소";
+    return normalized || "미확인";
+}
+
+function formatQueueJobMode(job) {
+    return String(job?.item_mode || "").trim() === "category" ? "카테고리" : "시드";
+}
+
+function formatQueueJobSource(job) {
+    return String(job?.source || "").trim() === "routine" ? "루틴 생성" : "수동 등록";
+}
+
+function formatQueueRunnerStateLabel(runner) {
+    if (runner?.paused) {
+        return runner.pause_reason
+            ? `일시정지 · ${runner.pause_reason}`
+            : "일시정지";
+    }
+    if (runner?.running) {
+        return "실행 중";
+    }
+    return "대기 중";
+}
+
+function formatQueueOutputLabel(pathValue) {
+    const normalized = String(pathValue || "").trim();
+    if (!normalized) {
+        return "-";
+    }
+    const parts = normalized.split(/[\\/]+/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : normalized;
+}
+
+function escapeQueueAttr(value) {
+    return escapeHtml(String(value || ""));
+}
+
+function canCancelQueueJob(job) {
+    const status = String(job?.status || "").trim();
+    return !["completed", "partial", "failed", "canceled"].includes(status);
+}
+
+function renderQueueJobCard(job) {
+    const completedCount = Number(job?.completed_count || 0);
+    const failedCount = Number(job?.failed_count || 0);
+    const blockedCount = Number(job?.blocked_count || 0);
+    const canceledCount = Number(job?.canceled_count || 0);
+    const pendingCount = Number(job?.pending_count || 0);
+    const itemCount = Number(job?.item_count || 0);
+    const titleMode = String(job?.input_summary?.title_mode || "").trim();
+    const titleProvider = String(job?.input_summary?.title_provider || "").trim();
+    const lastErrorMessage = String(job?.last_error?.message || "").trim();
+    const itemSummary = [
+        `${formatQueueJobMode(job)} ${itemCount}건`,
+        formatQueueJobSource(job),
+        titleMode ? `제목 ${titleMode}${titleProvider ? `:${titleProvider}` : ""}` : "",
+    ].filter(Boolean).join(" · ");
+    const metaParts = [
+        job?.scheduled_for ? `예약 ${formatQueueDateTime(job.scheduled_for)}` : "",
+        job?.started_at ? `시작 ${formatQueueDateTime(job.started_at)}` : "",
+        job?.finished_at ? `완료 ${formatQueueDateTime(job.finished_at)}` : "",
+        job?.next_attempt_at ? `재시도 ${formatQueueDateTime(job.next_attempt_at)}` : "",
+        job?.current_item_value ? `현재 ${String(job.current_item_value).trim()}` : "",
+    ].filter(Boolean);
+    return `
+        <article class="queue-item-card">
+            <div class="queue-item-head">
+                <div class="queue-item-title">
+                    <h4>${escapeHtml(String(job?.name || "Queue Job"))}</h4>
+                    <p>${escapeHtml(itemSummary)}</p>
+                </div>
+                <span class="queue-status-pill ${escapeQueueAttr(job?.status)}">${escapeHtml(formatQueueStatusLabel(job?.status))}</span>
+            </div>
+            <div class="queue-item-meta">
+                ${metaParts.map((part) => `<span>${escapeHtml(part)}</span>`).join("") || "<span>등록 시각을 불러오는 중입니다.</span>"}
+            </div>
+            <div class="queue-mini-grid">
+                <div class="queue-mini-stat">
+                    <span>완료</span>
+                    <strong>${escapeHtml(String(completedCount))}</strong>
+                </div>
+                <div class="queue-mini-stat">
+                    <span>대기</span>
+                    <strong>${escapeHtml(String(pendingCount))}</strong>
+                </div>
+                <div class="queue-mini-stat">
+                    <span>실패</span>
+                    <strong>${escapeHtml(String(failedCount + blockedCount))}</strong>
+                </div>
+                <div class="queue-mini-stat">
+                    <span>취소</span>
+                    <strong>${escapeHtml(String(canceledCount))}</strong>
+                </div>
+            </div>
+            ${lastErrorMessage ? `<div class="queue-error">${escapeHtml(lastErrorMessage)}</div>` : ""}
+            ${job?.artifact_path ? `<div class="queue-path-note">${escapeHtml(job.artifact_path)}</div>` : ""}
+            <div class="queue-item-actions">
+                ${job?.artifact_path ? `
+                    <button
+                        type="button"
+                        class="ghost-chip"
+                        data-queue-action="download-artifact"
+                        data-job-id="${escapeQueueAttr(job?.job_id)}"
+                    >엑셀 다운로드</button>
+                ` : ""}
+                ${canCancelQueueJob(job) ? `
+                    <button
+                        type="button"
+                        class="ghost-btn"
+                        data-queue-action="cancel-job"
+                        data-job-id="${escapeQueueAttr(job?.job_id)}"
+                    >작업 취소</button>
+                ` : ""}
+            </div>
+        </article>
+    `;
+}
+
+function renderQueueRoutineCard(routine) {
+    const categories = Array.isArray(routine?.categories) ? routine.categories : [];
+    const titleMode = String(routine?.input_summary?.title_mode || "").trim();
+    const titleProvider = String(routine?.input_summary?.title_provider || "").trim();
+    const summary = [
+        `${categories.length}개 카테고리`,
+        `${formatQueueWeekdays(routine?.weekdays)} ${String(routine?.time_of_day || "06:00").trim()}`,
+        titleMode ? `제목 ${titleMode}${titleProvider ? `:${titleProvider}` : ""}` : "",
+    ].filter(Boolean).join(" · ");
+    return `
+        <article class="queue-item-card">
+            <div class="queue-item-head">
+                <div class="queue-item-title">
+                    <h4>${escapeHtml(String(routine?.name || "Routine"))}</h4>
+                    <p>${escapeHtml(summary)}</p>
+                </div>
+                <span class="queue-status-pill ${routine?.enabled ? "completed" : "canceled"}">${routine?.enabled ? "활성" : "중지"}</span>
+            </div>
+            <div class="queue-item-meta">
+                <span>다음 실행 ${escapeHtml(formatQueueDateTime(routine?.next_run_at))}</span>
+                <span>마지막 생성 ${escapeHtml(routine?.last_enqueued_on || "-")}</span>
+            </div>
+            <div class="queue-path-note">${escapeHtml(categories.join(", ") || "카테고리가 없습니다.")}</div>
+            <div class="queue-item-actions">
+                <button
+                    type="button"
+                    class="ghost-btn"
+                    data-queue-action="delete-routine"
+                    data-routine-id="${escapeQueueAttr(routine?.routine_id)}"
+                >루틴 삭제</button>
+            </div>
+        </article>
+    `;
+}
+
+function renderQueuePanel() {
+    const snapshot = getQueueSnapshotState();
+    const runner = snapshot.runner;
+    const jobs = snapshot.jobs;
+    const routines = snapshot.routines;
+    const selectedSeedCount = parseQueueListText(elements.queueSeedBatchSeedsInput?.value || "").length;
+    const selectedCategories = getQueueSelectedCategories();
+    const selectedCategoryCount = selectedCategories.length;
+    const selectedWeekdays = getQueueSelectedWeekdays();
+    const requestPending = Boolean(state.queueRequestInFlight);
+
+    if (elements.queueRunnerStateLabel) {
+        elements.queueRunnerStateLabel.textContent = formatQueueRunnerStateLabel(runner);
+    }
+    if (elements.queueRunnerJobLabel) {
+        elements.queueRunnerJobLabel.textContent = runner?.current_job_name
+            ? `${runner.current_job_name}${runner?.current_item_value ? ` · ${runner.current_item_value}` : ""}`
+            : "대기 중";
+    }
+    if (elements.queueJobCountLabel) {
+        elements.queueJobCountLabel.textContent = `작업 ${jobs.length}건 · 루틴 ${routines.length}건`;
+    }
+    if (elements.queueOutputDirLabel) {
+        elements.queueOutputDirLabel.textContent = formatQueueOutputLabel(snapshot.paths.output_dir);
+    }
+    if (elements.queueSeedBatchCountLabel) {
+        elements.queueSeedBatchCountLabel.textContent = `시드 ${selectedSeedCount}건`;
+    }
+    if (elements.queueRoutineCountLabel) {
+        elements.queueRoutineCountLabel.textContent = `카테고리 ${selectedCategoryCount}건`;
+    }
+    if (elements.queueSeedBatchHint) {
+        elements.queueSeedBatchHint.textContent = requestPending
+            ? "Queue 요청을 처리 중입니다."
+            : "현재 수집, 확장, 분석, 제목 옵션을 그대로 묶어서 시드별 전체 파이프라인을 순차 실행합니다. API 키나 트렌드 쿠키가 있으면 상태 파일에도 함께 저장됩니다.";
+    }
+    if (elements.queueRoutineHint) {
+        elements.queueRoutineHint.textContent = selectedWeekdays.length
+            ? `${formatQueueWeekdays(selectedWeekdays)} ${String(elements.queueRoutineTimeInput?.value || "06:00")}에 선택한 ${selectedCategoryCount}개 카테고리 작업을 자동 생성합니다. 현재 인증 설정도 상태 파일에 저장될 수 있습니다.`
+            : "요일을 최소 1개 선택해야 루틴을 등록할 수 있습니다.";
+    }
+    if (elements.pauseQueueRunnerButton) {
+        elements.pauseQueueRunnerButton.disabled = requestPending || Boolean(runner?.paused);
+    }
+    if (elements.resumeQueueRunnerButton) {
+        elements.resumeQueueRunnerButton.disabled = requestPending || !Boolean(runner?.paused);
+    }
+    if (elements.submitQueueSeedBatchButton) {
+        elements.submitQueueSeedBatchButton.disabled = requestPending || selectedSeedCount === 0;
+    }
+    if (elements.submitQueueRoutineButton) {
+        elements.submitQueueRoutineButton.disabled = requestPending || selectedCategoryCount === 0 || selectedWeekdays.length === 0;
+    }
+    if (elements.queueJobsList) {
+        elements.queueJobsList.innerHTML = jobs.length
+            ? jobs.slice(0, 12).map((job) => renderQueueJobCard(job)).join("")
+            : '<div class="collector-empty">등록된 작업이 없습니다.</div>';
+    }
+    if (elements.queueRoutinesList) {
+        elements.queueRoutinesList.innerHTML = routines.length
+            ? routines.map((routine) => renderQueueRoutineCard(routine)).join("")
+            : '<div class="collector-empty">등록된 루틴이 없습니다.</div>';
+    }
+    if (elements.queueSnapshotStatus) {
+        const syncMessage = String(state.queueSyncMessage || "").trim()
+            || "스케줄러 상태를 아직 불러오지 않았습니다.";
+        const pathNote = snapshot.paths.state_path
+            ? `<div class="queue-path-note">상태 파일: ${escapeHtml(snapshot.paths.state_path)}</div>`
+            : "";
+        elements.queueSnapshotStatus.innerHTML = `${escapeHtml(syncMessage)}${pathNote}`;
+    }
+}
+
+async function requestQueue(endpoint, options = {}) {
+    const startedAt = Date.now();
+    let response;
+    try {
+        response = await fetch(endpoint, {
+            method: options.method || "GET",
+            headers: options.body ? { "Content-Type": "application/json" } : undefined,
+            body: options.body ? JSON.stringify(options.body) : undefined,
+        });
+    } catch (error) {
+        const networkError = new Error("Queue 서버와 연결하지 못했습니다.");
+        networkError.code = "queue_network_error";
+        networkError.endpoint = endpoint;
+        networkError.detail = error instanceof Error ? error.message : String(error);
+        networkError.durationMs = Date.now() - startedAt;
+        throw networkError;
+    }
+
+    const requestId = response.headers.get("X-Request-ID") || "";
+    const rawText = await response.text();
+    const payload = tryParseJson(rawText);
+    if (!response.ok) {
+        throw createApiError({
+            endpoint,
+            requestId,
+            statusCode: response.status,
+            payload,
+            rawText,
+            durationMs: Date.now() - startedAt,
+        });
+    }
+    return payload || {};
+}
+
+async function refreshQueueSnapshot(options = {}) {
+    if (state.queueRequestInFlight && options.background) {
+        return null;
+    }
+    state.queueRequestInFlight = true;
+    renderQueuePanel();
+    try {
+        const payload = await requestQueue("/queue/snapshot");
+        state.queueSnapshot = payload.queue || {};
+        state.queueSyncMessage = `마지막 동기화 ${formatQueueDateTime(new Date().toISOString())}`;
+        renderQueuePanel();
+        return state.queueSnapshot;
+    } catch (error) {
+        const normalizedError = normalizeError(error, { endpoint: "/queue/snapshot" });
+        state.queueSyncMessage = normalizedError.message;
+        renderQueuePanel();
+        if (!options.silent) {
+            addLog(normalizedError.message, "error");
+        }
+        return null;
+    } finally {
+        state.queueRequestInFlight = false;
+        renderQueuePanel();
+    }
+}
+
+async function runQueueMutation(endpoint, requestOptions, successMessage) {
+    if (state.queueRequestInFlight) {
+        return null;
+    }
+    state.queueRequestInFlight = true;
+    renderQueuePanel();
+    try {
+        const payload = await requestQueue(endpoint, requestOptions);
+        state.queueSnapshot = payload.queue || state.queueSnapshot || {};
+        state.queueSyncMessage = successMessage;
+        addLog(successMessage, "success");
+        renderQueuePanel();
+        return state.queueSnapshot;
+    } catch (error) {
+        const normalizedError = normalizeError(error, { endpoint });
+        state.queueSyncMessage = normalizedError.message;
+        addLog(normalizedError.message, "error");
+        renderQueuePanel();
+        return null;
+    } finally {
+        state.queueRequestInFlight = false;
+        renderQueuePanel();
+    }
+}
+
+async function pauseQueueRunner() {
+    await runQueueMutation(
+        "/queue/runner/pause",
+        {
+            method: "POST",
+            body: { reason: "manual_pause_from_dashboard" },
+        },
+        "Queue runner를 일시정지했습니다.",
+    );
+}
+
+async function resumeQueueRunner() {
+    await runQueueMutation(
+        "/queue/runner/resume",
+        { method: "POST" },
+        "Queue runner를 재개했습니다.",
+    );
+}
+
+async function submitQueueSeedBatch() {
+    const seedKeywordsText = String(elements.queueSeedBatchSeedsInput?.value || "").trim();
+    const seeds = parseQueueListText(seedKeywordsText);
+    if (!seeds.length) {
+        addLog("Queue에 등록할 시드 키워드를 최소 1개 입력해 주세요.", "error");
+        renderQueuePanel();
+        return;
+    }
+
+    const pipeline = buildQueuePipelineInput();
+    const collectorConfig = buildQueueCollectorConfig();
+    const payload = {
+        name: String(elements.queueSeedBatchNameInput?.value || "").trim(),
+        seed_keywords_text: seedKeywordsText,
+        collector_options: collectorConfig.options,
+        title_options: pipeline.title_options,
+        pipeline,
+        scheduled_for: String(elements.queueSeedBatchScheduleInput?.value || "").trim() || null,
+    };
+
+    const snapshot = await runQueueMutation(
+        "/queue/jobs/seed-batch",
+        {
+            method: "POST",
+            body: payload,
+        },
+        `시드 배치 ${seeds.length}건을 Queue에 등록했습니다.`,
+    );
+    if (!snapshot) {
+        return;
+    }
+
+    if (elements.queueSeedBatchNameInput) {
+        elements.queueSeedBatchNameInput.value = "";
+    }
+    if (elements.queueSeedBatchScheduleInput) {
+        elements.queueSeedBatchScheduleInput.value = "";
+    }
+    if (elements.queueSeedBatchSeedsInput) {
+        elements.queueSeedBatchSeedsInput.value = "";
+    }
+    renderQueuePanel();
+}
+
+async function submitQueueRoutine() {
+    const categories = getQueueSelectedCategories();
+    const weekdays = getQueueSelectedWeekdays();
+    if (!categories.length) {
+        addLog("루틴에 등록할 카테고리를 최소 1개 선택해 주세요.", "error");
+        renderQueuePanel();
+        return;
+    }
+    if (!weekdays.length) {
+        addLog("루틴 실행 요일을 최소 1개 선택해 주세요.", "error");
+        renderQueuePanel();
+        return;
+    }
+
+    const pipeline = buildQueuePipelineInput();
+    const collectorConfig = buildQueueCollectorConfig();
+    const timeOfDay = String(elements.queueRoutineTimeInput?.value || "06:00").trim() || "06:00";
+    const payload = {
+        name: String(elements.queueRoutineNameInput?.value || "").trim(),
+        categories,
+        time_of_day: `${timeOfDay}:00`,
+        weekdays,
+        category_source: collectorConfig.category_source,
+        collector_options: collectorConfig.options,
+        title_options: pipeline.title_options,
+        pipeline,
+    };
+
+    const snapshot = await runQueueMutation(
+        "/queue/routines/daily-category",
+        {
+            method: "POST",
+            body: payload,
+        },
+        `일일 카테고리 루틴 ${categories.length}건을 등록했습니다.`,
+    );
+    if (!snapshot) {
+        return;
+    }
+
+    if (elements.queueRoutineNameInput) {
+        elements.queueRoutineNameInput.value = "";
+    }
+    renderQueuePanel();
+}
+
+async function handleQueueJobActionClick(event) {
+    if (!(event.target instanceof Element)) {
+        return;
+    }
+    const trigger = event.target.closest("[data-queue-action]");
+    if (!trigger) {
+        return;
+    }
+    const action = trigger.getAttribute("data-queue-action") || "";
+    const jobId = String(trigger.getAttribute("data-job-id") || "").trim();
+    if (action === "download-artifact" && jobId) {
+        window.location.href = `/queue/jobs/${encodeURIComponent(jobId)}/artifact`;
+        return;
+    }
+    if (action === "cancel-job" && jobId) {
+        await runQueueMutation(
+            `/queue/jobs/${encodeURIComponent(jobId)}/cancel`,
+            { method: "POST" },
+            "Queue 작업을 취소했습니다.",
+        );
+    }
+}
+
+async function handleQueueRoutineActionClick(event) {
+    if (!(event.target instanceof Element)) {
+        return;
+    }
+    const trigger = event.target.closest("[data-queue-action]");
+    if (!trigger) {
+        return;
+    }
+    const action = trigger.getAttribute("data-queue-action") || "";
+    const routineId = String(trigger.getAttribute("data-routine-id") || "").trim();
+    if (action === "delete-routine" && routineId) {
+        await runQueueMutation(
+            `/queue/routines/${encodeURIComponent(routineId)}`,
+            { method: "DELETE" },
+            "Queue 루틴을 삭제했습니다.",
+        );
+    }
+}
+
 function getUtilityDrawerTab() {
     const safeTab = String(state.utilityDrawerTab || "").trim();
-    return ["settings", "diagnostics", "logs"].includes(safeTab) ? safeTab : "diagnostics";
+    return QUEUE_UTILITY_TABS.includes(safeTab) ? safeTab : "diagnostics";
 }
 
 function setUtilityDrawerTab(tabKey) {
-    const safeTab = ["settings", "diagnostics", "logs"].includes(String(tabKey || "").trim())
+    const safeTab = QUEUE_UTILITY_TABS.includes(String(tabKey || "").trim())
         ? String(tabKey || "").trim()
         : "diagnostics";
     state.utilityDrawerTab = safeTab;
@@ -835,6 +1708,10 @@ function setUtilityDrawerTab(tabKey) {
     });
     if (safeTab === "settings" && typeof window.refreshOperationSettings === "function") {
         window.refreshOperationSettings();
+    }
+    if (safeTab === "queue") {
+        renderQueuePanel();
+        void refreshQueueSnapshot({ silent: true, background: true });
     }
 }
 
@@ -868,6 +1745,13 @@ function isBusySafeButton(button) {
         || button?.matches?.("[data-utility-tab]")
         || button?.matches?.("#utilityDrawerClose")
         || button?.matches?.("#utilityDrawerBackdrop")
+        || button?.matches?.("#toggleTitleAdvancedButton")
+        || button?.matches?.("#refreshQueueSnapshotButton")
+        || button?.matches?.("#pauseQueueRunnerButton")
+        || button?.matches?.("#resumeQueueRunnerButton")
+        || button?.matches?.("#submitQueueSeedBatchButton")
+        || button?.matches?.("#submitQueueRoutineButton")
+        || button?.matches?.("[data-queue-action]")
         || button?.matches?.("[data-inline-action='toggle_analysis_grade']")
         || button?.matches?.("[data-inline-action='toggle_analysis_attackability']")
         || button?.matches?.("[data-inline-action='apply_analysis_grade_preset']")
@@ -1273,11 +2157,17 @@ function renderLongtailAxisRow({
 }
 
 function renderLongtailBoard() {
-    const summary = state.results.selected?.longtail_summary || {};
-    const suggestions = Array.isArray(state.results.selected?.longtail_suggestions)
-        ? state.results.selected.longtail_suggestions
+    const selectedResult = state.results.selected || {};
+    const summary = selectedResult.longtail_summary || {};
+    const suggestions = Array.isArray(selectedResult.longtail_suggestions)
+        ? selectedResult.longtail_suggestions
         : [];
     const hasVerified = Number(summary.verified_count || 0) > 0;
+    const shouldRebuild = hasPendingLongtailOptionChanges(selectedResult);
+    const optionStripHtml = renderLongtailOptionStrip(selectedResult);
+    const actionLabel = shouldRebuild
+        ? "롱테일 다시 조합"
+        : (hasVerified ? "롱테일 다시 검증" : "롱테일 검증 실행");
 
     if (!suggestions.length && !summary.suggestion_count) {
         return `
@@ -1285,17 +2175,19 @@ function renderLongtailBoard() {
                 <div class="longtail-head">
                     <div>
                         <span class="field-label">롱테일 조합</span>
-                        <p class="input-help compact-help">클러스터에서 중심 키워드와 의도 토큰을 조합해 실전 롱테일 후보를 제안합니다.</p>
+                        <p class="input-help compact-help">클러스터에서 중심 키워드와 핵심 의도만 먼저 조합합니다. 가이드와 체크리스트는 필요할 때만 아래에서 켜세요.</p>
                     </div>
                     <div class="longtail-actions">
+                        <span class="analysis-source-pill type">과한 템플릿 토큰 기본 제외</span>
                         <button
                             type="button"
                             class="subtle-btn"
                             data-inline-action="verify_longtail_suggestions"
                             ${state.isBusy ? "disabled" : ""}
-                        >롱테일 검증 실행</button>
+                        >${actionLabel}</button>
                     </div>
                 </div>
+                ${optionStripHtml}
                 <div class="collector-empty longtail-empty">
                     현재 선별 결과에서는 조합 가능한 롱테일 후보가 없습니다. 클러스터가 2개 이상인 묶음이 생기면 자동 제안됩니다.
                 </div>
@@ -1308,7 +2200,7 @@ function renderLongtailBoard() {
             <div class="longtail-head">
                 <div>
                     <span class="field-label">롱테일 조합</span>
-                    <p class="input-help compact-help">클러스터 기반 후보를 먼저 제안하고, 검증 실행 시 다시 분석해 실제 우선순위를 판정합니다.</p>
+                    <p class="input-help compact-help">클러스터 기반 후보를 먼저 제안하고, 검증 실행 시 다시 분석해 실제 우선순위를 판정합니다. 추가 토큰은 필요할 때만 켜서 다시 조합하세요.</p>
                 </div>
                 <div class="longtail-actions">
                     <span class="analysis-source-pill type">클러스터당 최대 3개</span>
@@ -1317,9 +2209,10 @@ function renderLongtailBoard() {
                         class="subtle-btn"
                         data-inline-action="verify_longtail_suggestions"
                         ${state.isBusy ? "disabled" : ""}
-                    >${hasVerified ? "롱테일 다시 검증" : "롱테일 검증 실행"}</button>
+                    >${actionLabel}</button>
                 </div>
             </div>
+            ${optionStripHtml}
             <div class="analysis-summary-strip longtail-summary-strip">
                 <div class="collector-stat-card">
                     <span>제안 후보</span>
@@ -1895,6 +2788,13 @@ function handleResultsGridClick(event) {
         return;
     }
 
+    const longtailOptionTrigger = event.target.closest("[data-longtail-option-key]");
+    if (longtailOptionTrigger) {
+        toggleLongtailOptionalSuffixKey(longtailOptionTrigger.getAttribute("data-longtail-option-key") || "");
+        renderResults();
+        return;
+    }
+
     const resultTabTrigger = event.target.closest("[data-result-tab]");
     if (resultTabTrigger) {
         setActiveResultView(resultTabTrigger.getAttribute("data-result-tab") || "");
@@ -1954,7 +2854,12 @@ function handleResultsGridClick(event) {
             return;
         }
         if (action === "verify_longtail_suggestions") {
-            runWithGuard(runLongtailVerification, "롱테일 검증 실행 중");
+            runWithGuard(
+                runLongtailVerification,
+                hasPendingLongtailOptionChanges(state.results.selected || {})
+                    ? "롱테일 다시 조합/검증 실행 중"
+                    : "롱테일 검증 실행 중",
+            );
             return;
         }
         if (action === "run_serp_competition_summary") {

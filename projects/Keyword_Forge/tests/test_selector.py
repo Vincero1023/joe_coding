@@ -383,6 +383,56 @@ def test_selector_builds_longtail_suggestions_from_clustered_keywords() -> None:
     assert any("보험" in item["longtail_keyword"] for item in suggestions)
 
 
+def test_selector_keeps_guide_and_checklist_suffixes_optional() -> None:
+    analyzed_keywords = [
+        {
+            "keyword": "보험 추천",
+            "profitability_grade": "A",
+            "attackability_grade": "2",
+            "combo_grade": "A2",
+            "golden_bucket": "gold",
+            "score": 76.0,
+            "metrics": {"volume": 1200.0, "cpc": 210.0},
+        },
+        {
+            "keyword": "보험 비교",
+            "profitability_grade": "A",
+            "attackability_grade": "2",
+            "combo_grade": "A2",
+            "golden_bucket": "gold",
+            "score": 73.0,
+            "metrics": {"volume": 980.0, "cpc": 180.0},
+        },
+        {
+            "keyword": "보험 가입 조건",
+            "profitability_grade": "B",
+            "attackability_grade": "1",
+            "combo_grade": "B1",
+            "golden_bucket": "gold",
+            "score": 71.0,
+            "metrics": {"volume": 740.0, "cpc": 165.0},
+        },
+    ]
+
+    default_result = run({"analyzed_keywords": analyzed_keywords})
+    default_keywords = [item["longtail_keyword"] for item in default_result["longtail_suggestions"]]
+
+    option_result = run(
+        {
+            "analyzed_keywords": analyzed_keywords,
+            "select_options": {
+                "longtail_options": {
+                    "optional_suffix_keys": ["guide", "checklist"],
+                }
+            },
+        }
+    )
+    option_keywords = [item["longtail_keyword"] for item in option_result["longtail_suggestions"]]
+
+    assert not any(keyword.endswith("가이드") or keyword.endswith("체크리스트") for keyword in default_keywords)
+    assert any(keyword.endswith("가이드") or keyword.endswith("체크리스트") for keyword in option_keywords)
+
+
 def test_verify_longtail_candidates_merges_verified_analysis() -> None:
     selected_keywords = [
         {

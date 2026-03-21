@@ -255,6 +255,7 @@ def test_build_title_input_includes_longtail_context() -> None:
         "selected_keywords": [{"keyword": INSURANCE}],
         "keyword_clusters": [{"cluster_id": "cluster-01", "representative_keyword": INSURANCE}],
         "longtail_suggestions": [{"suggestion_id": "longtail-01", "longtail_keyword": f"{INSURANCE} 체크리스트"}],
+        "longtail_options": {"optional_suffix_keys": ["checklist"]},
     }
     analyzed_result = {
         "analyzed_keywords": [{"keyword": f"{INSURANCE} 가입 방법"}],
@@ -274,6 +275,7 @@ def test_build_title_input_includes_longtail_context() -> None:
     assert result["selected_keywords"] == selected_result["selected_keywords"]
     assert result["keyword_clusters"] == selected_result["keyword_clusters"]
     assert result["longtail_suggestions"] == selected_result["longtail_suggestions"]
+    assert result["longtail_options"] == selected_result["longtail_options"]
     assert result["analyzed_keywords"] == analyzed_result["analyzed_keywords"]
     assert result["title_options"]["keyword_modes"] == ["single", "longtail_selected", "longtail_exploratory"]
 

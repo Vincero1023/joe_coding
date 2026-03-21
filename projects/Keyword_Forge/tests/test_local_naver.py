@@ -7,7 +7,11 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.local.naver_login_browser import LocalLoginBrowserError, LocalNaverLoginBrowserService
+from app.local.naver_login_browser import (
+    LocalLoginBrowserError,
+    LocalNaverLoginBrowserService,
+    read_cached_session_summary,
+)
 from app.local.naver_session import LocalBrowserCookieError, LocalNaverSessionService
 from app.main import app
 
@@ -124,6 +128,55 @@ def test_local_naver_login_browser_endpoint_preserves_error_hint() -> None:
     payload = response.json()["error"]
     assert payload["message"] == "msedge 전용 로그인 브라우저에서 제한 시간 안에 네이버 세션 쿠키를 확인하지 못했습니다."
     assert payload["detail"]["hint"] == "열린 브라우저 창에서 네이버 로그인과 Creator Advisor 접속을 완료한 뒤 기다려 주세요."
+
+
+def test_read_cached_session_summary_returns_saved_metadata(tmp_path) -> None:
+    session_file = tmp_path / "naver_creator_session.json"
+    session_file.write_text(
+        json.dumps(
+            {
+                "browser": "chrome",
+                "cookie_header": "NID_AUT=test; NID_SES=session",
+                "cookie_names": ["NID_AUT", "NID_SES"],
+                "cookie_count": 2,
+                "saved_at": 1774101314,
+                "target_url": "https://creator-advisor.naver.com/naver_blog/goodbuy40/trends",
+                "profile_dir": "F:/tmp/profile",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = read_cached_session_summary(session_file)
+
+    assert result["available"] is True
+    assert result["browser"] == "chrome"
+    assert result["cookie_count"] == 2
+    assert result["cookie_names"] == ["NID_AUT", "NID_SES"]
+    assert result["saved_at"] == 1774101314
+
+
+def test_local_naver_session_cache_endpoint_returns_cached_summary() -> None:
+    with patch(
+        "app.api.routes.local_naver.read_cached_session_summary",
+        return_value={
+            "available": True,
+            "browser": "chrome",
+            "cookie_count": 3,
+            "cookie_names": ["NID_AUT", "NID_SES", "NNB"],
+            "saved_at": 1774101314,
+            "target_url": "https://creator-advisor.naver.com/naver_blog/goodbuy40/trends",
+            "profile_dir": "F:/tmp/profile",
+        },
+    ):
+        response = client.get("/local/naver-session-cache")
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["available"] is True
+    assert result["browser"] == "chrome"
+    assert result["cookie_count"] == 3
 
 
 def test_local_naver_login_browser_service_wraps_playwright_startup_error() -> None:

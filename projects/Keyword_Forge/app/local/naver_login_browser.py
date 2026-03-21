@@ -289,6 +289,54 @@ class LocalNaverLoginBrowserService:
         )
 
 
+def read_cached_session_summary(session_cache_file: Path | None = None) -> dict[str, Any]:
+    target_file = session_cache_file or _SESSION_CACHE_FILE
+    empty_summary = {
+        "available": False,
+        "browser": "",
+        "cookie_count": 0,
+        "cookie_names": [],
+        "saved_at": 0,
+        "target_url": "",
+        "profile_dir": "",
+    }
+
+    if not target_file.exists():
+        return empty_summary
+
+    try:
+        payload = json.loads(target_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty_summary
+
+    cookie_header = str(payload.get("cookie_header") or "").strip()
+    cookie_names = payload.get("cookie_names")
+    if not isinstance(cookie_names, list):
+        cookie_names = []
+
+    try:
+        cookie_count = int(payload.get("cookie_count") or 0)
+    except (TypeError, ValueError):
+        cookie_count = 0
+    if cookie_count <= 0 and cookie_header:
+        cookie_count = max(1, len(cookie_names))
+
+    try:
+        saved_at = int(payload.get("saved_at") or 0)
+    except (TypeError, ValueError):
+        saved_at = 0
+
+    return {
+        "available": bool(cookie_header),
+        "browser": str(payload.get("browser") or "").strip(),
+        "cookie_count": cookie_count,
+        "cookie_names": [str(name).strip() for name in cookie_names if str(name).strip()],
+        "saved_at": saved_at,
+        "target_url": str(payload.get("target_url") or "").strip(),
+        "profile_dir": str(payload.get("profile_dir") or "").strip(),
+    }
+
+
 def _profile_dir_for_channel(channel: str) -> Path:
     return _SESSION_DIR / channel.replace("-", "_")
 

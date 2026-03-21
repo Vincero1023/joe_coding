@@ -43,7 +43,10 @@ class PipelineService:
             pipeline_debug,
             stage_name="selector",
             runner=lambda: selector_module.run(
-                {"analyzed_keywords": _get_list(analyzed_result, "analyzed_keywords")}
+                {
+                    "analyzed_keywords": _get_list(analyzed_result, "analyzed_keywords"),
+                    "select_options": input_data.get("select_options", {}),
+                }
             ),
         )
         titled_result = _run_stage(
@@ -59,6 +62,9 @@ class PipelineService:
             "selected_keywords": _get_list(selected_result, "selected_keywords"),
             "keyword_clusters": _get_list(selected_result, "keyword_clusters"),
             "longtail_suggestions": _get_list(selected_result, "longtail_suggestions"),
+            "longtail_options": selected_result.get("longtail_options", {})
+            if isinstance(selected_result, dict)
+            else {},
             "generated_titles": _get_list(titled_result, "generated_titles"),
             "content_map_summary": selected_result.get("content_map_summary", {})
             if isinstance(selected_result, dict)
@@ -119,6 +125,11 @@ def _build_title_input(
         "selected_keywords": _get_list(selected_result, "selected_keywords"),
         "keyword_clusters": _get_list(selected_result, "keyword_clusters"),
         "longtail_suggestions": _get_list(selected_result, "longtail_suggestions"),
+        "longtail_options": (
+            selected_result.get("longtail_options", {})
+            if isinstance(selected_result, dict)
+            else input_data.get("longtail_options", {})
+        ),
         "analyzed_keywords": _get_list(analyzed_result, "analyzed_keywords"),
         "title_options": input_data.get("title_options", {}),
     }

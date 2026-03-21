@@ -4,7 +4,7 @@ from difflib import SequenceMatcher
 import re
 from typing import Any
 
-from app.expander.utils.tokenizer import normalize_key, normalize_text
+from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
 from app.title.rules import NAVER_HOME_MAX_LENGTH
 
 
@@ -175,13 +175,13 @@ def assess_single_title(
             },
         }
 
-    contains_keyword = bool(keyword and keyword in normalized_title)
-    starts_with_keyword = bool(keyword and normalized_title.startswith(keyword))
+    contains_keyword = _contains_keyword_phrase(keyword, normalized_title)
+    starts_with_keyword = _starts_with_keyword_phrase(keyword, normalized_title)
     length_ok = True
     duplicate_risk = bool(canonical_title and duplicate_counts.get(canonical_title, 0) > 1)
 
     if not contains_keyword:
-        issues.append("키워드를 제목에 그대로 넣지 않았습니다.")
+        issues.append("키워드 핵심 표현이 제목에 충분히 반영되지 않았습니다.")
         score -= 36
         critical = True
     elif not starts_with_keyword:
@@ -267,6 +267,68 @@ def _normalize_title_list(raw_titles: Any) -> list[str]:
     if not isinstance(raw_titles, list):
         return []
     return [normalize_text(title) for title in raw_titles if normalize_text(title)]
+
+
+def _contains_keyword_phrase(keyword: str, title: str) -> bool:
+    normalized_keyword = normalize_text(keyword)
+    normalized_title = normalize_text(title)
+    if not normalized_keyword or not normalized_title:
+        return False
+    if normalized_keyword in normalized_title:
+        return True
+
+    keyword_tokens = _normalize_tokens(keyword)
+    title_tokens = _normalize_tokens(title)
+    if not keyword_tokens or not title_tokens:
+        return False
+    return _contains_tokens_in_order(keyword_tokens, title_tokens)
+
+
+def _starts_with_keyword_phrase(keyword: str, title: str) -> bool:
+    normalized_keyword = normalize_text(keyword)
+    normalized_title = normalize_text(title)
+    if not normalized_keyword or not normalized_title:
+        return False
+    if normalized_title.startswith(normalized_keyword):
+        return True
+
+    keyword_tokens = _normalize_tokens(keyword)
+    title_tokens = _normalize_tokens(title)
+    if not keyword_tokens or not title_tokens:
+        return False
+
+    prefix_length = 1 if len(keyword_tokens) == 1 else 2
+    return (
+        title_tokens[:prefix_length] == keyword_tokens[:prefix_length]
+        and _contains_tokens_in_order(keyword_tokens, title_tokens)
+    )
+
+
+def _normalize_tokens(value: str) -> list[str]:
+    tokens: list[str] = []
+    for token in tokenize_text(value):
+        normalized_token = normalize_key(token)
+        if normalized_token:
+            tokens.append(normalized_token)
+    return tokens
+
+
+def _contains_tokens_in_order(keyword_tokens: list[str], title_tokens: list[str]) -> bool:
+    if not keyword_tokens:
+        return False
+
+    search_start = 0
+    for keyword_token in keyword_tokens:
+        matched = False
+        for index in range(search_start, len(title_tokens)):
+            if title_tokens[index] != keyword_token:
+                continue
+            search_start = index + 1
+            matched = True
+            break
+        if not matched:
+            return False
+    return True
 
 
 def _count_duplicates(titles: list[str]) -> dict[str, int]:

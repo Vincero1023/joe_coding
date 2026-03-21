@@ -1,8 +1,14 @@
 from unittest.mock import patch
 
-from app.title.ai_client import TitleGenerationOptions, _build_user_prompt_from_items, request_ai_titles
+from app.title.ai_client import (
+    TitleGenerationOptions,
+    _build_user_prompt_from_items,
+    _resolve_retry_delay_seconds,
+    request_ai_titles,
+)
 from app.title.category_detector import detect_category
 from app.title.main import run
+from app.title.quality import assess_single_title
 from app.title.rules import NAVER_HOME_MAX_LENGTH
 from app.title.targets import build_title_targets
 from app.title.title_generator import generate_titles
@@ -60,6 +66,31 @@ def test_title_generator_preserves_keyword_text() -> None:
     assert all("제주 여행 코스" in title for title in result[0]["titles"]["blog"])
     assert result[0]["quality_report"]["bundle_score"] > 0
     assert result[0]["quality_report"]["label"] in {"양호", "재검토", "재생성 권장"}
+
+
+def test_title_quality_accepts_keyword_tokens_with_inserted_modifiers() -> None:
+    report = assess_single_title(
+        "트레이더조 에코백 체크리스트",
+        "트레이더조 에코백 구매 전 필수 체크리스트",
+        "blog",
+        {},
+    )
+
+    assert report["checks"]["contains_keyword"] is True
+    assert report["checks"]["starts_with_keyword"] is True
+    assert "키워드 핵심 표현이 제목에 충분히 반영되지 않았습니다." not in report["issues"]
+
+
+def test_title_quality_still_fails_when_keyword_core_token_is_missing() -> None:
+    report = assess_single_title(
+        "트레이더조 에코백 체크리스트",
+        "트레이더조 에코백 종류별 비교 가이드",
+        "blog",
+        {},
+    )
+
+    assert report["checks"]["contains_keyword"] is False
+    assert "키워드 핵심 표현이 제목에 충분히 반영되지 않았습니다." in report["issues"]
 
 
 def test_template_titles_avoid_legacy_repetitive_phrases() -> None:
@@ -206,6 +237,8 @@ def test_title_generation_options_use_home_issue_preset_by_default_in_ai_mode() 
     assert "Naver home-feed exposure" in options.effective_system_prompt
     assert "When the issue signal is weak" in options.effective_system_prompt
     assert "Never invent unsupported facts" in options.effective_system_prompt
+    assert "Every title must contain all meaningful keyword tokens" in options.effective_system_prompt
+    assert "Do not drop or paraphrase modifier tokens" in options.effective_system_prompt
 
 
 def test_ai_prompt_builder_includes_category_overlay_and_metrics() -> None:
@@ -241,10 +274,14 @@ def test_ai_prompt_builder_includes_category_overlay_and_metrics() -> None:
 
     assert "Current local date reference:" in prompt
     assert "Never invent unsupported facts" in prompt
+    assert "Every title must contain all meaningful keyword tokens from the input keyword." in prompt
+    assert "Keep keyword tokens in the same order." in prompt
     assert "category overlay: 부동산 블로그" in prompt
     assert "preferred naver_home pair:" in prompt
     assert "freshness cues:" in prompt
     assert "data hooks:" in prompt
+    assert "required keyword tokens: 서울, 청약, 경쟁률" in prompt
+    assert "keyword coverage rule:" in prompt
     assert "available signals: score 77" in prompt
     assert "grade A/2" in prompt
     assert "volume 1,250" in prompt
@@ -292,6 +329,58 @@ def test_request_ai_titles_includes_live_issue_context_in_prompt() -> None:
     assert "recent headlines:" in prompt
     assert "서울 청약 경쟁률 이번주 일정 바뀌나" in prompt
     assert "news 2/3" in prompt
+    assert "required keyword tokens: 서울, 청약, 경쟁률" in prompt
+
+
+def test_request_ai_titles_supports_vertex_provider() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "vertex",
+                "api_key": "vertex-key",
+                "model": "gemini-2.5-flash-lite",
+            }
+        }
+    )
+
+    with patch(
+        "app.title.ai_client._post_json",
+        return_value={
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "text": (
+                                    '{"items":[{"keyword":"보험 추천","naver_home":["보험 추천 비교 포인트","보험 추천 선택 기준"],'
+                                    '"blog":["보험 추천 가이드","보험 추천 체크포인트"]}]}'
+                                )
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+    ) as mocked_post:
+        result = request_ai_titles([{"keyword": "보험 추천"}], options)
+
+    called_url = mocked_post.call_args.args[0]
+    called_headers = mocked_post.call_args.args[1]
+    assert "aiplatform.googleapis.com" in called_url
+    assert "publishers/google/models/gemini-2.5-flash-lite:generateContent" in called_url
+    assert "key=vertex-key" in called_url
+    assert called_headers["Content-Type"] == "application/json"
+    assert result[0]["keyword"] == "보험 추천"
+
+
+def test_resolve_retry_delay_seconds_reads_provider_hint() -> None:
+    delay = _resolve_retry_delay_seconds(
+        "429 You exceeded your current quota. Please retry in 44.460159992s.",
+        attempt=0,
+    )
+
+    assert delay == 44.460159992
 
 
 def test_title_generation_options_parse_quality_retry_settings() -> None:
@@ -635,6 +724,9 @@ def _build_longtail_title_input() -> dict:
                 "longtail_exploratory",
                 "longtail_experimental",
             ]
+        },
+        "longtail_options": {
+            "optional_suffix_keys": ["guide", "checklist"],
         },
     }
 

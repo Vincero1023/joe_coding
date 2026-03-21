@@ -21,5 +21,15 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert response.status_code == 200
     assert "titlePromptProfilePicker" in response.text
     assert 'data-utility-open="settings"' in response.text
+    assert 'data-utility-open="queue"' in response.text
     assert 'data-utility-panel="settings"' in response.text
+    assert 'data-utility-panel="queue"' in response.text
     assert "operationMode" in response.text
+    assert "operationCustomModeGuide" in response.text
+    assert "operationCustomPresetPanel" in response.text
+    assert "submitQueueSeedBatchButton" in response.text
+    assert "toggleTitleAdvancedButton" in response.text
+    assert "data-queue-category" in response.text
+    assert "localCookieStatus" in response.text
+    assert "저장된 전용 로그인 세션" in response.text
+    assert '<option value="vertex">Vertex AI</option>' in response.text

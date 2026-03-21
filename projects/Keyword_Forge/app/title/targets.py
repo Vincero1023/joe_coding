@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Any
 
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
-from app.selector.longtail import build_longtail_map
+from app.selector.longtail import build_longtail_map, resolve_longtail_options
 
 TITLE_KEYWORD_MODE_LABELS: dict[str, str] = {
     "single": "단일 키워드",
@@ -90,6 +90,7 @@ def build_title_targets(input_data: Any) -> tuple[list[dict[str, Any]], dict[str
     keyword_clusters = _coerce_items(input_data.get("keyword_clusters"))
     longtail_suggestions = _coerce_items(input_data.get("longtail_suggestions"))
     analyzed_items = _coerce_items(input_data.get("analyzed_keywords"))
+    longtail_options = resolve_longtail_options(input_data.get("longtail_options"))
 
     selected_items = [
         item
@@ -130,7 +131,12 @@ def build_title_targets(input_data: Any) -> tuple[list[dict[str, Any]], dict[str
             )
 
     if "longtail_selected" in requested_modes:
-        selected_suggestions = _resolve_selected_longtail_suggestions(selected_items, keyword_clusters, longtail_suggestions)
+        selected_suggestions = _resolve_selected_longtail_suggestions(
+            selected_items,
+            keyword_clusters,
+            longtail_suggestions,
+            longtail_options=longtail_options,
+        )
         for suggestion in selected_suggestions:
             keyword = normalize_text(suggestion.get("longtail_keyword"))
             keyword_key = normalize_key(keyword)
@@ -149,6 +155,7 @@ def build_title_targets(input_data: Any) -> tuple[list[dict[str, Any]], dict[str
             per_keyword_limit=2,
             minimum_score=33.0,
             minimum_volume=50.0,
+            longtail_options=longtail_options,
         )
         for target in exploratory_targets:
             keyword_key = normalize_key(target.get("keyword"))
@@ -167,6 +174,7 @@ def build_title_targets(input_data: Any) -> tuple[list[dict[str, Any]], dict[str
             per_keyword_limit=2,
             minimum_score=18.0,
             minimum_volume=10.0,
+            longtail_options=longtail_options,
         )
         for target in experimental_targets:
             keyword_key = normalize_key(target.get("keyword"))
@@ -182,9 +190,15 @@ def _resolve_selected_longtail_suggestions(
     selected_items: list[dict[str, Any]],
     keyword_clusters: list[dict[str, Any]],
     longtail_suggestions: list[dict[str, Any]],
+    *,
+    longtail_options: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     suggestions = longtail_suggestions or _coerce_items(
-        build_longtail_map(selected_items, keyword_clusters).get("longtail_suggestions")
+        build_longtail_map(
+            selected_items,
+            keyword_clusters,
+            longtail_options=longtail_options,
+        ).get("longtail_suggestions")
     )
     selected_keyword_keys = {
         normalize_key(item.get("keyword"))
@@ -228,6 +242,7 @@ def _build_related_mode_targets(
     per_keyword_limit: int,
     minimum_score: float,
     minimum_volume: float,
+    longtail_options: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     generated_targets: list[dict[str, Any]] = []
     seen_keywords: set[str] = set()
@@ -257,7 +272,11 @@ def _build_related_mode_targets(
             "all_keywords": [representative_keyword] + [normalize_text(item.get("keyword")) for item in related_candidates],
         }
         suggestions = _coerce_items(
-            build_longtail_map([selected_item, *related_candidates], [custom_cluster]).get("longtail_suggestions")
+            build_longtail_map(
+                [selected_item, *related_candidates],
+                [custom_cluster],
+                longtail_options=longtail_options,
+            ).get("longtail_suggestions")
         )
         for suggestion in suggestions:
             if _should_skip_related_mode_suggestion(
