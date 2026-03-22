@@ -93,6 +93,15 @@
 - `브라우저에서 쿠키 불러오기` 버튼은 기존 Edge/Chrome 세션을 직접 읽는 보조 경로이며, 브라우저 쿠키 DB 잠금/권한 문제로 실패할 수 있습니다.
 - Creator Advisor 기준 페이지가 `/naver_blog/...`이면 서비스도 `naver_blog`로 맞춰야 합니다.
 
+## 로컬 시크릿 / 데이터
+
+- 로컬 전용 시크릿 기본 경로는 `.local/credentials/` 입니다.
+- 기본 파일명:
+  - `.local/credentials/naver_search.credentials.json`
+  - `.local/credentials/searchad.credentials.json`
+- 루트 `naver_search.credentials.json`, `searchad.credentials.json`도 레거시 fallback으로 계속 읽지만, 새 환경에서는 `.local/credentials/`만 쓰는 쪽을 권장합니다.
+- `.local/`, `Status/`, `.tmp_*`, `*.credentials.json`은 git 추적 대상에서 제외하도록 정리했습니다.
+
 ## 다음 작업
 
 - Vertex AI Express Mode API key로 실제 제목 생성과 fallback 동작을 수동 확인하기

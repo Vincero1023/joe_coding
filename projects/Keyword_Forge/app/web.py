@@ -22,7 +22,7 @@ from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_paylo
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260321-cannibal-serp-v48"
+_ASSET_VERSION = "20260322-auth-guard-feedback-v50"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -948,6 +948,8 @@ def _render_home() -> str:
                 </p>
                 <div class="hero-actions">
                     <button type="button" class="primary-btn" id="runFullButton">전체 실행</button>
+                    <button type="button" class="ghost-chip" data-utility-open="settings" aria-pressed="false">운영 설정</button>
+                    <button type="button" class="ghost-chip" data-utility-open="queue" aria-pressed="false">예약 / Queue</button>
                     <a class="secondary-link" href="/guides">사용 가이드</a>
                     <a class="secondary-link" href="/api-docs" target="_blank" rel="noopener noreferrer">API 문서</a>
                 </div>
@@ -989,22 +991,6 @@ def _render_home() -> str:
             </section>
 
             <div class="control-column">
-            <section class="panel settings-panel">
-                <div class="panel-head">
-                    <div>
-                        <p class="panel-kicker">Popup</p>
-                        <h2>설정</h2>
-                    </div>
-                </div>
-                <p class="input-help compact-help settings-panel-note">
-                    운영 제한과 예약 작업은 팝업으로 열어 관리합니다. 실행 로그와 진단은 아래 작업대에서도 바로 확인할 수 있습니다.
-                </p>
-                <div class="settings-shortcut-row">
-                    <button type="button" class="ghost-chip" data-utility-open="settings" aria-pressed="false">운영 설정</button>
-                    <button type="button" class="ghost-chip" data-utility-open="queue" aria-pressed="false">예약 / Queue</button>
-                </div>
-            </section>
-
             <section class="panel control-panel">
                 <div class="panel-head">
                     <div>
@@ -1194,12 +1180,35 @@ def _render_home() -> str:
             <section class="panel launcher-panel">
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">Launcher</p>
-                        <h2>시작점</h2>
+                        <p class="panel-kicker">Quick Start</p>
+                        <h2>빠른 시작</h2>
                     </div>
                 </div>
+                <section class="quickstart-panel">
+                    <div class="quickstart-head">
+                        <div>
+                            <p class="panel-kicker">Mode</p>
+                            <h3>시작 모드</h3>
+                        </div>
+                        <span class="badge" id="quickStartModeBadge">키워드 발굴</span>
+                    </div>
+                    <div class="quickstart-mode-grid">
+                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="discover">키워드 발굴</button>
+                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="analyze">보유 키워드 분석</button>
+                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="title">제목 생성</button>
+                    </div>
+                    <div class="quickstart-summary">
+                        <strong id="quickStartSummaryTitle">카테고리/시드에서 전체 파이프라인을 새로 시작합니다.</strong>
+                        <p id="quickStartSummaryText">수집, 확장, 분석, 선별, 제목 생성까지 한 번에 이어서 실행합니다.</p>
+                        <div id="quickStartSummaryMeta" class="quickstart-meta"></div>
+                    </div>
+                    <div class="quickstart-actions">
+                        <button type="button" class="primary-btn" id="quickStartPrimaryButton">전체 실행 시작</button>
+                        <button type="button" class="ghost-chip" id="quickStartSecondaryButton">관련 설정 보기</button>
+                    </div>
+                </section>
                 <p class="input-help compact-help launcher-panel-note">
-                    현재 결과를 이어서 쓰거나 직접 붙여넣기로 확장, 분석, 제목 생성을 시작합니다.
+                    시작 모드만 고르면 아래 카드에서 세부 설정을 이어서 다듬을 수 있습니다. 운영 제한과 예약 작업은 상단 버튼에서 바로 엽니다.
                 </p>
 
                 <div class="control-launcher-column">
@@ -1340,7 +1349,7 @@ def _render_home() -> str:
                                 <input type="radio" name="titleModeOption" value="ai" />
                                 <span>
                                     <strong>AI 모드</strong>
-                                    <em>Provider, 모델, API Key를 사용해 더 유연한 제목을 생성합니다.</em>
+                                    <em>운영 설정에 등록한 Provider와 모델을 사용해 더 유연한 제목을 생성합니다.</em>
                                 </span>
                             </label>
                         </div>
@@ -1423,26 +1432,19 @@ def _render_home() -> str:
                         </label>
 
                         <label class="field-block" data-title-mode-visibility="ai" hidden>
-                            <span class="field-label">AI Provider</span>
-                            <select id="titleProvider">
-                                <option value="openai">OpenAI</option>
-                                <option value="gemini">Gemini</option>
-                                <option value="vertex">Vertex AI</option>
-                                <option value="anthropic">Anthropic</option>
-                            </select>
+                            <span class="field-label field-label-row">
+                                <span>AI 연결</span>
+                                <button type="button" class="ghost-chip inline-cta-chip" id="openApiRegistrySettingsButton">API 등록</button>
+                            </span>
+                            <select id="titleProvider"></select>
+                            <p id="titleProviderRegistryHint" class="input-help compact-help">
+                                운영 설정에서 등록한 API만 여기 표시됩니다.
+                            </p>
                         </label>
 
                         <label class="field-block" data-title-mode-visibility="ai" hidden>
                             <span class="field-label">Model</span>
                             <select id="titleModel"></select>
-                        </label>
-
-                        <label class="field-block field-block-wide" data-title-mode-visibility="ai" hidden>
-                            <span class="field-label field-label-row">
-                                <span>API Key</span>
-                                {title_api_key_help}
-                            </span>
-                            <input id="titleApiKey" type="password" placeholder="브라우저에만 저장됩니다." />
                         </label>
 
                         <div class="field-block" data-title-mode-visibility="ai" hidden>
@@ -1558,6 +1560,40 @@ def _render_home() -> str:
                                 </article>
                             </div>
                             <div class="settings-panel-grid">
+                                <section class="settings-card api-registry-card">
+                                    <div class="collector-panel-head">
+                                        <div>
+                                            <p class="panel-kicker">AI Access</p>
+                                            <h3>AI API 등록</h3>
+                                        </div>
+                                        <span class="badge" id="titleApiRegistryCount">0개 연결</span>
+                                    </div>
+                                    <div class="settings-form-grid api-registry-grid">
+                                        <label class="field-block">
+                                            <span class="field-label">OpenAI</span>
+                                            <input id="apiRegistryOpenaiKey" type="password" placeholder="sk-..." />
+                                        </label>
+                                        <label class="field-block">
+                                            <span class="field-label">Gemini</span>
+                                            <input id="apiRegistryGeminiKey" type="password" placeholder="AIza..." />
+                                        </label>
+                                        <label class="field-block">
+                                            <span class="field-label">Vertex AI</span>
+                                            <input id="apiRegistryVertexKey" type="password" placeholder="AIza..." />
+                                        </label>
+                                        <label class="field-block">
+                                            <span class="field-label">Anthropic</span>
+                                            <input id="apiRegistryAnthropicKey" type="password" placeholder="sk-ant-..." />
+                                        </label>
+                                    </div>
+                                    <div id="titleApiRegistryStatus" class="settings-hint">
+                                        등록된 API만 제목 생성 AI 설정에 표시됩니다.
+                                    </div>
+                                    <div class="settings-hero-actions api-registry-actions">
+                                        <button type="button" class="ghost-chip" id="saveTitleApiRegistryButton">브라우저에 저장</button>
+                                        <button type="button" class="ghost-chip" id="clearTitleApiRegistryButton">모두 지우기</button>
+                                    </div>
+                                </section>
                                 <section class="settings-card">
                                     <div class="collector-panel-head">
                                         <div>

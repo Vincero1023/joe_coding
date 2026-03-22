@@ -49,6 +49,60 @@ def test_build_blog_search_requests_skips_keywords_with_existing_blog_totals() -
     assert requests == ["tooth insurance compare"]
 
 
+def test_open_search_credentials_prefer_local_default_file_over_legacy_root(tmp_path, monkeypatch) -> None:
+    local_credential_path = tmp_path / ".local" / "credentials" / "naver_search.credentials.json"
+    local_credential_path.parent.mkdir(parents=True)
+    local_credential_path.write_text(
+        json.dumps(
+            {
+                "client_id": "local-client-id",
+                "client_secret": "local-client-secret",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "naver_search.credentials.json").write_text(
+        json.dumps(
+            {
+                "client_id": "legacy-client-id",
+                "client_secret": "legacy-client-secret",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    credentials = NaverOpenSearchCredentials.from_input({})
+
+    assert credentials == NaverOpenSearchCredentials(
+        client_id="local-client-id",
+        client_secret="local-client-secret",
+    )
+
+
+def test_open_search_credentials_fall_back_to_legacy_root_file_when_local_default_is_missing(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    (tmp_path / "naver_search.credentials.json").write_text(
+        json.dumps(
+            {
+                "client_id": "legacy-client-id",
+                "client_secret": "legacy-client-secret",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    credentials = NaverOpenSearchCredentials.from_input({})
+
+    assert credentials == NaverOpenSearchCredentials(
+        client_id="legacy-client-id",
+        client_secret="legacy-client-secret",
+    )
+
+
 def test_naver_open_search_client_fetches_blog_totals() -> None:
     keyword = "driver insurance compare"
     opener_calls = []

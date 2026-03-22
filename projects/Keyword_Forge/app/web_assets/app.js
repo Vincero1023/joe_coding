@@ -42,6 +42,13 @@ const DOWNSTREAM_STAGE_KEYS = {
 const TREND_SETTINGS_STORAGE_KEY = "keyword_forge_trend_settings";
 const TREND_SETTINGS_VERSION = 3;
 const TITLE_SETTINGS_STORAGE_KEY = "keyword_forge_title_settings";
+const TITLE_API_REGISTRY_STORAGE_KEY = "keyword_forge_title_api_registry_v1";
+const TITLE_API_REGISTRY_VERSION = 1;
+const KEYWORD_WORK_HISTORY_STORAGE_KEY = "keyword_forge_keyword_work_history_v1";
+const KEYWORD_WORK_HISTORY_VERSION = 1;
+const KEYWORD_STATUS_STORAGE_KEY = "keyword_forge_keyword_status_v1";
+const KEYWORD_STATUS_VERSION = 1;
+const KEYWORD_RECENT_DUPLICATE_WINDOW_DAYS = 14;
 const OPERATION_SETTINGS_STORAGE_KEY = "keyword_forge_operation_settings";
 const DASHBOARD_SESSION_STORAGE_KEY = "keyword_forge_dashboard_session_v1";
 const TITLE_PROMPT_PREVIEW_LIMIT = 160;
@@ -166,6 +173,25 @@ const TITLE_PRESET_MAP = TITLE_PRESET_LIBRARY.reduce((map, preset) => {
     }
     return map;
 }, {});
+const TITLE_PROVIDER_ORDER = ["openai", "gemini", "vertex", "anthropic"];
+const KEYWORD_STATUS_OPTIONS = [
+    { value: "", label: "상태 없음" },
+    { value: "reviewed", label: "검토함" },
+    { value: "selected", label: "선별함" },
+    { value: "titled", label: "제목생성" },
+    { value: "published", label: "발행완료" },
+];
+const KEYWORD_STATUS_LABEL_MAP = KEYWORD_STATUS_OPTIONS.reduce((map, option) => {
+    map[option.value] = option.label;
+    return map;
+}, {});
+const KEYWORD_STATUS_PRIORITY = {
+    "": 0,
+    reviewed: 1,
+    selected: 2,
+    titled: 3,
+    published: 4,
+};
 const GRADE_ORDER = ["S", "A", "B", "C", "D", "F"];
 const PROFITABILITY_ORDER = ["A", "B", "C", "D"];
 const ATTACKABILITY_ORDER = ["1", "2", "3", "4"];
@@ -217,10 +243,15 @@ const state = {
     tickerId: null,
     titleModeFilter: "all",
     titleSort: "mode_quality_desc",
+    quickStartMode: "discover",
     operationSettingsSnapshot: null,
     operationModePresets: [...OPERATION_MODE_PRESET_FALLBACKS],
     operationCustomPresetKey: "balanced",
     operationLastCustomSettings: null,
+    keywordWorkHistory: null,
+    keywordStatusRegistry: null,
+    keywordLatestUsageMap: new Map(),
+    keywordRecentUsageMap: new Map(),
 };
 
 const elements = {};
@@ -231,6 +262,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadTrendSettings();
     void loadTrendSessionCacheStatus({ silent: true });
     loadTitleSettings();
+    loadKeywordWorkflowState();
     void loadOperationSettings();
     const restoredDashboard = restoreDashboardSession();
     syncTrendDateToToday();
@@ -1206,6 +1238,9 @@ function buildTitleRunSummary(titleOptions) {
     if (titleOptions.mode !== "ai") {
         return `template 규칙 기반 / ${modeSummary}`;
     }
+    if (!String(titleOptions.provider || "").trim()) {
+        return `AI 미등록 / ${modeSummary}`;
+    }
     const preset = getTitlePresetConfig(titleOptions.preset_key);
     const parts = [
         preset?.label || "",
@@ -1384,6 +1419,10 @@ async function importLocalNaverCookie() {
         }
         persistTrendSettings();
         renderTrendSettingsState();
+        await resetOperationGuards({
+            silent: true,
+            successMessage: "Creator Advisor 세션을 다시 불러와 보호 잠금을 해제했습니다.",
+        });
         addLog(`${result.browser || browser} 브라우저에서 Creator Advisor 쿠키를 불러왔습니다.`, "success");
     } catch (error) {
         const normalized = normalizeError(error, {
@@ -1441,6 +1480,10 @@ async function openDedicatedLoginBrowser() {
         }
         persistTrendSettings();
         renderTrendSettingsState();
+        await resetOperationGuards({
+            silent: true,
+            successMessage: "Creator Advisor 재로그인 후 보호 잠금을 자동으로 해제했습니다.",
+        });
         addLog(`${result.browser || browser} 전용 로그인 브라우저에서 Creator Advisor 쿠키를 저장했습니다.`, "success");
     } catch (error) {
         const normalized = normalizeError(error, {
@@ -1524,9 +1567,11 @@ function handleTitleSettingsChange(event) {
 function persistTitleSettings() {
     try {
         const existingSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+        const formState = getTitleSettingsFormState();
         const nextSettings = {
             ...existingSettings,
-            ...getTitleSettingsFormState(),
+            ...formState,
+            api_key: "",
         };
         const profiles = normalizeTitlePromptProfiles(nextSettings.prompt_profiles);
         const activeProfile = resolveTitlePromptProfile(profiles, nextSettings.active_prompt_profile_id);
@@ -1897,6 +1942,166 @@ async function runFreshTitleFlow() {
 async function runFreshFullFlow() {
     beginFreshPipelineRun("전체 파이프라인");
     await runFullFlow();
+}
+
+function normalizeQuickStartMode(mode) {
+    return ["discover", "analyze", "title"].includes(String(mode || "").trim())
+        ? String(mode || "").trim()
+        : "discover";
+}
+
+function setQuickStartMode(mode) {
+    state.quickStartMode = normalizeQuickStartMode(mode);
+    renderInputState();
+}
+
+function focusControlBlock(controlBlockKey) {
+    const target = document.querySelector(`[data-control-block="${controlBlockKey}"]`);
+    if (!target) {
+        return;
+    }
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function getQuickStartConfig() {
+    const mode = normalizeQuickStartMode(state.quickStartMode);
+    const analyzeUsesManual = (elements.analyzeInputSource?.value || "expanded_results") === "manual_text";
+    const analyzeManualCount = parseKeywordText(elements.analyzeManualInput?.value || "").length;
+    const expandedCount = countItems(state.results.expanded?.expanded_keywords || []);
+    const selectedCount = countItems(state.results.selected?.selected_keywords || []);
+    const titleMode = syncTitleModeInputFromRadios();
+    const registeredProviders = getRegisteredTitleProviders();
+    const selectedProvider = ensureRegisteredTitleProvider(elements.titleProvider?.value);
+
+    if (mode === "analyze") {
+        const canRun = analyzeUsesManual ? analyzeManualCount > 0 : expandedCount > 0;
+        return {
+            mode,
+            badge: "보유 키워드 분석",
+            title: canRun
+                ? "직접 넣은 키워드나 확장 결과를 바로 분석할 수 있습니다."
+                : "분석할 키워드를 먼저 붙여넣거나 확장 결과를 준비하세요.",
+            description: "확장 없이도 수동 입력 분석이 가능하고, 벤치마크 HTML/CSV를 붙여 넣으면 실측 데이터를 우선 사용합니다.",
+            meta: [
+                analyzeUsesManual ? `직접 입력 ${analyzeManualCount}건` : `확장 결과 ${expandedCount}건`,
+                elements.analyzeKeywordStatsInput?.value.trim() ? "벤치마크 데이터 포함" : "벤치마크 데이터 없음",
+                "출력: 검증 테이블",
+            ],
+            primaryLabel: canRun ? "분석 시작" : "분석 입력 준비",
+            primaryRun: canRun ? runFreshAnalyzeFlow : null,
+            focusBlockKey: "analyze",
+        };
+    }
+
+    if (mode === "title") {
+        const canRun = selectedCount > 0 && (titleMode !== "ai" || Boolean(selectedProvider));
+        return {
+            mode,
+            badge: "제목 생성",
+            title: canRun
+                ? "선별 키워드에서 제목 생성 단계만 바로 시작합니다."
+                : (selectedCount === 0
+                    ? "선별 결과를 먼저 만들면 제목 생성만 따로 실행할 수 있습니다."
+                    : "AI 모드라면 운영 설정에서 API를 먼저 등록하세요."),
+            description: "template 또는 등록된 AI 연결을 사용해 제목 묶음을 만들고, 자동 재작성과 프롬프트 저장본도 그대로 반영합니다.",
+            meta: [
+                `선별 ${selectedCount}건`,
+                titleMode === "ai"
+                    ? (selectedProvider ? `AI ${formatTitleProviderLabel(selectedProvider)}` : "AI 미등록")
+                    : "template",
+                formatTitleKeywordModeSummary(getTitleSettingsFormState().keyword_modes),
+            ],
+            primaryLabel: canRun ? "제목 생성 시작" : (selectedCount === 0 ? "선별 결과 준비" : "API 등록 필요"),
+            primaryRun: canRun ? runFreshTitleFlow : null,
+            focusBlockKey: selectedCount === 0 ? "pipeline" : "title",
+            openSettingsWhenBlocked: selectedCount > 0 && titleMode === "ai" && !selectedProvider,
+        };
+    }
+
+    const collectorMode = getCollectorMode();
+    const categoryMode = collectorMode === "category";
+    const categoryValue = String(elements.categoryInput?.value || "").trim();
+    const seedValue = String(elements.seedInput?.value || "").trim();
+    const discoverReady = categoryMode || seedValue.length > 0;
+    return {
+        mode: "discover",
+        badge: "키워드 발굴",
+        title: discoverReady
+            ? "수집부터 선별, 제목 생성까지 전체 파이프라인을 새로 시작합니다."
+            : "시드 키워드를 입력하면 전체 파이프라인을 바로 시작할 수 있습니다.",
+        description: "카테고리 수집 또는 시드 기반 수집으로 시작해 확장, 분석, 선별, 제목 생성을 한 번에 이어서 실행합니다.",
+        meta: [
+            categoryMode ? "수집 모드 카테고리" : "수집 모드 시드",
+            categoryMode ? `카테고리 ${categoryValue || "-"}` : `시드 ${seedValue || "입력 필요"}`,
+            "출력: 전체 파이프라인",
+        ],
+        primaryLabel: discoverReady ? "전체 실행 시작" : "시드 입력 준비",
+        primaryRun: discoverReady ? runFreshFullFlow : null,
+        focusBlockKey: "collect",
+    };
+}
+
+function runQuickStartPrimaryAction() {
+    const config = getQuickStartConfig();
+    if (config.primaryRun) {
+        const label = config.mode === "discover"
+            ? "전체 파이프라인 새로 실행 중"
+            : config.mode === "analyze"
+                ? "분석 단계 새로 실행 중"
+                : "제목 생성 단계 새로 실행 중";
+        runWithGuard(config.primaryRun, label);
+        return;
+    }
+
+    if (config.openSettingsWhenBlocked) {
+        openUtilityDrawer("settings");
+        return;
+    }
+    focusControlBlock(config.focusBlockKey);
+}
+
+function focusQuickStartDetails() {
+    const config = getQuickStartConfig();
+    if (config.openSettingsWhenBlocked) {
+        openUtilityDrawer("settings");
+        return;
+    }
+    focusControlBlock(config.focusBlockKey);
+}
+
+function renderQuickStartState() {
+    const config = getQuickStartConfig();
+
+    elements.quickStartModeButtons?.forEach((button) => {
+        const isActive = (button.dataset.quickstartMode || "") === config.mode;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+    if (elements.quickStartModeBadge) {
+        elements.quickStartModeBadge.textContent = config.badge;
+    }
+    if (elements.quickStartSummaryTitle) {
+        elements.quickStartSummaryTitle.textContent = config.title;
+    }
+    if (elements.quickStartSummaryText) {
+        elements.quickStartSummaryText.textContent = config.description;
+    }
+    if (elements.quickStartSummaryMeta) {
+        elements.quickStartSummaryMeta.innerHTML = config.meta
+            .filter(Boolean)
+            .map((item) => `<span class="badge">${escapeHtml(item)}</span>`)
+            .join("");
+    }
+    if (elements.quickStartPrimaryButton) {
+        elements.quickStartPrimaryButton.textContent = config.primaryLabel;
+        elements.quickStartPrimaryButton.disabled = Boolean(state.isBusy);
+    }
+    if (elements.quickStartSecondaryButton) {
+        elements.quickStartSecondaryButton.textContent = config.openSettingsWhenBlocked
+            ? "운영 설정 열기"
+            : "관련 설정 보기";
+        elements.quickStartSecondaryButton.disabled = Boolean(state.isBusy);
+    }
 }
 
 function renderInputState() {
@@ -2544,6 +2749,403 @@ function readSessionStorageJson(key) {
     }
 }
 
+function normalizeKeywordLookupKey(keyword) {
+    return String(keyword || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+}
+
+function normalizeKeywordLabel(keyword) {
+    return String(keyword || "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function isValidHistoryDateKey(dateKey) {
+    const normalized = String(dateKey || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+        return false;
+    }
+    return !Number.isNaN(new Date(`${normalized}T00:00:00`).valueOf());
+}
+
+function getTodayHistoryDateKey() {
+    return formatDateInputValue(new Date());
+}
+
+function createEmptyKeywordWorkHistory() {
+    return {
+        version: KEYWORD_WORK_HISTORY_VERSION,
+        by_date: {},
+    };
+}
+
+function createEmptyKeywordStatusRegistry() {
+    return {
+        version: KEYWORD_STATUS_VERSION,
+        keywords: {},
+    };
+}
+
+function normalizeKeywordStatusValue(status) {
+    const normalized = String(status || "").trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(KEYWORD_STATUS_LABEL_MAP, normalized)
+        ? normalized
+        : "";
+}
+
+function normalizeKeywordWorkHistory(rawHistory) {
+    const nextHistory = createEmptyKeywordWorkHistory();
+    const byDate = rawHistory?.by_date && typeof rawHistory.by_date === "object"
+        ? rawHistory.by_date
+        : {};
+
+    Object.entries(byDate).forEach(([dateKey, entries]) => {
+        if (!isValidHistoryDateKey(dateKey) || !Array.isArray(entries)) {
+            return;
+        }
+        const seenKeywords = new Set();
+        const safeKeywords = entries
+            .map((entry) => (
+                typeof entry === "string"
+                    ? entry
+                    : (entry && typeof entry === "object" ? entry.keyword : "")
+            ))
+            .map(normalizeKeywordLabel)
+            .filter((keyword) => {
+                const lookupKey = normalizeKeywordLookupKey(keyword);
+                if (!lookupKey || seenKeywords.has(lookupKey)) {
+                    return false;
+                }
+                seenKeywords.add(lookupKey);
+                return true;
+            });
+        if (safeKeywords.length) {
+            nextHistory.by_date[dateKey] = safeKeywords;
+        }
+    });
+
+    return nextHistory;
+}
+
+function normalizeKeywordStatusRegistry(rawRegistry) {
+    const nextRegistry = createEmptyKeywordStatusRegistry();
+    const keywords = rawRegistry?.keywords && typeof rawRegistry.keywords === "object"
+        ? rawRegistry.keywords
+        : {};
+
+    Object.values(keywords).forEach((entry) => {
+        const keyword = normalizeKeywordLabel(
+            typeof entry === "string"
+                ? entry
+                : (entry && typeof entry === "object" ? (entry.keyword || "") : ""),
+        );
+        const status = normalizeKeywordStatusValue(
+            typeof entry === "string"
+                ? ""
+                : (entry && typeof entry === "object" ? entry.status : ""),
+        );
+        const updatedAt = isValidHistoryDateKey(entry?.updated_at) ? entry.updated_at : "";
+        const lookupKey = normalizeKeywordLookupKey(keyword);
+        if (!lookupKey || !status) {
+            return;
+        }
+        nextRegistry.keywords[lookupKey] = {
+            keyword,
+            status,
+            updated_at: updatedAt,
+        };
+    });
+
+    return nextRegistry;
+}
+
+function readKeywordWorkHistory() {
+    return normalizeKeywordWorkHistory(readLocalStorageJson(KEYWORD_WORK_HISTORY_STORAGE_KEY));
+}
+
+function writeKeywordWorkHistory(history) {
+    const normalized = normalizeKeywordWorkHistory(history);
+    state.keywordWorkHistory = normalized;
+    window.localStorage.setItem(KEYWORD_WORK_HISTORY_STORAGE_KEY, JSON.stringify(normalized));
+    refreshKeywordWorkflowCaches();
+}
+
+function readKeywordStatusRegistry() {
+    return normalizeKeywordStatusRegistry(readLocalStorageJson(KEYWORD_STATUS_STORAGE_KEY));
+}
+
+function writeKeywordStatusRegistry(registry) {
+    const normalized = normalizeKeywordStatusRegistry(registry);
+    state.keywordStatusRegistry = normalized;
+    window.localStorage.setItem(KEYWORD_STATUS_STORAGE_KEY, JSON.stringify(normalized));
+}
+
+function buildKeywordUsageMap(history, options = {}) {
+    const normalizedHistory = normalizeKeywordWorkHistory(history);
+    const referenceDateKey = isValidHistoryDateKey(options.referenceDateKey)
+        ? options.referenceDateKey
+        : getTodayHistoryDateKey();
+    const referenceTime = new Date(`${referenceDateKey}T00:00:00`).valueOf();
+    const windowDays = Number.isFinite(Number(options.windowDays)) ? Number(options.windowDays) : null;
+    const usageMap = new Map();
+
+    Object.keys(normalizedHistory.by_date)
+        .sort((left, right) => right.localeCompare(left))
+        .forEach((dateKey) => {
+            const dateTime = new Date(`${dateKey}T00:00:00`).valueOf();
+            const daysSince = Math.floor((referenceTime - dateTime) / 86400000);
+            if (daysSince < 0) {
+                return;
+            }
+            if (windowDays !== null && daysSince >= windowDays) {
+                return;
+            }
+            (normalizedHistory.by_date[dateKey] || []).forEach((keyword) => {
+                const lookupKey = normalizeKeywordLookupKey(keyword);
+                if (!lookupKey || usageMap.has(lookupKey)) {
+                    return;
+                }
+                usageMap.set(lookupKey, {
+                    keyword,
+                    lastUsedDate: dateKey,
+                    daysSince,
+                });
+            });
+        });
+
+    return usageMap;
+}
+
+function refreshKeywordWorkflowCaches() {
+    state.keywordLatestUsageMap = buildKeywordUsageMap(state.keywordWorkHistory || createEmptyKeywordWorkHistory());
+    state.keywordRecentUsageMap = buildKeywordUsageMap(state.keywordWorkHistory || createEmptyKeywordWorkHistory(), {
+        windowDays: KEYWORD_RECENT_DUPLICATE_WINDOW_DAYS,
+    });
+}
+
+function loadKeywordWorkflowState() {
+    state.keywordWorkHistory = readKeywordWorkHistory();
+    state.keywordStatusRegistry = readKeywordStatusRegistry();
+    refreshKeywordWorkflowCaches();
+}
+
+function getKeywordStatusEntry(keyword) {
+    const lookupKey = normalizeKeywordLookupKey(keyword);
+    return lookupKey
+        ? (state.keywordStatusRegistry?.keywords?.[lookupKey] || null)
+        : null;
+}
+
+function getKeywordWorkflowMeta(keyword) {
+    const lookupKey = normalizeKeywordLookupKey(keyword);
+    const latestUsage = lookupKey ? (state.keywordLatestUsageMap?.get(lookupKey) || null) : null;
+    const recentUsage = lookupKey ? (state.keywordRecentUsageMap?.get(lookupKey) || null) : null;
+    const statusEntry = getKeywordStatusEntry(keyword);
+    const status = normalizeKeywordStatusValue(statusEntry?.status);
+
+    return {
+        lookupKey,
+        keyword: normalizeKeywordLabel(keyword),
+        lastUsedDate: latestUsage?.lastUsedDate || "",
+        recentUsedDate: recentUsage?.lastUsedDate || "",
+        isRecentDuplicate: Boolean(recentUsage),
+        daysSince: recentUsage?.daysSince ?? latestUsage?.daysSince ?? null,
+        status,
+        statusLabel: KEYWORD_STATUS_LABEL_MAP[status] || "",
+        isPublished: status === "published",
+    };
+}
+
+function buildKeywordBlockedSummary(blockedItems) {
+    const counts = {
+        recent_duplicate: 0,
+        published: 0,
+    };
+    (blockedItems || []).forEach((entry) => {
+        if (entry?.reason === "published") {
+            counts.published += 1;
+        } else if (entry?.reason === "recent_duplicate") {
+            counts.recent_duplicate += 1;
+        }
+    });
+    return [
+        counts.recent_duplicate ? `2주 중복 ${counts.recent_duplicate}건` : "",
+        counts.published ? `발행완료 ${counts.published}건` : "",
+    ].filter(Boolean).join(" / ");
+}
+
+function filterBlockedKeywordItems(items) {
+    const allowedItems = [];
+    const blockedItems = [];
+
+    (items || []).forEach((item) => {
+        const meta = getKeywordWorkflowMeta(item?.keyword);
+        if (!meta.lookupKey) {
+            allowedItems.push(item);
+            return;
+        }
+        if (meta.isPublished) {
+            blockedItems.push({
+                item,
+                reason: "published",
+                meta,
+            });
+            return;
+        }
+        if (meta.isRecentDuplicate) {
+            blockedItems.push({
+                item,
+                reason: "recent_duplicate",
+                meta,
+            });
+            return;
+        }
+        allowedItems.push(item);
+    });
+
+    return {
+        allowedItems,
+        blockedItems,
+    };
+}
+
+function recordWorkedKeywords(keywords, dateKey = getTodayHistoryDateKey()) {
+    const safeDateKey = isValidHistoryDateKey(dateKey) ? dateKey : getTodayHistoryDateKey();
+    const normalizedKeywords = (keywords || [])
+        .map(normalizeKeywordLabel)
+        .filter(Boolean);
+
+    if (!normalizedKeywords.length) {
+        return 0;
+    }
+
+    const nextHistory = normalizeKeywordWorkHistory(state.keywordWorkHistory || createEmptyKeywordWorkHistory());
+    const existingKeywords = Array.isArray(nextHistory.by_date[safeDateKey])
+        ? [...nextHistory.by_date[safeDateKey]]
+        : [];
+    const seenKeywords = new Set(existingKeywords.map(normalizeKeywordLookupKey));
+    let addedCount = 0;
+
+    normalizedKeywords.forEach((keyword) => {
+        const lookupKey = normalizeKeywordLookupKey(keyword);
+        if (!lookupKey || seenKeywords.has(lookupKey)) {
+            return;
+        }
+        seenKeywords.add(lookupKey);
+        existingKeywords.push(keyword);
+        addedCount += 1;
+    });
+
+    nextHistory.by_date[safeDateKey] = existingKeywords;
+    writeKeywordWorkHistory(nextHistory);
+    return addedCount;
+}
+
+function setKeywordStatus(keyword, nextStatus, options = {}) {
+    const normalizedKeyword = normalizeKeywordLabel(keyword);
+    const lookupKey = normalizeKeywordLookupKey(normalizedKeyword);
+    if (!lookupKey) {
+        return "";
+    }
+
+    const status = normalizeKeywordStatusValue(nextStatus);
+    const registry = normalizeKeywordStatusRegistry(state.keywordStatusRegistry || createEmptyKeywordStatusRegistry());
+    if (!status) {
+        delete registry.keywords[lookupKey];
+    } else {
+        registry.keywords[lookupKey] = {
+            keyword: normalizedKeyword,
+            status,
+            updated_at: getTodayHistoryDateKey(),
+        };
+    }
+    writeKeywordStatusRegistry(registry);
+
+    if (!options.silent) {
+        addLog(
+            status
+                ? `${normalizedKeyword} 상태를 ${KEYWORD_STATUS_LABEL_MAP[status] || status}로 저장했습니다.`
+                : `${normalizedKeyword} 상태 태그를 비웠습니다.`,
+            "success",
+        );
+    }
+    return status;
+}
+
+function promoteKeywordStatus(keyword, nextStatus) {
+    const normalizedKeyword = normalizeKeywordLabel(keyword);
+    const lookupKey = normalizeKeywordLookupKey(normalizedKeyword);
+    const targetStatus = normalizeKeywordStatusValue(nextStatus);
+    if (!lookupKey || !targetStatus) {
+        return;
+    }
+
+    const currentStatus = getKeywordStatusEntry(normalizedKeyword)?.status || "";
+    if ((KEYWORD_STATUS_PRIORITY[currentStatus] || 0) >= (KEYWORD_STATUS_PRIORITY[targetStatus] || 0)) {
+        return;
+    }
+    setKeywordStatus(normalizedKeyword, targetStatus, { silent: true });
+}
+
+function promoteKeywordStatuses(items, nextStatus) {
+    (items || []).forEach((item) => {
+        promoteKeywordStatus(item?.keyword, nextStatus);
+    });
+}
+
+function renderKeywordWorkflowBadges(keyword, options = {}) {
+    const meta = getKeywordWorkflowMeta(keyword);
+    const badges = [];
+
+    if (meta.statusLabel) {
+        badges.push(`<span class="keyword-workflow-pill status-${escapeHtml(meta.status || "none")}">${escapeHtml(meta.statusLabel)}</span>`);
+    }
+    if (!options.suppressRecentDuplicate && meta.isRecentDuplicate) {
+        badges.push('<span class="keyword-workflow-pill duplicate">2주 중복</span>');
+        if (meta.recentUsedDate) {
+            badges.push(`<span class="keyword-workflow-pill history-date">${escapeHtml(meta.recentUsedDate)}</span>`);
+        }
+    }
+
+    return badges.join("");
+}
+
+function renderKeywordStatusSelect(keyword) {
+    const normalizedKeyword = normalizeKeywordLabel(keyword);
+    if (!normalizedKeyword) {
+        return "";
+    }
+    const currentStatus = getKeywordStatusEntry(normalizedKeyword)?.status || "";
+    return `
+        <label class="keyword-status-control">
+            <span>상태</span>
+            <select class="keyword-status-select" data-keyword-status-control="true" data-keyword="${escapeHtml(normalizedKeyword)}">
+                ${KEYWORD_STATUS_OPTIONS.map((option) => `
+                    <option value="${escapeHtml(option.value)}" ${option.value === currentStatus ? "selected" : ""}>
+                        ${escapeHtml(option.label)}
+                    </option>
+                `).join("")}
+            </select>
+        </label>
+    `;
+}
+
+function renderKeywordWorkflowInline(keyword, options = {}) {
+    const badgesHtml = renderKeywordWorkflowBadges(keyword, options);
+    const controlHtml = options.showStatusControl === false ? "" : renderKeywordStatusSelect(keyword);
+    if (!badgesHtml && !controlHtml) {
+        return "";
+    }
+    return `
+        <div class="keyword-workflow-inline${options.compact ? " compact" : ""}">
+            ${badgesHtml ? `<div class="keyword-workflow-badges">${badgesHtml}</div>` : ""}
+            ${controlHtml}
+        </div>
+    `;
+}
+
 function buildDashboardFormSnapshot() {
     const collectorMode = getCollectorMode();
     return {
@@ -2570,10 +3172,10 @@ function buildDashboardFormSnapshot() {
         analyzeInputSource: elements.analyzeInputSource?.value || "expanded_results",
         analyzeManualInput: elements.analyzeManualInput?.value || "",
         analyzeKeywordStatsInput: elements.analyzeKeywordStatsInput?.value || "",
+        quickStartMode: normalizeQuickStartMode(state.quickStartMode),
         titleMode: syncTitleModeInputFromRadios(),
         titleProvider: elements.titleProvider?.value || "",
         titleModel: elements.titleModel?.value || "",
-        titleApiKey: elements.titleApiKey?.value || "",
         titleTemperature: elements.titleTemperature?.value || "",
         titleFallback: Boolean(elements.titleFallback?.checked),
         localCookieStatus: elements.localCookieStatus?.textContent || "",
@@ -2655,6 +3257,9 @@ function applyDashboardFormSnapshot(formState) {
     if (elements.analyzeKeywordStatsInput && typeof formState.analyzeKeywordStatsInput === "string") {
         elements.analyzeKeywordStatsInput.value = formState.analyzeKeywordStatsInput;
     }
+    if (typeof formState.quickStartMode === "string") {
+        state.quickStartMode = normalizeQuickStartMode(formState.quickStartMode);
+    }
 
     const restoredTitleMode = String(formState.titleMode || "").trim();
     if (restoredTitleMode) {
@@ -2667,9 +3272,6 @@ function applyDashboardFormSnapshot(formState) {
     }
     if (elements.titleModel && typeof formState.titleModel === "string") {
         elements.titleModel.value = formState.titleModel;
-    }
-    if (elements.titleApiKey && typeof formState.titleApiKey === "string") {
-        elements.titleApiKey.value = formState.titleApiKey;
     }
     if (elements.titleTemperature && formState.titleTemperature !== undefined) {
         elements.titleTemperature.value = String(formState.titleTemperature || "");
@@ -3501,6 +4103,13 @@ function bindElements() {
     elements.analyzeKeywordStatsInput = document.getElementById("analyzeKeywordStatsInput");
     elements.exportCsvButton = document.getElementById("exportCsvButton");
     elements.exportTitleCsvButton = document.getElementById("exportTitleCsvButton");
+    elements.quickStartModeButtons = Array.from(document.querySelectorAll("[data-quickstart-mode]"));
+    elements.quickStartModeBadge = document.getElementById("quickStartModeBadge");
+    elements.quickStartSummaryTitle = document.getElementById("quickStartSummaryTitle");
+    elements.quickStartSummaryText = document.getElementById("quickStartSummaryText");
+    elements.quickStartSummaryMeta = document.getElementById("quickStartSummaryMeta");
+    elements.quickStartPrimaryButton = document.getElementById("quickStartPrimaryButton");
+    elements.quickStartSecondaryButton = document.getElementById("quickStartSecondaryButton");
     elements.analyzeSourceVisibilityBlocks = Array.from(document.querySelectorAll("[data-analyze-source-visibility]"));
     elements.selectedCollectedCount = document.getElementById("selectedCollectedCount");
     elements.manualAnalyzeCount = document.getElementById("manualAnalyzeCount");
@@ -3513,8 +4122,9 @@ function bindElements() {
     elements.titlePreset = document.getElementById("titlePreset");
     elements.titlePresetDescription = document.getElementById("titlePresetDescription");
     elements.titleProvider = document.getElementById("titleProvider");
+    elements.titleProviderRegistryHint = document.getElementById("titleProviderRegistryHint");
+    elements.openApiRegistrySettingsButton = document.getElementById("openApiRegistrySettingsButton");
     elements.titleModel = document.getElementById("titleModel");
-    elements.titleApiKey = document.getElementById("titleApiKey");
     elements.titleTemperature = document.getElementById("titleTemperature");
     elements.titleTemperatureDescription = document.getElementById("titleTemperatureDescription");
     elements.titleFallback = document.getElementById("titleFallback");
@@ -4859,6 +5469,13 @@ function bindElements() {
     elements.analyzeKeywordStatsInput = document.getElementById("analyzeKeywordStatsInput");
     elements.exportCsvButton = document.getElementById("exportCsvButton");
     elements.exportTitleCsvButton = document.getElementById("exportTitleCsvButton");
+    elements.quickStartModeButtons = Array.from(document.querySelectorAll("[data-quickstart-mode]"));
+    elements.quickStartModeBadge = document.getElementById("quickStartModeBadge");
+    elements.quickStartSummaryTitle = document.getElementById("quickStartSummaryTitle");
+    elements.quickStartSummaryText = document.getElementById("quickStartSummaryText");
+    elements.quickStartSummaryMeta = document.getElementById("quickStartSummaryMeta");
+    elements.quickStartPrimaryButton = document.getElementById("quickStartPrimaryButton");
+    elements.quickStartSecondaryButton = document.getElementById("quickStartSecondaryButton");
     elements.analyzeSourceVisibilityBlocks = Array.from(document.querySelectorAll("[data-analyze-source-visibility]"));
     elements.selectedCollectedCount = document.getElementById("selectedCollectedCount");
     elements.manualAnalyzeCount = document.getElementById("manualAnalyzeCount");
@@ -4881,8 +5498,9 @@ function bindElements() {
     elements.titlePreset = document.getElementById("titlePreset");
     elements.titlePresetDescription = document.getElementById("titlePresetDescription");
     elements.titleProvider = document.getElementById("titleProvider");
+    elements.titleProviderRegistryHint = document.getElementById("titleProviderRegistryHint");
+    elements.openApiRegistrySettingsButton = document.getElementById("openApiRegistrySettingsButton");
     elements.titleModel = document.getElementById("titleModel");
-    elements.titleApiKey = document.getElementById("titleApiKey");
     elements.titleTemperature = document.getElementById("titleTemperature");
     elements.titleTemperatureDescription = document.getElementById("titleTemperatureDescription");
     elements.titleFallback = document.getElementById("titleFallback");
@@ -4918,6 +5536,14 @@ function bindElements() {
     elements.errorConsole = document.getElementById("errorConsole");
     elements.debugPanels = document.getElementById("debugPanels");
     elements.stopStreamButton = document.getElementById("stopStreamButton");
+    elements.titleApiRegistryCount = document.getElementById("titleApiRegistryCount");
+    elements.titleApiRegistryStatus = document.getElementById("titleApiRegistryStatus");
+    elements.apiRegistryOpenaiKey = document.getElementById("apiRegistryOpenaiKey");
+    elements.apiRegistryGeminiKey = document.getElementById("apiRegistryGeminiKey");
+    elements.apiRegistryVertexKey = document.getElementById("apiRegistryVertexKey");
+    elements.apiRegistryAnthropicKey = document.getElementById("apiRegistryAnthropicKey");
+    elements.saveTitleApiRegistryButton = document.getElementById("saveTitleApiRegistryButton");
+    elements.clearTitleApiRegistryButton = document.getElementById("clearTitleApiRegistryButton");
     elements.modeVisibilityBlocks = Array.from(document.querySelectorAll("[data-mode-visibility]"));
     elements.guideTabButtons = Array.from(document.querySelectorAll("[data-guide-tab]"));
     elements.guideTabPanels = Array.from(document.querySelectorAll("[data-guide-panel]"));
@@ -4928,6 +5554,13 @@ function bindEvents() {
     document.querySelectorAll("input[name='collectorMode']").forEach((element) => {
         element.addEventListener("change", renderInputState);
     });
+    elements.quickStartModeButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            setQuickStartMode(button.dataset.quickstartMode || "");
+        });
+    });
+    elements.quickStartPrimaryButton?.addEventListener("click", runQuickStartPrimaryAction);
+    elements.quickStartSecondaryButton?.addEventListener("click", focusQuickStartDetails);
     document.querySelectorAll("[data-run-action='collect']").forEach((button) => {
         button.addEventListener("click", () => {
             runWithGuard(runFreshCollectFlow, "\uc218\uc9d1 \ub2e8\uacc4 \uc0c8\ub85c \uc2e4\ud589 \uc911");
@@ -5016,7 +5649,6 @@ function bindEvents() {
         elements.titlePreset,
         elements.titleProvider,
         elements.titleModel,
-        elements.titleApiKey,
         elements.titleTemperature,
         elements.titleFallback,
     ].forEach((element) => {
@@ -5028,9 +5660,14 @@ function bindEvents() {
         radio.addEventListener("input", handleTitleSettingsChange);
     });
     elements.openTitlePromptEditorButton?.addEventListener("click", openTitlePromptEditor);
+    elements.openApiRegistrySettingsButton?.addEventListener("click", () => {
+        openUtilityDrawer("settings");
+    });
     elements.titlePromptProfilePicker?.addEventListener("input", handleTitleSettingsChange);
     elements.titlePromptProfilePicker?.addEventListener("change", handleTitleSettingsChange);
     elements.clearTitlePromptButton?.addEventListener("click", clearTitleSystemPrompt);
+    elements.saveTitleApiRegistryButton?.addEventListener("click", saveTitleApiRegistry);
+    elements.clearTitleApiRegistryButton?.addEventListener("click", clearTitleApiRegistry);
     [
         elements.operationMode,
         elements.operationRequestGap,
@@ -6014,6 +6651,7 @@ function renderInputState() {
 
     updateGradeFilterUI();
     renderTrendSettingsState();
+    renderQuickStartState();
 }
 
 function renderCollectedList(items) {
@@ -6819,9 +7457,33 @@ function renderResults() {
 
     const activeViewKey = resolveActiveResultView(resultViews);
     const activeView = resultViews.find((view) => view.key === activeViewKey) || null;
-    const railHtml = activeViewKey === "expanded" || activeViewKey === "analyzed"
-        ? renderWorkbenchAside(expandedItems, analyzedItems)
+    const railHtml = activeView
+        ? (
+            typeof renderResultsWorkbenchRail === "function"
+                ? renderResultsWorkbenchRail({
+                    activeViewKey,
+                    collectedItems,
+                    expandedItems,
+                    analyzedItems,
+                    selectedItems,
+                    generatedTitles,
+                    lowQualityTitleCount,
+                    selectedProfile,
+                })
+                : (activeViewKey === "expanded" || activeViewKey === "analyzed"
+                    ? renderWorkbenchAside(expandedItems, analyzedItems)
+                    : "")
+        )
         : "";
+    const activeViewHtml = activeView ? activeView.render() : "";
+    const stageBodyHtml = railHtml
+        ? `
+            <div class="results-stage-layout">
+                <div class="results-stage-main">${activeViewHtml}</div>
+                <aside class="results-stage-aside">${railHtml}</aside>
+            </div>
+        `
+        : activeViewHtml;
     const resultsDomState = typeof captureResultsDomState === "function"
         ? captureResultsDomState()
         : null;
@@ -6830,7 +7492,7 @@ function renderResults() {
     elements.resultsGrid.innerHTML = activeView
         ? `
             ${renderResultStageTabs(resultViews, activeViewKey)}
-            <div class="results-stage-body">${activeView.render()}</div>
+            <div class="results-stage-body">${stageBodyHtml}</div>
         `
         : `
             <div class="placeholder">
@@ -6840,8 +7502,8 @@ function renderResults() {
         `;
 
     if (elements.resultsRail && elements.resultsRailPanel) {
-        elements.resultsRail.innerHTML = railHtml;
-        elements.resultsRailPanel.hidden = !railHtml;
+        elements.resultsRail.innerHTML = "";
+        elements.resultsRailPanel.hidden = true;
     }
     if (typeof restoreResultsDomState === "function") {
         restoreResultsDomState(resultsDomState);
@@ -7180,6 +7842,8 @@ function createDefaultAnalyzedFilters() {
         maxCompetition: "",
         priority: "all",
         measured: "all",
+        hideRecentDuplicates: false,
+        hidePublished: false,
     };
 }
 
@@ -7192,6 +7856,9 @@ function getAnalyzedFilters() {
 
 function hasActiveAnalyzedFilters(filters = getAnalyzedFilters()) {
     return Object.entries(filters).some(([key, value]) => {
+        if (typeof value === "boolean") {
+            return value;
+        }
         if (key === "priority" || key === "measured") {
             return value && value !== "all";
         }
@@ -7230,6 +7897,8 @@ function applyAnalyzedFilters(items) {
     const maxCompetition = coerceFilterNumber(filters.maxCompetition);
     const priority = String(filters.priority || "all");
     const measured = String(filters.measured || "all");
+    const hideRecentDuplicates = Boolean(filters.hideRecentDuplicates);
+    const hidePublished = Boolean(filters.hidePublished);
 
     return (items || []).filter((item) => {
         const itemGrade = resolveAnalysisGrade(item);
@@ -7247,6 +7916,13 @@ function applyAnalyzedFilters(items) {
             return false;
         }
         if (measured === "estimated" && isMeasuredItem(item)) {
+            return false;
+        }
+        const workflowMeta = getKeywordWorkflowMeta(item.keyword);
+        if (hideRecentDuplicates && workflowMeta.isRecentDuplicate) {
+            return false;
+        }
+        if (hidePublished && workflowMeta.isPublished) {
             return false;
         }
         if (minScore !== null && Number(item.score || 0) < minScore) {
@@ -7856,11 +8532,215 @@ function normalizeTitleProvider(provider) {
 }
 
 function formatTitleProviderLabel(provider) {
+    const rawProvider = String(provider || "").trim().toLowerCase();
+    if (!rawProvider) return "미등록";
     const normalized = normalizeTitleProvider(provider);
     if (normalized === "gemini") return "Gemini";
     if (normalized === "vertex") return "Vertex AI";
     if (normalized === "anthropic") return "Anthropic";
     return "OpenAI";
+}
+
+function createEmptyTitleApiRegistry() {
+    return {
+        version: TITLE_API_REGISTRY_VERSION,
+        providers: TITLE_PROVIDER_ORDER.reduce((providers, provider) => {
+            providers[provider] = { api_key: "" };
+            return providers;
+        }, {}),
+    };
+}
+
+function normalizeTitleApiRegistry(value) {
+    const normalized = createEmptyTitleApiRegistry();
+    const source = value && typeof value === "object"
+        ? (value.providers && typeof value.providers === "object" ? value.providers : value)
+        : {};
+
+    TITLE_PROVIDER_ORDER.forEach((provider) => {
+        const rawEntry = source?.[provider];
+        const rawKey = rawEntry && typeof rawEntry === "object"
+            ? rawEntry.api_key
+            : rawEntry;
+        normalized.providers[provider] = {
+            api_key: String(rawKey || "").trim(),
+        };
+    });
+
+    return normalized;
+}
+
+function getTitleApiRegistryFormState() {
+    return normalizeTitleApiRegistry({
+        providers: {
+            openai: { api_key: elements.apiRegistryOpenaiKey?.value || "" },
+            gemini: { api_key: elements.apiRegistryGeminiKey?.value || "" },
+            vertex: { api_key: elements.apiRegistryVertexKey?.value || "" },
+            anthropic: { api_key: elements.apiRegistryAnthropicKey?.value || "" },
+        },
+    });
+}
+
+function applyTitleApiRegistryToForm(registry) {
+    const normalized = normalizeTitleApiRegistry(registry);
+    if (elements.apiRegistryOpenaiKey) {
+        elements.apiRegistryOpenaiKey.value = normalized.providers.openai.api_key;
+    }
+    if (elements.apiRegistryGeminiKey) {
+        elements.apiRegistryGeminiKey.value = normalized.providers.gemini.api_key;
+    }
+    if (elements.apiRegistryVertexKey) {
+        elements.apiRegistryVertexKey.value = normalized.providers.vertex.api_key;
+    }
+    if (elements.apiRegistryAnthropicKey) {
+        elements.apiRegistryAnthropicKey.value = normalized.providers.anthropic.api_key;
+    }
+}
+
+function readTitleApiRegistry() {
+    return normalizeTitleApiRegistry(readLocalStorageJson(TITLE_API_REGISTRY_STORAGE_KEY));
+}
+
+function writeTitleApiRegistry(registry) {
+    window.localStorage.setItem(
+        TITLE_API_REGISTRY_STORAGE_KEY,
+        JSON.stringify(normalizeTitleApiRegistry(registry)),
+    );
+}
+
+function loadTitleApiRegistry() {
+    const registry = readTitleApiRegistry();
+    applyTitleApiRegistryToForm(registry);
+    return registry;
+}
+
+function getRegisteredTitleProviders(registry = readTitleApiRegistry()) {
+    return TITLE_PROVIDER_ORDER.filter((provider) => String(registry.providers?.[provider]?.api_key || "").trim());
+}
+
+function ensureRegisteredTitleProvider(provider, registry = readTitleApiRegistry()) {
+    const preferredProvider = String(provider || "").trim().toLowerCase();
+    const registeredProviders = getRegisteredTitleProviders(registry);
+    if (preferredProvider && registeredProviders.includes(preferredProvider)) {
+        return preferredProvider;
+    }
+    return registeredProviders[0] || "";
+}
+
+function getTitleApiKeyForProvider(provider, registry = readTitleApiRegistry()) {
+    const selectedProvider = ensureRegisteredTitleProvider(provider, registry);
+    if (!selectedProvider) {
+        return "";
+    }
+    return String(registry.providers?.[selectedProvider]?.api_key || "").trim();
+}
+
+function getVisibleTitlePresets(registry = readTitleApiRegistry()) {
+    const registeredProviders = new Set(getRegisteredTitleProviders(registry));
+    return TITLE_PRESET_LIBRARY.filter((preset) => (
+        Boolean(preset?.is_manual)
+        || registeredProviders.has(normalizeTitleProvider(preset?.provider))
+    ));
+}
+
+function isTitlePresetAvailable(presetKey, registry = readTitleApiRegistry()) {
+    const normalizedPresetKey = normalizeTitlePresetKey(presetKey);
+    return getVisibleTitlePresets(registry).some((preset) => preset?.key === normalizedPresetKey);
+}
+
+function setTitleProviderOptions(preferredProvider = "", registry = readTitleApiRegistry()) {
+    if (!elements.titleProvider) {
+        return "";
+    }
+
+    const registeredProviders = getRegisteredTitleProviders(registry);
+    elements.titleProvider.innerHTML = "";
+
+    if (!registeredProviders.length) {
+        const emptyOption = document.createElement("option");
+        emptyOption.value = "";
+        emptyOption.textContent = "등록된 API 없음";
+        elements.titleProvider.appendChild(emptyOption);
+        elements.titleProvider.value = "";
+        return "";
+    }
+
+    registeredProviders.forEach((provider) => {
+        const option = document.createElement("option");
+        option.value = provider;
+        option.textContent = formatTitleProviderLabel(provider);
+        elements.titleProvider.appendChild(option);
+    });
+
+    const selectedProvider = ensureRegisteredTitleProvider(preferredProvider, registry);
+    elements.titleProvider.value = selectedProvider;
+    if (elements.titleProvider.value !== selectedProvider) {
+        elements.titleProvider.value = registeredProviders[0] || "";
+    }
+    return String(elements.titleProvider.value || "").trim();
+}
+
+function setTitlePresetOptions(preferredPresetKey = MANUAL_TITLE_PRESET_KEY, registry = readTitleApiRegistry()) {
+    if (!elements.titlePreset) {
+        return MANUAL_TITLE_PRESET_KEY;
+    }
+
+    const visiblePresets = getVisibleTitlePresets(registry);
+    const normalizedPreferredKey = normalizeTitlePresetKey(preferredPresetKey);
+    elements.titlePreset.innerHTML = "";
+
+    visiblePresets.forEach((preset) => {
+        const option = document.createElement("option");
+        option.value = String(preset?.key || "");
+        option.textContent = String(preset?.label || preset?.key || "");
+        elements.titlePreset.appendChild(option);
+    });
+
+    const fallbackKey = visiblePresets.find((preset) => preset?.is_manual)?.key || MANUAL_TITLE_PRESET_KEY;
+    const selectedKey = visiblePresets.some((preset) => preset?.key === normalizedPreferredKey)
+        ? normalizedPreferredKey
+        : fallbackKey;
+    elements.titlePreset.value = selectedKey;
+    if (elements.titlePreset.value !== selectedKey) {
+        elements.titlePreset.value = fallbackKey;
+    }
+    return String(elements.titlePreset.value || fallbackKey || MANUAL_TITLE_PRESET_KEY);
+}
+
+function renderTitleApiRegistryStatus(registry = readTitleApiRegistry()) {
+    const registeredProviders = getRegisteredTitleProviders(registry);
+    const labels = registeredProviders.map((provider) => formatTitleProviderLabel(provider));
+
+    if (elements.titleApiRegistryCount) {
+        elements.titleApiRegistryCount.textContent = `${registeredProviders.length}개 연결`;
+    }
+    if (elements.titleApiRegistryStatus) {
+        elements.titleApiRegistryStatus.textContent = registeredProviders.length
+            ? `등록 완료: ${labels.join(", ")}. 제목 생성 AI 설정에는 등록된 연결만 표시됩니다.`
+            : "등록된 API가 없습니다. OpenAI, Gemini, Vertex AI, Anthropic 중 필요한 연결만 저장하세요.";
+    }
+    if (elements.titleProviderRegistryHint) {
+        elements.titleProviderRegistryHint.textContent = registeredProviders.length
+            ? `사용 가능: ${labels.join(", ")}`
+            : "운영 설정에서 API를 먼저 등록하면 여기서 선택할 수 있습니다.";
+    }
+}
+
+function migrateLegacyTitleApiKey(settings, registry = readTitleApiRegistry()) {
+    const nextRegistry = normalizeTitleApiRegistry(registry);
+    const legacyApiKey = String(settings?.api_key || "").trim();
+    const provider = normalizeTitleProvider(settings?.provider || "openai");
+
+    if (legacyApiKey && !nextRegistry.providers?.[provider]?.api_key) {
+        nextRegistry.providers[provider].api_key = legacyApiKey;
+        try {
+            writeTitleApiRegistry(nextRegistry);
+        } catch (error) {
+            addLog("기존 제목 API 키를 새 등록함으로 옮기지 못했습니다.", "error");
+        }
+    }
+
+    return nextRegistry;
 }
 
 function getTitleModelOptionsForProvider(provider) {
@@ -7915,7 +8795,11 @@ function getTitlePresetConfig(presetKey) {
 }
 
 function findMatchingTitlePresetKey(settings = {}) {
-    const provider = normalizeTitleProvider(settings.provider);
+    const rawProvider = String(settings.provider || "").trim();
+    if (!rawProvider) {
+        return "";
+    }
+    const provider = normalizeTitleProvider(rawProvider);
     const model = String(settings.model || "").trim();
     const temperature = normalizeTitleTemperatureValue(settings.temperature);
     const matchedPreset = TITLE_PRESET_LIBRARY.find((preset) => (
@@ -8135,6 +9019,17 @@ function setTitleModelOptions(provider, preferredValue = "") {
         return;
     }
 
+    const rawProvider = String(provider || "").trim().toLowerCase();
+    if (!rawProvider) {
+        elements.titleModel.innerHTML = "";
+        const emptyOption = document.createElement("option");
+        emptyOption.value = "";
+        emptyOption.textContent = "등록된 API 없음";
+        elements.titleModel.appendChild(emptyOption);
+        elements.titleModel.value = "";
+        return;
+    }
+
     const normalizedProvider = normalizeTitleProvider(provider);
     const normalizedPreferredValue = String(preferredValue || "").trim();
     const baseOptions = getTitleModelOptionsForProvider(normalizedProvider).map((option) => ({ ...option }));
@@ -8165,19 +9060,22 @@ function setTitleModelOptions(provider, preferredValue = "") {
 function applyTitlePresetSelection(presetKey) {
     const normalizedPresetKey = normalizeTitlePresetKey(presetKey);
     const preset = getTitlePresetConfig(normalizedPresetKey);
-    if (elements.titlePreset) {
-        elements.titlePreset.value = normalizedPresetKey;
-    }
+    const registry = readTitleApiRegistry();
+    const selectedPresetKey = setTitlePresetOptions(normalizedPresetKey, registry);
 
-    if (preset) {
-        const provider = normalizeTitleProvider(preset.provider);
-        elements.titleProvider.value = provider;
-        setTitleModelOptions(provider, preset.model);
+    if (preset && selectedPresetKey === normalizedPresetKey) {
+        const selectedProvider = ensureRegisteredTitleProvider(preset.provider, registry);
+        setTitleProviderOptions(selectedProvider, registry);
+        setTitleModelOptions(selectedProvider, preset.model);
         elements.titleTemperature.value = normalizeTitleTemperatureValue(preset.temperature);
+    } else {
+        if (elements.titlePreset) {
+            elements.titlePreset.value = MANUAL_TITLE_PRESET_KEY;
+        }
     }
 
     updateTitlePresetDescription();
-    return normalizedPresetKey;
+    return String(elements.titlePreset?.value || MANUAL_TITLE_PRESET_KEY);
 }
 
 function getTitleSystemPromptValue() {
@@ -8342,6 +9240,54 @@ function clearTitleSystemPrompt() {
     addLog("제목 생성용 추가 프롬프트를 비웠습니다.", "success");
 }
 
+function saveTitleApiRegistry() {
+    const registry = getTitleApiRegistryFormState();
+    const preservedPresetKey = normalizeTitlePresetKey(elements.titlePreset?.value || "");
+    const preservedProvider = String(elements.titleProvider?.value || "").trim();
+    const preservedModel = String(elements.titleModel?.value || "").trim();
+    const preservedTemperature = elements.titleTemperature?.value || TITLE_TEMPERATURE_DEFAULT;
+
+    try {
+        writeTitleApiRegistry(registry);
+        applyTitleApiRegistryToForm(registry);
+        renderTitleApiRegistryStatus(registry);
+
+        const selectedProvider = setTitleProviderOptions(preservedProvider, registry);
+        const selectedPresetKey = setTitlePresetOptions(preservedPresetKey, registry);
+        if (selectedPresetKey !== MANUAL_TITLE_PRESET_KEY && isTitlePresetAvailable(selectedPresetKey, registry)) {
+            applyTitlePresetSelection(selectedPresetKey);
+        } else {
+            if (elements.titlePreset) {
+                elements.titlePreset.value = MANUAL_TITLE_PRESET_KEY;
+            }
+            if (elements.titleProvider) {
+                elements.titleProvider.value = selectedProvider;
+            }
+            setTitleModelOptions(selectedProvider, preservedModel);
+            if (elements.titleTemperature) {
+                elements.titleTemperature.value = normalizeTitleTemperatureValue(preservedTemperature);
+            }
+            updateTitlePresetDescription();
+        }
+
+        persistTitleSettings();
+        renderTitleSettingsState();
+        addLog(
+            getRegisteredTitleProviders(registry).length
+                ? `AI API 연결 ${getRegisteredTitleProviders(registry).length}개를 저장했습니다.`
+                : "AI API 등록함을 비웠습니다.",
+            "success",
+        );
+    } catch (error) {
+        addLog("브라우저 저장소에 AI API 등록 정보를 저장하지 못했습니다.", "error");
+    }
+}
+
+function clearTitleApiRegistry() {
+    applyTitleApiRegistryToForm(createEmptyTitleApiRegistry());
+    saveTitleApiRegistry();
+}
+
 function loadTitleSettings() {
     const defaults = {
         mode: "template",
@@ -8362,9 +9308,13 @@ function loadTitleSettings() {
         active_prompt_profile_id: "",
     };
 
+    let apiRegistry = loadTitleApiRegistry();
     const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY);
     const hasStoredSettings = Boolean(storedSettings && typeof storedSettings === "object");
     const settings = { ...defaults, ...(hasStoredSettings ? storedSettings : {}) };
+    apiRegistry = migrateLegacyTitleApiKey(settings, apiRegistry);
+    applyTitleApiRegistryToForm(apiRegistry);
+    renderTitleApiRegistryStatus(apiRegistry);
     const promptProfiles = normalizeTitlePromptProfiles(settings.prompt_profiles);
     settings.prompt_profiles = promptProfiles;
     settings.active_prompt_profile_id = resolveTitlePromptProfile(promptProfiles, settings.active_prompt_profile_id)?.id || "";
@@ -8376,21 +9326,22 @@ function loadTitleSettings() {
         )
         : DEFAULT_TITLE_PRESET_KEY;
     const preferredPresetKey = resolvePreferredTitlePresetKey(storedSettings, resolvedPresetKey);
+    const preferredProvider = ensureRegisteredTitleProvider(settings.provider, apiRegistry);
 
     applyTitleModeSelection(settings.mode);
-    if (preferredPresetKey !== MANUAL_TITLE_PRESET_KEY) {
+    setTitleProviderOptions(preferredProvider, apiRegistry);
+    setTitlePresetOptions(preferredPresetKey, apiRegistry);
+    if (preferredPresetKey !== MANUAL_TITLE_PRESET_KEY && isTitlePresetAvailable(preferredPresetKey, apiRegistry)) {
         applyTitlePresetSelection(preferredPresetKey);
     } else {
-        const provider = normalizeTitleProvider(settings.provider);
         if (elements.titlePreset) {
             elements.titlePreset.value = MANUAL_TITLE_PRESET_KEY;
         }
-        elements.titleProvider.value = provider;
-        setTitleModelOptions(provider, settings.model);
+        elements.titleProvider.value = preferredProvider;
+        setTitleModelOptions(preferredProvider, settings.model);
         elements.titleTemperature.value = normalizeTitleTemperatureValue(settings.temperature);
         updateTitlePresetDescription();
     }
-    elements.titleApiKey.value = settings.api_key || "";
     elements.titleFallback.checked = Boolean(settings.fallback_to_template);
     if (elements.titleAutoRetryEnabled) {
         elements.titleAutoRetryEnabled.checked = Boolean(settings.auto_retry_enabled ?? true);
@@ -8437,7 +9388,7 @@ function handleTitleSettingsChange(event) {
     }
 
     if (event?.target === elements.titleProvider) {
-        const provider = normalizeTitleProvider(elements.titleProvider.value);
+        const provider = ensureRegisteredTitleProvider(elements.titleProvider.value);
         const currentModel = String(elements.titleModel?.value || "").trim();
         const modelOptions = getTitleModelOptionsForProvider(provider);
         const shouldResetToDefault = !currentModel
@@ -8500,16 +9451,20 @@ function handleTitleSettingsChange(event) {
 function renderTitleSettingsState() {
     const mode = syncTitleModeInputFromRadios();
     const isAiMode = mode === "ai";
+    const apiRegistry = readTitleApiRegistry();
+    const registeredProviders = getRegisteredTitleProviders(apiRegistry);
+    const hasRegisteredProviders = registeredProviders.length > 0;
+    const selectedProvider = ensureRegisteredTitleProvider(elements.titleProvider?.value, apiRegistry);
 
     setBlocksVisibility(elements.titleModeVisibilityBlocks, mode, "titleModeVisibility");
+    renderTitleApiRegistryStatus(apiRegistry);
 
     if (elements.titlePreset) {
-        elements.titlePreset.disabled = !isAiMode;
+        elements.titlePreset.disabled = !isAiMode || !hasRegisteredProviders;
     }
-    elements.titleProvider.disabled = !isAiMode;
-    elements.titleModel.disabled = !isAiMode;
-    elements.titleApiKey.disabled = !isAiMode;
-    elements.titleTemperature.disabled = !isAiMode;
+    elements.titleProvider.disabled = !isAiMode || !hasRegisteredProviders;
+    elements.titleModel.disabled = !isAiMode || !hasRegisteredProviders;
+    elements.titleTemperature.disabled = !isAiMode || !hasRegisteredProviders;
     elements.titleFallback.disabled = !isAiMode;
     if (elements.titleAutoRetryEnabled) {
         elements.titleAutoRetryEnabled.disabled = !isAiMode;
@@ -8535,14 +9490,19 @@ function renderTitleSettingsState() {
     updateTitlePresetDescription();
     updateTitleTemperatureDescription();
     updateTitlePromptSummary();
-    elements.titleModeBadge.textContent = isAiMode ? `ai:${elements.titleProvider.value}` : "template";
+    elements.titleModeBadge.textContent = isAiMode
+        ? (selectedProvider ? `ai:${selectedProvider}` : "ai:미등록")
+        : "template";
 }
 
 function getTitleSettingsFormState() {
     const mode = syncTitleModeInputFromRadios();
+    const apiRegistry = readTitleApiRegistry();
     const presetKey = normalizeTitlePresetKey(elements.titlePreset?.value || "");
-    const provider = normalizeTitleProvider(elements.titleProvider.value);
-    const model = String(elements.titleModel?.value || "").trim() || TITLE_PROVIDER_DEFAULT_MODELS[provider] || "gpt-4o-mini";
+    const provider = ensureRegisteredTitleProvider(elements.titleProvider?.value, apiRegistry);
+    const model = provider
+        ? (String(elements.titleModel?.value || "").trim() || TITLE_PROVIDER_DEFAULT_MODELS[provider] || "gpt-4o-mini")
+        : "";
     return {
         mode,
         keyword_modes: normalizeTitleKeywordModes([
@@ -8558,7 +9518,7 @@ function getTitleSettingsFormState() {
         preset_key: presetKey,
         provider,
         model,
-        api_key: String(elements.titleApiKey?.value || "").trim(),
+        api_key: getTitleApiKeyForProvider(provider, apiRegistry),
         temperature: normalizeTitleTemperatureValue(elements.titleTemperature?.value || TITLE_TEMPERATURE_DEFAULT),
         fallback_to_template: Boolean(elements.titleFallback?.checked),
         active_prompt_profile_id: normalizeTitlePromptProfileId(elements.titlePromptProfilePicker?.value || ""),
@@ -9029,10 +9989,12 @@ async function saveOperationSettings() {
     }
 }
 
-async function resetOperationGuards() {
+async function resetOperationGuards(options = {}) {
     if (!elements.operationMode) {
         return;
     }
+
+    const wasLocked = Boolean(state.operationSettingsSnapshot?.state?.auth_lock_active);
 
     try {
         const snapshot = await requestOperationSettings("/settings/runtime/reset-guards", {
@@ -9042,13 +10004,28 @@ async function resetOperationGuards() {
         state.operationSettingsSnapshot = snapshot;
         applyOperationSettingsToForm(snapshot.settings || getOperationSettingsFormState());
         renderOperationSettingsState();
-        addLog("운영 보호 잠금을 해제했습니다.", "info");
+        const isLocked = Boolean(snapshot?.state?.auth_lock_active);
+        const feedbackMessage = isLocked
+            ? "보호 잠금이 아직 유지되고 있습니다. 잠시 후 다시 시도해 주세요."
+            : wasLocked
+                ? "보호 잠금을 해제했습니다. 다시 수집을 실행해 보세요."
+                : "이미 보호 잠금이 해제된 상태입니다.";
+        if (elements.operationSettingsSyncStatus && !options.silent) {
+            elements.operationSettingsSyncStatus.textContent = feedbackMessage;
+        }
+        if (!options.silent) {
+            addLog(options.successMessage || feedbackMessage, isLocked ? "error" : "info");
+            showUserNotice({ message: options.successMessage || feedbackMessage });
+        }
     } catch (error) {
         const normalizedError = normalizeError(error, { endpoint: "/settings/runtime/reset-guards" });
         if (elements.operationSettingsSyncStatus) {
             elements.operationSettingsSyncStatus.textContent = normalizedError.message;
         }
-        addLog(normalizedError.message, "error");
+        if (!options.silent) {
+            addLog(normalizedError.message, "error");
+            showUserNotice(normalizedError);
+        }
     }
 }
 
@@ -9955,4 +10932,739 @@ function openTitlePromptEditor() {
         return;
     }
     openedWindow.focus?.();
+}
+
+function createDefaultAnalyzedFilters() {
+    return {
+        query: "",
+        minScore: "",
+        minPcSearch: "",
+        minMoSearch: "",
+        minTotalSearch: "1",
+        maxTotalSearch: "",
+        minBlog: "",
+        minPcClicks: "",
+        minMoClicks: "",
+        minTotalClicks: "",
+        minCpc: "",
+        minBid1: "",
+        minBid2: "",
+        minBid3: "",
+        maxCompetition: "",
+        priority: "all",
+        measured: "all",
+        hideRecentDuplicates: false,
+        hidePublished: false,
+    };
+}
+
+function hasActiveAnalyzedFilters(filters = getAnalyzedFilters()) {
+    return Object.entries(filters).some(([key, value]) => {
+        if (typeof value === "boolean") {
+            return value;
+        }
+        if (key === "priority" || key === "measured") {
+            return value && value !== "all";
+        }
+        return String(value || "").trim() !== "";
+    });
+}
+
+function applyAnalyzedFilters(items) {
+    const filters = getAnalyzedFilters();
+    const selectedGrades = new Set(getSelectedGradeFilters());
+    const query = String(filters.query || "").trim().toLowerCase();
+    const minScore = coerceFilterNumber(filters.minScore);
+    const minPcSearch = coerceFilterNumber(filters.minPcSearch);
+    const minMoSearch = coerceFilterNumber(filters.minMoSearch);
+    const minTotalSearch = coerceFilterNumber(filters.minTotalSearch ?? filters.minVolume);
+    const maxTotalSearch = coerceFilterNumber(filters.maxTotalSearch);
+    const minBlog = coerceFilterNumber(filters.minBlog);
+    const minPcClicks = coerceFilterNumber(filters.minPcClicks);
+    const minMoClicks = coerceFilterNumber(filters.minMoClicks);
+    const minTotalClicks = coerceFilterNumber(filters.minTotalClicks);
+    const minCpc = coerceFilterNumber(filters.minCpc);
+    const minBid1 = coerceFilterNumber(filters.minBid1 ?? filters.minBid);
+    const minBid2 = coerceFilterNumber(filters.minBid2);
+    const minBid3 = coerceFilterNumber(filters.minBid3);
+    const maxCompetition = coerceFilterNumber(filters.maxCompetition);
+    const priority = String(filters.priority || "all");
+    const measured = String(filters.measured || "all");
+    const hideRecentDuplicates = Boolean(filters.hideRecentDuplicates);
+    const hidePublished = Boolean(filters.hidePublished);
+
+    return (items || []).filter((item) => {
+        const itemGrade = resolveAnalysisGrade(item);
+        if (selectedGrades.size && !selectedGrades.has(itemGrade)) {
+            return false;
+        }
+        const keyword = String(item.keyword || "");
+        if (query && !keyword.toLowerCase().includes(query)) {
+            return false;
+        }
+        if (priority !== "all" && String(item.priority || "") !== priority) {
+            return false;
+        }
+        if (measured === "measured" && !isMeasuredItem(item)) {
+            return false;
+        }
+        if (measured === "estimated" && isMeasuredItem(item)) {
+            return false;
+        }
+        const workflowMeta = getKeywordWorkflowMeta(item.keyword);
+        if (hideRecentDuplicates && workflowMeta.isRecentDuplicate) {
+            return false;
+        }
+        if (hidePublished && workflowMeta.isPublished) {
+            return false;
+        }
+        if (minScore !== null && Number(item.score || 0) < minScore) {
+            return false;
+        }
+        if (minPcSearch !== null && Number(item.metrics?.pc_searches || 0) < minPcSearch) {
+            return false;
+        }
+        if (minMoSearch !== null && Number(item.metrics?.mobile_searches || 0) < minMoSearch) {
+            return false;
+        }
+        if (minTotalSearch !== null && Number(item.metrics?.volume || 0) < minTotalSearch) {
+            return false;
+        }
+        if (maxTotalSearch !== null && Number(item.metrics?.volume || 0) > maxTotalSearch) {
+            return false;
+        }
+        if (minBlog !== null && Number(item.metrics?.blog_results || 0) < minBlog) {
+            return false;
+        }
+        if (minPcClicks !== null && Number(item.metrics?.pc_clicks || 0) < minPcClicks) {
+            return false;
+        }
+        if (minMoClicks !== null && Number(item.metrics?.mobile_clicks || 0) < minMoClicks) {
+            return false;
+        }
+        if (minTotalClicks !== null && Number(item.metrics?.total_clicks || 0) < minTotalClicks) {
+            return false;
+        }
+        if (minCpc !== null && Number(item.metrics?.cpc || 0) < minCpc) {
+            return false;
+        }
+        if (minBid1 !== null && Number(item.metrics?.bid || 0) < minBid1) {
+            return false;
+        }
+        if (minBid2 !== null && Number(item.metrics?.bid_2 || 0) < minBid2) {
+            return false;
+        }
+        if (minBid3 !== null && Number(item.metrics?.bid_3 || 0) < minBid3) {
+            return false;
+        }
+        if (maxCompetition !== null && Number(item.metrics?.competition || 0) > maxCompetition) {
+            return false;
+        }
+        return true;
+    });
+}
+
+function renderAnalysisKeywordCell(item) {
+    const meta = [];
+    if (item.origin && item.origin !== item.keyword) {
+        meta.push(`원본 ${item.origin}`);
+    }
+    if (item.type) {
+        meta.push(formatExpandedType(item.type));
+    }
+    return `
+        <div class="analysis-keyword-cell">
+            <div class="analysis-keyword-copy">
+                <strong>${escapeHtml(item.keyword || "-")}</strong>
+                ${meta.length ? `<span>${escapeHtml(meta.join(" / "))}</span>` : ""}
+            </div>
+            ${renderKeywordWorkflowInline(item.keyword, { compact: true })}
+        </div>
+    `;
+}
+
+function renderAnalyzedList(items) {
+    const filters = getAnalyzedFilters();
+    const filteredItems = applyAnalyzedFilters(items);
+    const measuredCount = filteredItems.filter(isMeasuredItem).length;
+    const goldenCount = filteredItems.filter(isGoldenCandidate).length;
+    const highBidCount = filteredItems.filter((item) => Number(item.metrics?.bid || 0) >= 500).length;
+    const typeCount = new Set(filteredItems.map((item) => String(item.type || "").trim()).filter(Boolean)).size;
+    const recentDuplicateCount = (items || []).filter((item) => getKeywordWorkflowMeta(item?.keyword).isRecentDuplicate).length;
+    const publishedCount = (items || []).filter((item) => getKeywordWorkflowMeta(item?.keyword).isPublished).length;
+    const rows = filteredItems.map((item) => `
+        <tr class="${isMeasuredItem(item) ? "measured-row" : "estimated-row"}">
+            <td>${renderAnalysisKeywordCell(item)}</td>
+            <td>${renderGradeBadge(resolveAnalysisGrade(item))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.score))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_searches))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_searches))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.volume))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.blog_results))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_clicks))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_clicks))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.total_clicks))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.cpc))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid_2))}</td>
+            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid_3))}</td>
+            <td>${renderAnalysisSourceCell(item)}</td>
+        </tr>
+    `).join("");
+
+    return `
+        <div class="analysis-console">
+            <div class="analysis-summary-strip">
+                <div class="collector-stat-card">
+                    <span>표시 키워드</span>
+                    <strong>${escapeHtml(String(filteredItems.length))}</strong>
+                </div>
+                <div class="collector-stat-card">
+                    <span>실측</span>
+                    <strong>${escapeHtml(String(measuredCount))}</strong>
+                </div>
+                <div class="collector-stat-card">
+                    <span>${escapeHtml(getQuickCandidateLabel())}</span>
+                    <strong>${escapeHtml(String(goldenCount))}</strong>
+                </div>
+                <div class="collector-stat-card">
+                    <span>입찰1 500+</span>
+                    <strong>${escapeHtml(String(highBidCount))}</strong>
+                </div>
+                <div class="collector-stat-card">
+                    <span>출처 유형</span>
+                    <strong>${escapeHtml(String(typeCount))}</strong>
+                </div>
+            </div>
+            <div class="analysis-filter-tip">
+                <strong>필터 팁</strong>
+                <span>기본 필터는 검색량 1 이상 키워드를 먼저 보도록 잡혀 있습니다. 필요하면 조회수, 클릭수, CPC, 경쟁 강도로 더 좁힐 수 있습니다.</span>
+            </div>
+            <div class="analysis-filter-tip">
+                <strong>중복 방지</strong>
+                <span>최근 14일 이력 ${escapeHtml(String(recentDuplicateCount))}건 / 발행완료 ${escapeHtml(String(publishedCount))}건을 태그로 표시하고, 숨기기 토글과 자동 제외에 함께 사용합니다.</span>
+            </div>
+            ${renderAnalyzedGradeBoard(items, filteredItems)}
+            <div class="analysis-filter-stack">
+                <div class="analysis-filter-row primary">
+                    <input class="analysis-filter-input" type="search" data-analyzed-filter="query" value="${escapeHtml(filters.query)}" placeholder="키워드 검색..." />
+                    <select class="analysis-filter-select" data-analyzed-filter="priority">
+                        <option value="all"${filters.priority === "all" ? " selected" : ""}>우선순위 전체</option>
+                        <option value="high"${filters.priority === "high" ? " selected" : ""}>상</option>
+                        <option value="medium"${filters.priority === "medium" ? " selected" : ""}>중</option>
+                        <option value="low"${filters.priority === "low" ? " selected" : ""}>하</option>
+                    </select>
+                    <select class="analysis-filter-select" data-analyzed-filter="measured">
+                        <option value="all"${filters.measured === "all" ? " selected" : ""}>측정 전체</option>
+                        <option value="measured"${filters.measured === "measured" ? " selected" : ""}>실측만</option>
+                        <option value="estimated"${filters.measured === "estimated" ? " selected" : ""}>추정만</option>
+                    </select>
+                    <label class="analysis-filter-check">
+                        <input type="checkbox" data-analyzed-filter="hideRecentDuplicates" ${filters.hideRecentDuplicates ? "checked" : ""} />
+                        <span>2주 중복 숨기기</span>
+                    </label>
+                    <label class="analysis-filter-check">
+                        <input type="checkbox" data-analyzed-filter="hidePublished" ${filters.hidePublished ? "checked" : ""} />
+                        <span>발행완료 숨기기</span>
+                    </label>
+                    <button type="button" class="ghost-chip" data-inline-action="reset_analyzed_filters">필터 초기화</button>
+                    <span class="analysis-filter-summary">표시 ${filteredItems.length} / 전체 ${countItems(items)}건</span>
+                </div>
+                <div class="analysis-filter-row metrics">
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minPcSearch" value="${escapeHtml(filters.minPcSearch)}" placeholder="PC조회↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minMoSearch" value="${escapeHtml(filters.minMoSearch)}" placeholder="MO조회↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minTotalSearch" value="${escapeHtml(filters.minTotalSearch)}" placeholder="합계↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="maxTotalSearch" value="${escapeHtml(filters.maxTotalSearch)}" placeholder="합계↓" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBlog" value="${escapeHtml(filters.minBlog)}" placeholder="블로그↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minScore" value="${escapeHtml(filters.minScore)}" placeholder="점수↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minCpc" value="${escapeHtml(filters.minCpc)}" placeholder="CPC↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="maxCompetition" value="${escapeHtml(filters.maxCompetition)}" placeholder="경쟁↓" />
+                </div>
+                <div class="analysis-filter-row metrics">
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minPcClicks" value="${escapeHtml(filters.minPcClicks)}" placeholder="PC클릭↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minMoClicks" value="${escapeHtml(filters.minMoClicks)}" placeholder="MO클릭↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minTotalClicks" value="${escapeHtml(filters.minTotalClicks)}" placeholder="클릭합↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid1" value="${escapeHtml(filters.minBid1)}" placeholder="입찰1↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid2" value="${escapeHtml(filters.minBid2)}" placeholder="입찰2↑" />
+                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid3" value="${escapeHtml(filters.minBid3)}" placeholder="입찰3↑" />
+                </div>
+            </div>
+            <div class="expanded-table-wrap full">
+                <table class="expanded-table analyzed-table compact">
+                    <thead>
+                        <tr>
+                            <th>키워드</th>
+                            <th>등급</th>
+                            <th>점수</th>
+                            <th>PC조회</th>
+                            <th>MO조회</th>
+                            <th>총조회</th>
+                            <th>블로그</th>
+                            <th>PC클릭</th>
+                            <th>MO클릭</th>
+                            <th>클릭합</th>
+                            <th>CPC</th>
+                            <th>입찰1</th>
+                            <th>입찰2</th>
+                            <th>입찰3</th>
+                            <th>출처</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows || '<tr><td colspan="15">조건에 맞는 키워드가 없습니다.</td></tr>'}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function handleResultsGridInput(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
+        return;
+    }
+
+    const filterName = target.dataset.analyzedFilter || "";
+    if (!filterName) {
+        return;
+    }
+
+    const nextValue = target instanceof HTMLInputElement && target.type === "checkbox"
+        ? target.checked
+        : target.value;
+    updateAnalyzedFilter(filterName, nextValue);
+}
+
+function handleResultsGridChange(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
+        return;
+    }
+
+    const filterName = target.dataset.analyzedFilter || "";
+    if (filterName) {
+        const nextValue = target instanceof HTMLInputElement && target.type === "checkbox"
+            ? target.checked
+            : target.value;
+        updateAnalyzedFilter(filterName, nextValue);
+        return;
+    }
+
+    const keywordStatusControl = target.dataset.keywordStatusControl || "";
+    if (keywordStatusControl) {
+        const keyword = target.dataset.keyword || "";
+        setKeywordStatus(keyword, target.value);
+        renderResults();
+        return;
+    }
+
+    const titleResultControl = target.dataset.titleResultControl || "";
+    if (titleResultControl) {
+        updateTitleResultControl(titleResultControl, target.value);
+        return;
+    }
+
+    if (!(target instanceof HTMLInputElement) || !target.matches("[data-collected-key]")) {
+        return;
+    }
+
+    const identity = target.dataset.collectedKey || "";
+    if (!identity) {
+        return;
+    }
+
+    if (target.checked) {
+        if (!state.selectedCollectedKeys.includes(identity)) {
+            state.selectedCollectedKeys = [...state.selectedCollectedKeys, identity];
+        }
+    } else {
+        state.selectedCollectedKeys = state.selectedCollectedKeys.filter((item) => item !== identity);
+    }
+
+    renderInputState();
+    renderResults();
+}
+
+function createEmptyTitledResult() {
+    return {
+        generated_titles: [],
+        generation_meta: {},
+    };
+}
+
+function applyEmptyTitledResult(message) {
+    clearStageAndDownstream("titled");
+
+    const stage = getStage("titled");
+    const finishedAt = Date.now();
+    const result = createEmptyTitledResult();
+
+    state.results.titled = result;
+    state.stageStatus.titled = {
+        state: "success",
+        message: "제목 결과 0건",
+        startedAt: null,
+        finishedAt,
+        durationMs: 0,
+    };
+    state.diagnostics.titled = {
+        stageKey: "titled",
+        stageLabel: stage?.label || "제목 생성",
+        status: "success",
+        endpoint: "/generate-title",
+        requestId: "",
+        startedAt: "",
+        durationMs: 0,
+        request: null,
+        responseSummary: buildResponseSummary("titled", result),
+        backendDebug: null,
+        note: message,
+    };
+}
+
+function buildKeywordGuardNotice(blockedItems, emptyMessage) {
+    const summary = buildKeywordBlockedSummary(blockedItems);
+    return summary ? `${emptyMessage}\n제외 사유: ${summary}` : emptyMessage;
+}
+
+function runKeywordGuardLog(prefix, blockedItems) {
+    const summary = buildKeywordBlockedSummary(blockedItems);
+    if (!summary) {
+        return;
+    }
+    addLog(`${prefix}: ${summary}`, "info");
+}
+
+async function runSelectStage(options = {}) {
+    if (!state.results.analyzed?.analyzed_keywords?.length) {
+        await runAnalyzeStage();
+    } else if (state.stageStatus.analyzed.state === "cancelled") {
+        addLog(`중지 전까지 분석된 ${countItems(state.results.analyzed.analyzed_keywords)}건으로 선별을 이어갑니다.`);
+    }
+
+    const allowedGrades = normalizeGradeList(options.allowedGrades || []);
+    const analyzedKeywords = state.results.analyzed?.analyzed_keywords || [];
+    const selectionCandidates = allowedGrades.length
+        ? analyzedKeywords.filter((item) => allowedGrades.includes(resolveAnalysisGrade(item)))
+        : analyzedKeywords;
+
+    const { allowedItems: guardedSelectionCandidates, blockedItems } = filterBlockedKeywordItems(selectionCandidates);
+    if (blockedItems.length) {
+        runKeywordGuardLog("선별 후보에서 자동 제외", blockedItems);
+    }
+
+    if (!guardedSelectionCandidates.length) {
+        const noticeMessage = buildKeywordGuardNotice(
+            blockedItems,
+            allowedGrades.length
+                ? `선택한 등급 조건(${allowedGrades.join(", ")})에 맞는 새 키워드가 없습니다.`
+                : "선별할 새 키워드가 없습니다.",
+        );
+        applyEmptySelectedResult(noticeMessage);
+        throw createUserNoticeError(noticeMessage, {
+            code: "empty_selection_notice",
+            stageKey: "selected",
+        });
+    }
+
+    addLog(
+        allowedGrades.length
+            ? `선별 시작: ${allowedGrades.join(", ")} 등급 ${countItems(guardedSelectionCandidates)}건에 골든 규칙을 적용합니다.`
+            : `선별 시작: 후보 ${countItems(guardedSelectionCandidates)}건에 골든 규칙을 적용합니다.`,
+    );
+    clearStageAndDownstream("selected");
+    const result = await executeStage({
+        stageKey: "selected",
+        endpoint: "/select",
+        inputData: {
+            analyzed_keywords: guardedSelectionCandidates,
+            select_options: allowedGrades.length
+                ? { allowed_grades: allowedGrades, mode: "grade_filter" }
+                : {},
+        },
+    });
+
+    state.results.selected = {
+        ...result,
+        selection_profile: {
+            mode: allowedGrades.length ? "grade_filter" : "default",
+            allowed_grades: allowedGrades,
+            candidate_count: guardedSelectionCandidates.length,
+            blocked_summary: buildKeywordBlockedSummary(blockedItems),
+        },
+    };
+    promoteKeywordStatuses(result.selected_keywords || [], "selected");
+    addLog(
+        allowedGrades.length
+            ? `선별 완료 (${allowedGrades.join(", ")}): ${countItems(result.selected_keywords)}건`
+            : `선별 완료: ${countItems(result.selected_keywords)}건`,
+        "success",
+    );
+    renderAll();
+    return state.results.selected;
+}
+
+async function runTitleStage() {
+    const forwardSelectOptions = getForwardSelectOptions();
+    if (
+        !state.results.selected?.selected_keywords?.length
+        || !hasMatchingSelectionProfile(forwardSelectOptions.allowedGrades || [])
+    ) {
+        await runSelectStage(forwardSelectOptions);
+    }
+
+    const titleOptions = buildTitleOptions();
+    const { allowedItems: titleTargets, blockedItems } = filterBlockedKeywordItems(
+        state.results.selected?.selected_keywords || [],
+    );
+    if (blockedItems.length) {
+        runKeywordGuardLog("제목 생성 대상에서 자동 제외", blockedItems);
+    }
+    if (!titleTargets.length) {
+        const noticeMessage = buildKeywordGuardNotice(
+            blockedItems,
+            "제목 생성할 새 키워드가 없습니다.",
+        );
+        applyEmptyTitledResult(noticeMessage);
+        renderAll();
+        throw createUserNoticeError(noticeMessage, {
+            code: "empty_title_notice",
+            stageKey: "titled",
+        });
+    }
+
+    if (state.stageStatus.selected.state === "cancelled") {
+        addLog(`중지 전까지 선별된 ${countItems(state.results.selected?.selected_keywords)}건으로 제목 생성을 이어갑니다.`);
+    }
+    addLog(
+        titleOptions.mode === "ai"
+            ? `제목 생성 시작: ${titleOptions.provider} / ${titleOptions.model} 모델을 사용합니다.`
+            : "제목 생성 시작: template 규칙 기반으로 제목을 생성합니다.",
+    );
+    clearStageAndDownstream("titled");
+    const result = await executeStage({
+        stageKey: "titled",
+        endpoint: "/generate-title",
+        inputData: {
+            selected_keywords: titleTargets,
+            title_options: titleOptions,
+        },
+    });
+
+    state.results.titled = result;
+    promoteKeywordStatuses(result.generated_titles || [], "titled");
+    addLog(`제목 생성 완료: ${countItems(result.generated_titles)}세트`, "success");
+    renderAll();
+    return result;
+}
+
+function buildCsvDuplicateMeta(keyword) {
+    const meta = getKeywordWorkflowMeta(keyword);
+    return {
+        duplicateLabel: meta.isRecentDuplicate ? "중복" : "",
+        recentUsedDate: meta.isRecentDuplicate ? meta.recentUsedDate : "",
+    };
+}
+
+function downloadAnalyzedCsv() {
+    const items = state.results.analyzed?.analyzed_keywords || [];
+    if (!items.length) {
+        addLog("내보낼 분석 결과가 없습니다.", "error");
+        return;
+    }
+
+    const header = [
+        "keyword",
+        "duplicate",
+        "recent_used_date",
+        "grade",
+        "priority",
+        "analysis_mode",
+        "confidence",
+        "score",
+        "cpc_score",
+        "search_volume_score",
+        "rarity_score",
+        "pc_searches",
+        "mobile_searches",
+        "volume",
+        "blog_results",
+        "pc_clicks",
+        "mobile_clicks",
+        "cpc",
+        "bid",
+        "bid_1",
+        "bid_2",
+        "bid_3",
+        "mobile_bid_1",
+        "mobile_bid_2",
+        "mobile_bid_3",
+        "profit",
+        "competition",
+        "opportunity",
+    ];
+    const rows = items.map((item) => {
+        const duplicateMeta = buildCsvDuplicateMeta(item.keyword);
+        return [
+            item.keyword || "",
+            duplicateMeta.duplicateLabel,
+            duplicateMeta.recentUsedDate,
+            item.grade || "",
+            item.priority || "",
+            item.analysis_mode || "",
+            item.confidence ?? item.metrics?.confidence ?? "",
+            item.score ?? "",
+            item.metrics?.cpc_score ?? item.metrics?.monetization_score ?? "",
+            item.metrics?.search_volume_score ?? item.metrics?.volume_score ?? "",
+            item.metrics?.rarity_score ?? "",
+            item.metrics?.pc_searches ?? "",
+            item.metrics?.mobile_searches ?? "",
+            item.metrics?.volume ?? "",
+            item.metrics?.blog_results ?? "",
+            item.metrics?.pc_clicks ?? "",
+            item.metrics?.mobile_clicks ?? "",
+            item.metrics?.cpc ?? "",
+            item.metrics?.bid ?? "",
+            item.metrics?.bid_1 ?? "",
+            item.metrics?.bid_2 ?? "",
+            item.metrics?.bid_3 ?? "",
+            item.metrics?.mobile_bid_1 ?? "",
+            item.metrics?.mobile_bid_2 ?? "",
+            item.metrics?.mobile_bid_3 ?? "",
+            item.metrics?.profit ?? "",
+            item.metrics?.competition ?? "",
+            item.metrics?.opportunity ?? "",
+        ];
+    });
+    downloadCsvFile(header, rows, `keyword-analysis-${new Date().toISOString().slice(0, 10)}.csv`);
+    addLog(`분석 결과 ${items.length}건을 CSV로 내보냈습니다.`, "success");
+}
+
+function downloadTitleCsv() {
+    const items = state.results.titled?.generated_titles || [];
+    if (!items.length) {
+        addLog("내보낼 제목 결과가 없습니다.", "error");
+        return;
+    }
+
+    const header = [
+        "keyword",
+        "duplicate",
+        "recent_used_date",
+        "naver_home_1",
+        "naver_home_2",
+        "blog_1",
+        "blog_2",
+    ];
+    const rows = items.map((item) => {
+        const duplicateMeta = buildCsvDuplicateMeta(item.keyword);
+        const naverHomeTitles = Array.isArray(item.titles?.naver_home) ? item.titles.naver_home : [];
+        const blogTitles = Array.isArray(item.titles?.blog) ? item.titles.blog : [];
+        return [
+            item.keyword || "",
+            duplicateMeta.duplicateLabel,
+            duplicateMeta.recentUsedDate,
+            naverHomeTitles[0] || "",
+            naverHomeTitles[1] || "",
+            blogTitles[0] || "",
+            blogTitles[1] || "",
+        ];
+    });
+
+    downloadCsvFile(header, rows, `keyword-titles-${new Date().toISOString().slice(0, 10)}.csv`);
+    const addedCount = recordWorkedKeywords(items.map((item) => item.keyword));
+    renderResults();
+    addLog(
+        addedCount
+            ? `제목 결과 ${items.length}건을 CSV로 내보내고 작업 이력 ${addedCount}건을 저장했습니다.`
+            : `제목 결과 ${items.length}건을 CSV로 내보냈습니다.`,
+        "success",
+    );
+}
+
+function renderTitleList(items) {
+    const entries = buildTitleListEntries(items);
+    if (!entries.length) {
+        return '<div class="collector-empty">선택한 조건에 맞는 제목 결과가 없습니다.</div>';
+    }
+    return `<div class="title-list">${entries.map(({ item, qualityReport }) => {
+        const naverHomeCount = Array.isArray(item.titles?.naver_home) ? item.titles.naver_home.length : 0;
+        const blogCount = Array.isArray(item.titles?.blog) ? item.titles.blog.length : 0;
+        const qualityStatus = qualityReport.status || "review";
+        const qualityLabel = qualityReport.label || "검토 대기";
+        const summary = qualityReport.summary || "제목 문장을 확인하는 중입니다.";
+        const channelScores = qualityReport.channel_scores || {};
+        const titleChecks = qualityReport.title_checks || {};
+        const targetIdentity = getTitleTargetIdentity(item);
+        return `
+            <div class="title-item">
+                <div class="title-item-head">
+                    <div class="title-keyword">
+                        <div class="title-keyword-copy">
+                            <strong>${escapeHtml(item.keyword || "-")}</strong>
+                            ${renderKeywordWorkflowInline(item.keyword, { suppressRecentDuplicate: true })}
+                        </div>
+                        <span class="badge">제목 ${escapeHtml(String(naverHomeCount + blogCount))}개</span>
+                    </div>
+                    <div class="title-item-actions">
+                        <span class="title-quality-chip ${escapeHtml(qualityStatus)}">품질 ${escapeHtml(String(qualityReport.bundle_score || 0))}점</span>
+                        <span class="title-quality-chip ${escapeHtml(qualityStatus)}">${escapeHtml(qualityLabel)}</span>
+                        <button
+                            type="button"
+                            class="inline-action-btn"
+                            data-inline-action="rerun_title_single"
+                            data-title-target-id="${escapeHtml(targetIdentity)}"
+                        >이 키워드만 다시 생성</button>
+                    </div>
+                </div>
+                ${renderTitleTargetMeta(item)}
+                <div class="title-quality-summary ${escapeHtml(qualityStatus)}">
+                    <strong>${escapeHtml(summary)}</strong>
+                    <span>네이버홈 ${escapeHtml(String(channelScores.naver_home || 0))}점 / 블로그 ${escapeHtml(String(channelScores.blog || 0))}점</span>
+                </div>
+                ${renderTitleQualityIssues(qualityReport)}
+                <div class="title-columns">
+                    <div class="title-column">
+                        <h4>네이버홈형</h4>
+                        <ul>${renderTitleBulletList(item.titles?.naver_home || [], titleChecks.naver_home || [])}</ul>
+                    </div>
+                    <div class="title-column">
+                        <h4>블로그형</h4>
+                        <ul>${renderTitleBulletList(item.titles?.blog || [], titleChecks.blog || [])}</ul>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join("")}</div>`;
+}
+
+function promoteKeywordStatuses(items, nextStatus) {
+    const targetStatus = normalizeKeywordStatusValue(nextStatus);
+    if (!targetStatus) {
+        return;
+    }
+
+    const registry = normalizeKeywordStatusRegistry(state.keywordStatusRegistry || createEmptyKeywordStatusRegistry());
+    let changed = false;
+
+    (items || []).forEach((item) => {
+        const keyword = normalizeKeywordLabel(item?.keyword);
+        const lookupKey = normalizeKeywordLookupKey(keyword);
+        if (!lookupKey) {
+            return;
+        }
+        const currentStatus = normalizeKeywordStatusValue(registry.keywords?.[lookupKey]?.status || "");
+        if ((KEYWORD_STATUS_PRIORITY[currentStatus] || 0) >= (KEYWORD_STATUS_PRIORITY[targetStatus] || 0)) {
+            return;
+        }
+        registry.keywords[lookupKey] = {
+            keyword,
+            status: targetStatus,
+            updated_at: getTodayHistoryDateKey(),
+        };
+        changed = true;
+    });
+
+    if (changed) {
+        writeKeywordStatusRegistry(registry);
+    }
 }

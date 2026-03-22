@@ -22,7 +22,8 @@ _KEYWORD_TOOL_URI = "/keywordstool"
 _DEFAULT_TIMEOUT = 8.0
 _DEFAULT_BID_KEYWORD_BATCH_SIZE = 50
 _DEFAULT_KEYWORD_TOOL_BATCH_SIZE = 1
-_DEFAULT_CREDENTIALS_PATH = "searchad.credentials.json"
+_DEFAULT_CREDENTIALS_PATH = Path(".local") / "credentials" / "searchad.credentials.json"
+_LEGACY_CREDENTIALS_PATH = Path("searchad.credentials.json")
 _PC_TOP_POSITIONS = tuple(range(1, 11))
 _MOBILE_TOP_POSITIONS = tuple(range(1, 6))
 
@@ -92,11 +93,9 @@ class NaverSearchAdCredentials:
 def _load_searchad_credentials_file(path_value: str | None) -> dict[str, Any]:
     candidate_paths: list[Path] = []
     if path_value:
-        candidate_paths.append(Path(path_value.strip()))
-
-    default_path = Path(_DEFAULT_CREDENTIALS_PATH)
-    if default_path.exists():
-        candidate_paths.append(default_path)
+        candidate_paths.append(Path(path_value.strip()).expanduser())
+    candidate_paths.append(_DEFAULT_CREDENTIALS_PATH)
+    candidate_paths.append(_LEGACY_CREDENTIALS_PATH)
 
     seen: set[str] = set()
     for path in candidate_paths:

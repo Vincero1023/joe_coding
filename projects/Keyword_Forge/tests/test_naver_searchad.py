@@ -66,6 +66,62 @@ def test_credentials_can_load_from_json_file(tmp_path) -> None:
     )
 
 
+def test_credentials_prefer_local_default_file_over_legacy_root(tmp_path, monkeypatch) -> None:
+    local_credential_path = tmp_path / ".local" / "credentials" / "searchad.credentials.json"
+    local_credential_path.parent.mkdir(parents=True)
+    local_credential_path.write_text(
+        json.dumps(
+            {
+                "api_key": "local-api-key",
+                "secret_key": "local-secret-key",
+                "customer_id": "1234567",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "searchad.credentials.json").write_text(
+        json.dumps(
+            {
+                "api_key": "legacy-api-key",
+                "secret_key": "legacy-secret-key",
+                "customer_id": "7654321",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    credentials = NaverSearchAdCredentials.from_input({})
+
+    assert credentials == NaverSearchAdCredentials(
+        api_key="local-api-key",
+        secret_key="local-secret-key",
+        customer_id="1234567",
+    )
+
+
+def test_credentials_fall_back_to_legacy_root_file_when_local_default_is_missing(tmp_path, monkeypatch) -> None:
+    (tmp_path / "searchad.credentials.json").write_text(
+        json.dumps(
+            {
+                "api_key": "legacy-api-key",
+                "secret_key": "legacy-secret-key",
+                "customer_id": "7654321",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    credentials = NaverSearchAdCredentials.from_input({})
+
+    assert credentials == NaverSearchAdCredentials(
+        api_key="legacy-api-key",
+        secret_key="legacy-secret-key",
+        customer_id="7654321",
+    )
+
+
 def test_parse_average_position_bid_response_maps_pc_top_positions() -> None:
     keyword = "driver insurance compare"
     parsed = parse_average_position_bid_response(

@@ -33,6 +33,35 @@
 ---
 
 ## Date
+- 2026-03-22 10:07 (KST)
+
+## What changed (변경점)
+- `.gitignore`, `app/analyzer/naver_searchad.py`, `app/analyzer/naver_open_search.py`를 손봐 시크릿 기본 경로를 `.local/credentials/...`로 옮기고, 루트 `*.credentials.json`은 레거시 fallback으로만 남겼다.
+- `tests/test_naver_searchad.py`, `tests/test_naver_open_search.py`에 `local 우선 / legacy fallback` 회귀 테스트를 추가했고, README와 handoff 문서도 새 로컬 시크릿 경로 기준으로 갱신했다.
+- 저장 세션/Status/임시 로그 같은 로컬 산출물은 git ignore 대상으로 정리해 작업 트리와 시크릿이 계속 섞이지 않게 했다.
+
+## Why (원인/배경)
+- 현재 저장소에는 루트 credential JSON, `.local` 브라우저 프로필, `Status` 산출물 같은 로컬 전용 데이터가 함께 추적되고 있어 시크릿 노출과 작업 트리 오염 위험이 컸다.
+- 특히 분석 credential 파일은 코드 기본 경로가 루트를 보고 있어, 새 환경에서도 시크릿을 저장소 바로 아래에 두기 쉬운 구조였다.
+
+## How verified (검증 방법/체크리스트)
+- [ ] 로컬 재실행 완료
+- [ ] 출력 파일 생성 확인
+- [x] `pytest -q tests/test_naver_searchad.py tests/test_naver_open_search.py`
+- [ ] 회귀(기존 기능) 이상 없음
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 로컬 시크릿/세션/산출물이 저장소 루트와 git 추적 대상에 섞여 있었다.
+- 원인: credential 기본 파일명이 루트 경로였고, `.local`, `Status`, `.tmp_*` 같은 런타임 산출물에 대한 ignore 규칙이 약했다.
+- 해결: 기본 credential 경로를 `.local/credentials/`로 이동하고 레거시 fallback만 유지했으며, git ignore와 문서를 함께 정리했다.
+
+## Next (다음 작업)
+- 이미 추적 중인 `.local`, `Status`, 루트 credential 파일을 git index에서 완전히 걷어내기
+- 필요하면 `.local/.env` 또는 시크릿 export/import 규칙까지 한 번 더 정리하기
+
+---
+
+## Date
 - 2026-03-22 01:25 (KST)
 
 ## What changed (변경점)

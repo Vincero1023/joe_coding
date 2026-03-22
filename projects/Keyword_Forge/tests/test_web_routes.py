@@ -27,9 +27,14 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "operationMode" in response.text
     assert "operationCustomModeGuide" in response.text
     assert "operationCustomPresetPanel" in response.text
+    assert "quickStartPrimaryButton" in response.text
+    assert 'data-quickstart-mode="discover"' in response.text
+    assert "openApiRegistrySettingsButton" in response.text
+    assert "titleProviderRegistryHint" in response.text
+    assert "apiRegistryOpenaiKey" in response.text
+    assert "saveTitleApiRegistryButton" in response.text
     assert "submitQueueSeedBatchButton" in response.text
     assert "toggleTitleAdvancedButton" in response.text
     assert "data-queue-category" in response.text
     assert "localCookieStatus" in response.text
     assert "저장된 전용 로그인 세션" in response.text
-    assert '<option value="vertex">Vertex AI</option>' in response.text

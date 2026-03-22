@@ -1,6 +1,0 @@
-INFO:     127.0.0.1:4762 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:9866 - "POST /analyze HTTP/1.1" 200 OK
-INFO:     127.0.0.1:7309 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:7309 - "GET /assets/app.css?v=20260318-layout-stream-v9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:6091 - "GET /assets/app.js?v=20260318-layout-stream-v9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:6091 - "GET /favicon.ico HTTP/1.1" 404 Not Found

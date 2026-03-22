@@ -2566,6 +2566,340 @@ function renderSerpCompetitionBoard() {
     `;
 }
 
+function renderResultsWorkbenchRail(context = {}) {
+    const activeViewKey = String(context.activeViewKey || "").trim();
+    const expandedItems = Array.isArray(context.expandedItems) ? context.expandedItems : [];
+    const analyzedItems = Array.isArray(context.analyzedItems) ? context.analyzedItems : [];
+    const selectedItems = Array.isArray(context.selectedItems) ? context.selectedItems : [];
+    const generatedTitles = Array.isArray(context.generatedTitles) ? context.generatedTitles : [];
+    const cards = [
+        renderResultsRailSummaryCard({
+            activeViewKey,
+            expandedItems,
+            analyzedItems,
+            selectedItems,
+            generatedTitles,
+            lowQualityTitleCount: Number(context.lowQualityTitleCount || 0),
+            selectedProfile: context.selectedProfile || null,
+        }),
+        renderSelectedKeywordRailCard(selectedItems, context.selectedProfile || null),
+        renderTitleWorkflowRailCard({
+            activeViewKey,
+            selectedItems,
+            generatedTitles,
+            lowQualityTitleCount: Number(context.lowQualityTitleCount || 0),
+        }),
+    ].filter(Boolean);
+
+    if (activeViewKey === "expanded" || activeViewKey === "analyzed") {
+        const workbenchHtml = renderWorkbenchAside(expandedItems, analyzedItems);
+        if (String(workbenchHtml || "").trim()) {
+            cards.push(workbenchHtml);
+        }
+    }
+
+    return cards.join("");
+}
+
+function renderResultsRailSummaryCard({
+    activeViewKey,
+    expandedItems,
+    analyzedItems,
+    selectedItems,
+    generatedTitles,
+    lowQualityTitleCount,
+    selectedProfile,
+}) {
+    const selectedResult = state.results.selected || {};
+    const longtailSummary = selectedResult.longtail_summary || {};
+    const serpSummary = selectedResult.serp_competition_summary?.summary || {};
+    const cannibalizationSummary = selectedResult.cannibalization_report?.summary || {};
+    const analyzedMeasuredCount = analyzedItems.filter(isMeasuredItem).length;
+    const analyzedQuickCount = analyzedItems.filter(isGoldenCandidate).length;
+    const selectedGoldCount = selectedItems.filter((item) => resolveGoldenBucket(item) === "gold").length;
+    const expandedQueueSize = Number(state.results.expanded?.stream_meta?.queueSize || 0);
+    const titleTargetCount = new Set(generatedTitles.map((item) => getTitleTargetIdentity(item)).filter(Boolean)).size;
+    let kicker = "";
+    let title = "";
+    let subtitle = "";
+    let stats = [];
+    let actions = [];
+
+    if (generatedTitles.length) {
+        kicker = "Stage 5";
+        title = "제목 결과";
+        subtitle = buildEnhancedTitleGenerationSummaryText(state.results.titled?.generation_meta, generatedTitles);
+        stats = [
+            { label: "생성 묶음", value: countItems(generatedTitles) },
+            { label: "대상 키워드", value: titleTargetCount || countItems(selectedItems) },
+            { label: "재생성 권장", value: lowQualityTitleCount },
+        ];
+        actions = [
+            activeViewKey !== "titled"
+                ? '<button type="button" class="subtle-btn" data-result-tab="titled">제목 결과 보기</button>'
+                : "",
+            lowQualityTitleCount
+                ? '<button type="button" class="inline-action-btn" data-inline-action="rerun_title_flagged">기준 미달 다시 생성</button>'
+                : "",
+            selectedItems.length
+                ? '<button type="button" class="inline-action-btn" data-inline-action="rerun_title">전체 다시 생성</button>'
+                : "",
+        ];
+    } else if (selectedItems.length) {
+        kicker = "Stage 4";
+        title = "선별 완료";
+        subtitle = summarizeSelectionProfileRail(selectedProfile) || "선별된 키워드를 제목 생성 단계로 바로 넘길 수 있습니다.";
+        stats = [
+            { label: "선별", value: countItems(selectedItems) },
+            { label: "골드", value: selectedGoldCount },
+            { label: "롱테일 통과", value: Number(longtailSummary.pass_count || 0) },
+            { label: "SERP 고경쟁", value: Number(serpSummary.high_competition_count || 0) },
+            { label: "충돌 고위험", value: Number(cannibalizationSummary.high_risk_count || 0) },
+        ];
+        actions = [
+            activeViewKey !== "selected"
+                ? '<button type="button" class="subtle-btn" data-result-tab="selected">선별 보드 보기</button>'
+                : "",
+            '<button type="button" class="inline-action-btn" data-inline-action="continue_title">제목 생성</button>',
+        ];
+    } else if (analyzedItems.length) {
+        kicker = "Stage 3";
+        title = "분석 완료";
+        subtitle = `${countItems(analyzedItems)}건을 검증했습니다. 필터를 다듬거나 바로 선별 단계로 넘길 수 있습니다.`;
+        stats = [
+            { label: "검증", value: countItems(analyzedItems) },
+            { label: "실측", value: analyzedMeasuredCount },
+            { label: getQuickCandidateLabel(), value: analyzedQuickCount },
+        ];
+        actions = [
+            activeViewKey !== "analyzed"
+                ? '<button type="button" class="subtle-btn" data-result-tab="analyzed">검증 보기</button>'
+                : "",
+            '<button type="button" class="inline-action-btn" data-inline-action="continue_select">선별 이어가기</button>',
+        ];
+    } else if (
+        expandedItems.length
+        || state.stageStatus.expanded.state === "running"
+        || state.stageStatus.analyzed.state === "running"
+        || state.stageStatus.expanded.state === "cancelled"
+        || state.stageStatus.analyzed.state === "cancelled"
+    ) {
+        kicker = "Stage 2";
+        title = "작업대 진행";
+        subtitle = expandedItems.length
+            ? "확장 결과를 검증 테이블로 넘겨 선별 후보를 만들 수 있습니다."
+            : (state.stageStatus.expanded.message || state.stageStatus.analyzed.message || "확장 작업이 준비되면 이 패널에서 다음 단계를 바로 이어갈 수 있습니다.");
+        stats = [
+            { label: "확장", value: countItems(expandedItems) },
+            { label: "검증", value: countItems(analyzedItems) },
+            { label: "대기", value: expandedQueueSize },
+        ];
+        actions = [
+            activeViewKey !== "expanded"
+                ? '<button type="button" class="subtle-btn" data-result-tab="expanded">작업대 보기</button>'
+                : "",
+            expandedItems.length
+                ? '<button type="button" class="inline-action-btn" data-inline-action="continue_analyze">분석 이어가기</button>'
+                : "",
+        ];
+    } else {
+        return "";
+    }
+
+    return renderResultsRailSection({
+        kicker,
+        title,
+        subtitle,
+        stats,
+        actions,
+    });
+}
+
+function renderSelectedKeywordRailCard(items, selectedProfile) {
+    const topItems = Array.isArray(items) ? items.slice(0, 5) : [];
+    if (!topItems.length) {
+        return "";
+    }
+
+    const listHtml = `
+        <div class="results-rail-keyword-list">
+            ${topItems.map((item) => {
+                const badges = [
+                    renderProfitabilityBadge(resolveProfitabilityGrade(item)),
+                    renderAttackabilityBadge(resolveAttackabilityGrade(item)),
+                    renderComboBadge(resolveComboGrade(item)),
+                    renderGoldenBucketPill(resolveGoldenBucket(item)),
+                ].filter(Boolean);
+                return `
+                    <div class="results-rail-keyword">
+                        <div class="results-rail-keyword-copy">
+                            <strong>${escapeHtml(item.keyword || "-")}</strong>
+                            <span>${escapeHtml(`검색량 ${formatNumber(item.metrics?.volume)} / CPC ${formatNumber(item.metrics?.cpc)} / 점수 ${formatNumber(item.score)}`)}</span>
+                        </div>
+                        <div class="results-rail-keyword-badges">${badges.join("")}</div>
+                    </div>
+                `;
+            }).join("")}
+        </div>
+    `;
+
+    return renderResultsRailSection({
+        kicker: "Selection",
+        title: "선별 키워드 패널",
+        subtitle: summarizeSelectionProfileRail(selectedProfile) || "지금 바로 다음 단계에 보낼 상위 후보입니다.",
+        bodyHtml: listHtml,
+    });
+}
+
+function renderTitleWorkflowRailCard({
+    activeViewKey,
+    selectedItems,
+    generatedTitles,
+    lowQualityTitleCount,
+}) {
+    const hasTargets = generatedTitles.length || selectedItems.length;
+    if (!hasTargets) {
+        return "";
+    }
+
+    const titleSettings = getTitleSettingsFormState();
+    const settingsSummary = buildTitleRunSummary(titleSettings);
+    const previewItems = generatedTitles.length ? generatedTitles.slice(0, 4) : selectedItems.slice(0, 4);
+    const previewHtml = generatedTitles.length
+        ? `
+            <div class="results-rail-target-list">
+                ${previewItems.map((item) => {
+                    const naverHomeCount = Array.isArray(item.titles?.naver_home) ? item.titles.naver_home.length : 0;
+                    const blogCount = Array.isArray(item.titles?.blog) ? item.titles.blog.length : 0;
+                    return `
+                        <div class="results-rail-target-item">
+                            <div class="results-rail-target-copy">
+                                <strong>${escapeHtml(item.keyword || "-")}</strong>
+                                <span>${escapeHtml(String(item.target_mode_label || item.target_mode || "단일"))}</span>
+                            </div>
+                            <div class="results-rail-target-badges">
+                                <span class="badge">홈 ${escapeHtml(String(naverHomeCount))}</span>
+                                <span class="badge">블로그 ${escapeHtml(String(blogCount))}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join("")}
+            </div>
+        `
+        : `
+            <div class="results-rail-target-list">
+                ${previewItems.map((item) => `
+                    <div class="results-rail-target-item">
+                        <div class="results-rail-target-copy">
+                            <strong>${escapeHtml(item.keyword || "-")}</strong>
+                            <span>제목 생성 대기</span>
+                        </div>
+                        <div class="results-rail-target-badges">
+                            ${renderComboBadge(resolveComboGrade(item))}
+                            ${renderGoldenBucketPill(resolveGoldenBucket(item))}
+                        </div>
+                    </div>
+                `).join("")}
+            </div>
+        `;
+
+    return renderResultsRailSection({
+        kicker: "Title",
+        title: "제목 워크플로",
+        subtitle: settingsSummary,
+        stats: [
+            { label: "대상", value: generatedTitles.length || countItems(selectedItems) },
+            { label: "활성 모드", value: (titleSettings.keyword_modes || []).length || 1 },
+            { label: "재생성 권장", value: lowQualityTitleCount },
+        ],
+        bodyHtml: `
+            <div class="results-rail-note">
+                <strong>${generatedTitles.length ? "최근 생성 상태" : "현재 생성 설정"}</strong>
+                <span>${escapeHtml(generatedTitles.length
+                    ? buildEnhancedTitleGenerationSummaryText(state.results.titled?.generation_meta, generatedTitles)
+                    : "선별된 키워드를 제목 생성 대상으로 유지한 상태입니다.")}</span>
+            </div>
+            ${previewHtml}
+        `,
+        actions: [
+            generatedTitles.length && activeViewKey !== "titled"
+                ? '<button type="button" class="subtle-btn" data-result-tab="titled">제목 탭 열기</button>'
+                : "",
+            !generatedTitles.length && selectedItems.length
+                ? '<button type="button" class="inline-action-btn" data-inline-action="continue_title">현재 설정으로 생성</button>'
+                : "",
+        ],
+    });
+}
+
+function renderResultsRailSection({
+    kicker = "",
+    title = "",
+    subtitle = "",
+    stats = [],
+    bodyHtml = "",
+    actions = [],
+}) {
+    const statGridHtml = renderResultsRailStatGrid(stats);
+    const actionHtml = actions.filter(Boolean).length
+        ? `<div class="results-rail-actions">${actions.filter(Boolean).join("")}</div>`
+        : "";
+    return `
+        <section class="workbench-side-card results-rail-card">
+            <div class="workbench-side-head">
+                ${kicker ? `<span class="panel-kicker">${escapeHtml(kicker)}</span>` : ""}
+                <strong>${escapeHtml(title)}</strong>
+                ${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ""}
+            </div>
+            ${statGridHtml}
+            ${bodyHtml}
+            ${actionHtml}
+        </section>
+    `;
+}
+
+function renderResultsRailStatGrid(stats) {
+    const entries = (stats || []).filter((item) => item && item.value !== undefined && item.value !== null && Number(item.value || 0) > 0);
+    if (!entries.length) {
+        return "";
+    }
+    return `
+        <div class="results-rail-stat-grid">
+            ${entries.map((item) => `
+                <div class="results-rail-stat">
+                    <span>${escapeHtml(item.label || "")}</span>
+                    <strong>${escapeHtml(String(item.value))}</strong>
+                </div>
+            `).join("")}
+        </div>
+    `;
+}
+
+function summarizeSelectionProfileRail(profile) {
+    if (!profile) {
+        return "";
+    }
+
+    if (profile.mode === "combo_filter") {
+        const profitability = Array.isArray(profile.allowed_profitability_grades)
+            ? profile.allowed_profitability_grades.filter(Boolean).join(", ")
+            : "";
+        const attackability = Array.isArray(profile.allowed_attackability_grades)
+            ? profile.allowed_attackability_grades.filter(Boolean).join(", ")
+            : "";
+        if (profitability || attackability) {
+            return `수익성 ${profitability || "-"} / 공략성 ${attackability || "-"}`;
+        }
+        return "2축 조합 필터 기준";
+    }
+
+    const grades = Array.isArray(profile.allowed_grades) ? profile.allowed_grades.filter(Boolean) : [];
+    if (profile.mode === "grade_filter") {
+        return grades.length ? `등급 필터 ${grades.join(", ")}` : "등급 필터 기준";
+    }
+    return grades.length ? `골든 후보 + 등급 ${grades.join(", ")}` : "골든 후보 자동 선별 기준";
+}
+
 function renderSelectedList(items) {
     const goldCount = (items || []).filter((item) => resolveGoldenBucket(item) === "gold").length;
     const promisingCount = (items || []).filter((item) => resolveGoldenBucket(item) === "promising").length;
