@@ -18,11 +18,16 @@ from app.collector.categories import (
 )
 from app.expander.utils.tokenizer import normalize_key
 from app.title.ai_client import get_default_system_prompt
+from app.title.issue_sources import (
+    DEFAULT_COMMUNITY_SOURCE_KEYS,
+    build_community_source_payload,
+    build_issue_source_mode_payload,
+)
 from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_payload
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260322-auth-guard-feedback-v50"
+_ASSET_VERSION = "20260324-workflow-history-v58"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -64,6 +69,28 @@ def _render_queue_routine_category_picker() -> str:
             "</div>"
         )
     return "".join(rendered_groups)
+
+
+def _render_title_issue_source_mode_options() -> str:
+    return "".join(
+        f'<option value="{escape(str(item["key"]))}"{" selected" if item["key"] == "mixed" else ""}>'
+        f'{escape(str(item["label"]))}'
+        "</option>"
+        for item in build_issue_source_mode_payload()
+    )
+
+
+def _render_title_community_source_chips() -> str:
+    return "".join(
+        (
+            '<label class="check-chip">'
+            f'<input type="checkbox" value="{escape(str(item["key"]))}" data-title-community-source'
+            f'{" checked" if item["key"] in DEFAULT_COMMUNITY_SOURCE_KEYS else ""} />'
+            f'{escape(str(item["label"]))}'
+            "</label>"
+        )
+        for item in build_community_source_payload()
+    )
 
 
 def _replace_sample_site_name(value: str) -> str:
@@ -258,7 +285,7 @@ def _render_guide_panel() -> str:
         <section class="panel guide-panel">
             <div class="panel-head">
                 <div>
-                    <p class="panel-kicker">Guide</p>
+                    <p class="panel-kicker">가이드</p>
                     <h2>사용 가이드</h2>
                 </div>
                 <span class="status-pill success">Study {len(guides)}편 반영</span>
@@ -282,7 +309,7 @@ def _render_static_shell(*, title: str, description: str, body: str) -> str:
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{escape(title)} | Keyword Forge</title>
+    <title>{escape(title)} | 키워드 포지</title>
     <meta name="description" content="{escape(description)}" />
     <link rel="stylesheet" href="/assets/app.css?v={_ASSET_VERSION}" />
 </head>
@@ -314,12 +341,12 @@ def _render_title_prompt_editor() -> str:
         <div class="doc-stack">
             <section class="doc-hero doc-hero-compact">
                 <div class="doc-breadcrumbs">
-                    <a href="/">Keyword Forge</a>
+                    <a href="/">키워드 포지</a>
                     <span>/</span>
                     <span>제목 프롬프트</span>
                 </div>
                 <div class="doc-hero-copy">
-                    <p class="panel-kicker">Title Prompt</p>
+                    <p class="panel-kicker">제목 프롬프트</p>
                     <h1>AI 제목 프롬프트 관리</h1>
                     <p>
                         기본 시스템 프롬프트와 선택된 프리셋 안내는 계속 고정됩니다.
@@ -341,7 +368,7 @@ def _render_title_prompt_editor() -> str:
             <section class="panel">
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">Preview</p>
+                        <p class="panel-kicker">미리보기</p>
                         <h2>현재 적용 프롬프트 미리보기</h2>
                     </div>
                     <span class="status-pill" id="titlePromptEditorStatus">불러오는 중</span>
@@ -379,7 +406,7 @@ def _render_title_prompt_editor() -> str:
             <section class="panel">
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">Profiles</p>
+                        <p class="panel-kicker">저장본</p>
                         <h2>저장본 편집 및 선택</h2>
                     </div>
                     <span class="status-pill" id="titlePromptProfileStatus">저장본 불러오는 중</span>
@@ -788,7 +815,7 @@ def _render_guides_index() -> str:
             f"""
             <section class="doc-section">
                 <div class="doc-section-head">
-                    <p class="panel-kicker">Guide Group</p>
+                    <p class="panel-kicker">가이드 묶음</p>
                     <h2>{escape(label)}</h2>
                 </div>
                 <div class="guide-card-grid">
@@ -810,7 +837,7 @@ def _render_guides_index() -> str:
                     <a class="secondary-link" href="/api-docs" target="_blank" rel="noopener noreferrer">API 문서</a>
                 </div>
                 <div class="doc-hero-copy">
-                    <p class="eyebrow">Guide</p>
+                    <p class="eyebrow">가이드</p>
                     <h1>Study 문서 모음</h1>
                     <p>기능 설명서와 운영 팁을 주제별로 묶었습니다. 각 문서는 본 사이트 안에서 바로 열립니다.</p>
                 </div>
@@ -826,7 +853,7 @@ def _render_guides_index() -> str:
 def _render_guide_detail(guide_slug: str) -> str:
     guide = next((item for item in _load_study_guides() if str(item.get("slug")) == guide_slug), None)
     if guide is None:
-        raise HTTPException(status_code=404, detail="Guide not found.")
+        raise HTTPException(status_code=404, detail="가이드를 찾을 수 없습니다.")
 
     return _render_static_shell(
         title=str(guide["title"]),
@@ -842,7 +869,7 @@ def _render_guide_detail(guide_slug: str) -> str:
                     <a class="secondary-link" href="/">대시보드</a>
                 </div>
                 <div class="doc-hero-copy">
-                    <p class="eyebrow">Guide Detail</p>
+                    <p class="eyebrow">가이드 상세</p>
                     <h1>{escape(str(guide['title']))}</h1>
                     <p>{escape(str(guide.get('subtitle') or ''))}</p>
                 </div>
@@ -857,12 +884,225 @@ def _render_guide_detail(guide_slug: str) -> str:
     )
 
 
+def _render_recommended_usage() -> str:
+    return _render_static_shell(
+        title="추천 사용법",
+        description="자동화 블로그 작성 흐름에 맞춘 키워드 포지 운영 방법을 정리했습니다.",
+        body="""
+        <div class="doc-shell">
+            <header class="doc-hero">
+                <div class="doc-breadcrumbs">
+                    <a href="/">홈</a><span>/</span><strong>추천 사용법</strong>
+                </div>
+                <div class="doc-actions">
+                    <a class="secondary-link" href="/">대시보드</a>
+                    <a class="secondary-link" href="/guides">사용 가이드</a>
+                </div>
+                <div class="doc-hero-copy">
+                    <p class="eyebrow">추천 사용법</p>
+                    <h1>자동화 블로그 작성 기준 운영안</h1>
+                    <p>
+                        이 프로그램은 `돈 되는 키워드만 찾는 도구`로 보기보다
+                        `글감 후보를 고르고, 제목 방향을 정하는 도구`로 쓰는 편이 더 잘 맞습니다.
+                        제목만 자동 작성기로 넘겨 글을 만들고 있다면,
+                        점수 하나보다 `무슨 글을 써야 하는지`가 제목에 분명히 담기는 것이 더 중요합니다.
+                    </p>
+                </div>
+            </header>
+            <main class="doc-stack">
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">한눈에 이해</p>
+                            <h2>이 도구는 이렇게 생각하면 쉽습니다</h2>
+                        </div>
+                    </div>
+                    <div class="guide-card-grid">
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>글감 후보를 추리는 단계</h4>
+                                <p>수집과 확장으로 후보를 모으고, 분석과 선별로 지금 써 볼 만한 주제를 줄이는 단계입니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>제목 방향을 고정하는 단계</h4>
+                                <p>제목은 단순 문장이 아니라 글의 방향을 정하는 장치입니다. 제목이 또렷해야 뒤의 자동 작성기도 덜 흔들립니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>혼자 쓰는 실무 도구</h4>
+                                <p>남에게 보여주기 위한 서비스보다, 좋은 후보를 빠르게 걸러서 다음 단계로 넘기는 작업용 도구라고 생각하면 됩니다.</p>
+                            </div>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">가장 쉬운 사용 순서</p>
+                            <h2>처음에는 이 순서로 쓰면 됩니다</h2>
+                        </div>
+                    </div>
+                    <ul class="guide-article-points">
+                        <li><strong>1. 균형형으로 시작</strong><span>평소에는 `균형형`을 기본으로 돌리면 너무 공격적이지 않으면서도 쓸 만한 후보를 넓게 확보할 수 있습니다.</span></li>
+                        <li><strong>2. 자동 선별 결과 확인</strong><span>수익형 후보만 보지 말고 `글감 후보`까지 같이 봐야 롱테일용 글을 놓치지 않습니다.</span></li>
+                        <li><strong>3. 제목은 단일 + 롱테일 1단계 우선</strong><span>자동 작성기에 바로 넘길 때는 단일 키워드와 롱테일 1단계를 먼저 쓰는 편이 가장 안전합니다.</span></li>
+                        <li><strong>4. 낮은 품질 제목은 자동 보정 결과만 확인</strong><span>기준 미달 제목은 내부에서 자동으로 다시 만들고, 2번 연속 미달이면 더 강한 생성기로 한 번 더 보정합니다.</span></li>
+                    </ul>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">모드 선택</p>
+                            <h2>상황별로 어떤 모드를 쓰면 좋은가</h2>
+                        </div>
+                    </div>
+                    <div class="guide-card-grid">
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>균형형</h4>
+                                <p>가장 기본입니다. 매일 돌리기 좋고, 자동 작성기에 넘길 후보를 안정적으로 모으는 데 적합합니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>수익형</h4>
+                                <p>광고 단가나 수익 가능성을 더 중시할 때 씁니다. 매일 기본값으로 두기보다 따로 묶어서 보는 용도가 좋습니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>롱테일 탐색형</h4>
+                                <p>수익성이 약해도 누군가에게 필요한 주제를 찾는 모드입니다. 글감 채우기와 커버리지 확보용으로 좋습니다.</p>
+                            </div>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">제목 운영</p>
+                            <h2>자동 작성기에 넘길 제목은 이렇게 고르세요</h2>
+                        </div>
+                    </div>
+                    <div class="guide-card-grid">
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>단일 키워드</h4>
+                                <p>가장 단순하고 안전합니다. 글의 주제가 흔들리면 안 되는 자동 작성 흐름에서 기본값으로 좋습니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>롱테일 1단계</h4>
+                                <p>선별된 키워드를 바탕으로 만든 첫 번째 롱테일입니다. 지금 구조에서는 자동 작성기에 바로 넘기기 가장 좋은 롱테일입니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>롱테일 2~3단계</h4>
+                                <p>아이디어를 넓히는 데는 좋지만, 자동 작성기에 바로 넣기에는 노이즈가 더 많을 수 있습니다. 검토용으로 먼저 보는 편이 안전합니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>규칙형과 인공지능 생성</h4>
+                                <p>빠르고 일정한 결과가 필요하면 규칙형, 조금 더 다양한 제목이 필요하면 인공지능 생성을 쓰면 됩니다. 자동화 본선은 안정성이 우선입니다.</p>
+                            </div>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">자동 보정</p>
+                            <h2>제목 품질이 낮게 나와도 사용자는 중간 개입이 거의 필요 없습니다</h2>
+                        </div>
+                    </div>
+                    <div class="guide-card-grid">
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>자동 재작성</h4>
+                                <p>제목 품질이 기준보다 낮으면 내부에서 자동으로 다시 만듭니다. 사용자가 다시 누르지 않아도 됩니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>더 강한 생성기로 한 번 더 시도</h4>
+                                <p>두 번 연속으로 기준에 못 미치면 더 강한 생성기로 한 번 더 시도합니다. 사용자는 최종 결과만 확인하면 됩니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>그래도 애매하면</h4>
+                                <p>같은 키워드로 무한 재생성하기보다, 키워드 각도나 롱테일 단계 자체를 바꾸는 편이 더 효과적입니다.</p>
+                            </div>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">권장 루틴</p>
+                            <h2>혼자 쓸 때 가장 현실적인 운영안</h2>
+                        </div>
+                    </div>
+                    <ul class="guide-article-points">
+                        <li><strong>매일 1회 균형형</strong><span>기본 생산 라인으로 사용합니다.</span></li>
+                        <li><strong>매일 1회 롱테일 탐색형</strong><span>필요 글과 틈새 주제를 채우는 용도로 봅니다.</span></li>
+                        <li><strong>주 2~3회 수익형</strong><span>수익성 높은 묶음이 필요할 때만 추가로 돌립니다.</span></li>
+                        <li><strong>자동 작성기 전송 기준</strong><span>단일 키워드와 롱테일 1단계를 먼저 쓰고, 나머지는 검토 후 넣습니다.</span></li>
+                        <li><strong>최신 이슈형 제목은 따로 확인</strong><span>본문 작성기가 사실 확인을 못 하면 최신 이슈형 제목은 바로 발행하지 않는 편이 안전합니다.</span></li>
+                    </ul>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">다음 확장 추천</p>
+                            <h2>너 혼자 쓸 때 먼저 붙이면 좋은 최소 기능</h2>
+                        </div>
+                    </div>
+                    <div class="guide-card-grid">
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>1순위: 실행 기록과 재실행</h4>
+                                <p>어떤 시드, 어떤 모드, 어떤 제목 설정이 잘 먹혔는지 남겨 두고 다시 돌릴 수 있으면 실험이 자산이 됩니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>2순위: 키워드 보관함</h4>
+                                <p>좋았던 후보를 `보류`, `발행완료`, `다시볼 것`처럼 묶어 두면 중복 발행과 같은 고민을 줄일 수 있습니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>3순위: 주제에서 시드 자동 만들기</h4>
+                                <p>시드가 떠오르지 않을 때 주제만 넣고 첫 후보 묶음을 자동으로 만들면 탐색 속도가 빨라집니다.</p>
+                            </div>
+                        </article>
+                    </div>
+                </section>
+            </main>
+        </div>
+        """,
+    )
+
+
 def _render_home() -> str:
     category_options = _render_category_options()
     queue_routine_category_picker = _render_queue_routine_category_picker()
     category_source_options = "".join(
         f'<option value="{source}"{" selected" if source == DEFAULT_CATEGORY_SOURCE else ""}>'
-        f'{"네이버 트렌드" if source == "naver_trend" else "검색 preset fallback"}'
+        f'{"네이버 트렌드" if source == "naver_trend" else "검색 예비안"}'
         "</option>"
         for source in CATEGORY_SOURCE_CHOICES
     )
@@ -873,13 +1113,19 @@ def _render_home() -> str:
         for service in TREND_SERVICE_CHOICES
     )
     title_presets = build_title_preset_payload()
+    title_issue_source_modes = build_issue_source_mode_payload()
+    title_community_sources = build_community_source_payload()
     title_preset_options = "".join(
         f'<option value="{escape(str(item["key"]))}"{" selected" if item["key"] == DEFAULT_TITLE_PRESET_KEY else ""}>'
         f'{escape(str(item["label"]))}'
         "</option>"
         for item in title_presets
     )
+    title_issue_source_mode_options = _render_title_issue_source_mode_options()
+    title_community_source_chips = _render_title_community_source_chips()
     title_preset_payload = json.dumps(title_presets, ensure_ascii=False).replace("</", "<\\/")
+    title_issue_source_payload = json.dumps(title_issue_source_modes, ensure_ascii=False).replace("</", "<\\/")
+    title_community_source_payload = json.dumps(title_community_sources, ensure_ascii=False).replace("</", "<\\/")
     title_mode_help = _render_help_tooltip(
         "template는 규칙 기반으로 바로 생성합니다.\n"
         "AI는 provider/model을 사용해 더 유연하게 생성하고, 저점수 자동 재작성도 함께 쓸 수 있습니다.\n"
@@ -892,12 +1138,14 @@ def _render_home() -> str:
         "V3는 저검색량까지 넓히는 실험형입니다."
     )
     title_auto_retry_help = _render_help_tooltip(
-        "AI 모드에서 품질 점수가 기준보다 낮은 제목만 1회 더 다시 생성합니다.\n"
+        "AI 모드에서 품질 점수가 기준보다 낮은 제목은 자동으로 다시 생성합니다.\n"
+        "2회 연속 기준 미달이면 더 강한 모델로 자동 승격해 한 번 더 보정합니다.\n"
         "기준 점수를 올리면 더 엄격하게 다시 쓰고, 너무 높이면 호출량과 시간이 늘어납니다."
     )
     title_issue_context_help = _render_help_tooltip(
         "AI 제목 생성 직전에 네이버 검색 상위 결과를 확인해 최근 뉴스/이슈 표현을 프롬프트에 반영합니다.\n"
-        "조회 개수는 이번 호출에서 실시간 맥락을 붙일 키워드 수입니다. 높일수록 느려질 수 있습니다."
+        "조회 개수는 이번 호출에서 실시간 맥락을 붙일 키워드 수입니다. 높일수록 느려질 수 있습니다.\n"
+        "반응형을 고르면 선택한 커뮤니티 도메인 제목만 따로 압축해 프롬프트에 붙입니다."
     )
     title_api_key_help = _render_help_tooltip(
         "API 키는 서버에 저장하지 않고 현재 브라우저 localStorage에만 보관합니다.\n"
@@ -922,6 +1170,8 @@ def _render_home() -> str:
     />
     <script>
         window.KEYWORD_FORGE_TITLE_PRESETS = {title_preset_payload};
+        window.KEYWORD_FORGE_TITLE_ISSUE_SOURCE_MODES = {title_issue_source_payload};
+        window.KEYWORD_FORGE_TITLE_COMMUNITY_SOURCES = {title_community_source_payload};
     </script>
     <link rel="stylesheet" href="/assets/app.css?v={_ASSET_VERSION}" />
     <script src="/assets/app.js?v={_ASSET_VERSION}" defer></script>
@@ -934,7 +1184,7 @@ def _render_home() -> str:
     <div class="page-shell">
         <header class="hero">
             <div class="hero-copy">
-                <p class="eyebrow">Keyword Forge</p>
+                <p class="eyebrow">키워드 포지</p>
                 <h1>수익형 키워드 발굴&amp;제목 생성기</h1>
                 <aside class="hero-panel">
                     <div class="hero-stat"><span>수집</span><strong id="countCollected">0</strong></div>
@@ -949,8 +1199,11 @@ def _render_home() -> str:
                 <div class="hero-actions">
                     <button type="button" class="primary-btn" id="runFullButton">전체 실행</button>
                     <button type="button" class="ghost-chip" data-utility-open="settings" aria-pressed="false">운영 설정</button>
-                    <button type="button" class="ghost-chip" data-utility-open="queue" aria-pressed="false">예약 / Queue</button>
+                    <button type="button" class="ghost-chip" data-utility-open="history" aria-pressed="false">실행 기록</button>
+                    <button type="button" class="ghost-chip" data-utility-open="vault" aria-pressed="false">키워드 보관함</button>
+                    <button type="button" class="ghost-chip" data-utility-open="queue" aria-pressed="false">예약 / 대기열</button>
                     <a class="secondary-link" href="/guides">사용 가이드</a>
+                    <a class="secondary-link" href="/recommended-usage">추천 사용법</a>
                     <a class="secondary-link" href="/api-docs" target="_blank" rel="noopener noreferrer">API 문서</a>
                 </div>
             </div>
@@ -960,7 +1213,7 @@ def _render_home() -> str:
             <section class="panel summary-panel">
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">Progress</p>
+                        <p class="panel-kicker">진행 현황</p>
                         <h2>진행 현황</h2>
                     </div>
                     <span class="status-pill" id="pipelineStatus">대기 중</span>
@@ -983,7 +1236,7 @@ def _render_home() -> str:
             <section class="panel insights-panel" id="resultsRailPanel" hidden>
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">Insights</p>
+                        <p class="panel-kicker">인사이트</p>
                         <h2>실시간 인사이트</h2>
                     </div>
                 </div>
@@ -994,7 +1247,7 @@ def _render_home() -> str:
             <section class="panel control-panel">
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">Input</p>
+                        <p class="panel-kicker">실행 조건</p>
                         <h2>실행 조건</h2>
                     </div>
                 </div>
@@ -1003,7 +1256,7 @@ def _render_home() -> str:
                 <section class="control-stage-block control-stage-collect" data-control-block="collect">
                     <div class="control-stage-head">
                         <div>
-                            <p class="panel-kicker">Collect Setup</p>
+                            <p class="panel-kicker">수집 설정</p>
                             <h3>수집 설정</h3>
                         </div>
                         <span class="badge">1단계</span>
@@ -1087,6 +1340,29 @@ def _render_home() -> str:
                         <input id="seedInput" type="text" placeholder="예: 보험" />
                     </label>
 
+                    <div class="field-block field-block-wide topic-seed-generator-card">
+                        <div class="field-label-row">
+                            <span class="field-label">주제에서 시드 만들기</span>
+                            <span class="input-help compact-help">아이디어만 넣으면 시작용 시드 묶음을 자동으로 만듭니다. 칩을 누르면 바로 시드 입력으로 옮길 수 있습니다.</span>
+                        </div>
+                        <div class="topic-seed-generator-row">
+                            <input id="topicSeedInput" type="text" placeholder="예: 자취 가전, 초등 영어, 중고 모니터" />
+                            <select id="topicSeedIntent">
+                                <option value="balanced">균형형</option>
+                                <option value="need">정보형</option>
+                                <option value="profit">수익형</option>
+                            </select>
+                            <select id="topicSeedCount">
+                                <option value="8">8개</option>
+                                <option value="12" selected>12개</option>
+                                <option value="20">20개</option>
+                            </select>
+                            <button type="button" class="ghost-btn" id="generateTopicSeedsButton">시드 만들기</button>
+                        </div>
+                        <p class="input-help" id="topicSeedStatus">아직 주제 시드를 만들지 않았습니다.</p>
+                        <div id="topicSeedSuggestionList" class="topic-seed-suggestion-list"></div>
+                    </div>
+
                     <div class="field-block field-block-wide collector-inline-actions">
                         <div class="collector-action-row">
                             <button type="button" class="subtle-btn collector-run-btn" data-run-action="collect">수집만 실행</button>
@@ -1110,7 +1386,7 @@ def _render_home() -> str:
 
                 <div class="option-row collect-category-options" data-mode-visibility="category">
                     <label class="check-chip"><input id="optionBulk" type="checkbox" checked />카테고리 다중 쿼리 사용</label>
-                    <label class="check-chip"><input id="trendFallbackInput" type="checkbox" />트렌드 실패 시 preset fallback</label>
+                    <label class="check-chip"><input id="trendFallbackInput" type="checkbox" />트렌드 실패 시 검색 예비안 사용</label>
                 </div>
 
                 <p class="input-help" id="trendSourceHelp" data-mode-visibility="category">
@@ -1123,7 +1399,7 @@ def _render_home() -> str:
                 <section class="control-stage-block control-stage-pipeline" data-control-block="pipeline">
                     <div class="control-stage-head">
                         <div>
-                            <p class="panel-kicker">Pipeline</p>
+                            <p class="panel-kicker">파이프라인</p>
                             <h3>실행 버튼</h3>
                         </div>
                         <span class="badge">2-4단계</span>
@@ -1132,7 +1408,7 @@ def _render_home() -> str:
                 <div class="action-row pipeline-action-row">
                     <button type="button" class="subtle-btn" id="runExpandButton">확장까지 실행</button>
                     <button type="button" class="subtle-btn" id="runAnalyzeButton">분석까지 실행</button>
-                    <button type="button" class="subtle-btn" id="runSelectButton">골든 키워드 선별</button>
+                    <button type="button" class="subtle-btn" id="runSelectButton">자동 선별</button>
                     <button type="button" class="subtle-btn" id="runTitleButton">제목 생성까지 실행</button>
                     <button type="button" class="ghost-btn" id="stopStreamButton" disabled>중지</button>
                     <button type="button" class="ghost-btn" id="resetButton">결과 초기화</button>
@@ -1141,15 +1417,15 @@ def _render_home() -> str:
                     <div class="grade-select-head">
                         <div>
                             <span class="field-label">2축 선별</span>
-                            <p class="grade-select-summary" id="gradeSelectSummary">수익성 전체 · 공략성 전체</p>
+                            <p class="grade-select-summary" id="gradeSelectSummary">수익성 전체 · 노출도 전체</p>
                         </div>
-                        <p class="input-help compact-help">수익성 A~D와 공략성 1~4를 조합해 선별합니다. 기본 골든 후보는 A~C · 1~3 조합입니다.</p>
+                        <p class="input-help compact-help">수익성 A~D와 노출도 1~4를 조합해 선별합니다. 균형형은 A~C · 1~3, 수익형은 A~B · 1~4, 롱테일 탐색형은 B~D · 1~3 조합입니다.</p>
                     </div>
                     <div class="grade-select-presets">
                         <button type="button" class="ghost-chip" data-selection-preset="all">전체</button>
-                        <button type="button" class="ghost-chip" data-selection-preset="golden_candidate">골든 후보</button>
-                        <button type="button" class="ghost-chip" data-selection-preset="profit_focus">수익형 집중</button>
-                        <button type="button" class="ghost-chip" data-selection-preset="easy_exposure">쉬운 노출</button>
+                        <button type="button" class="ghost-chip" data-selection-preset="balanced">균형형</button>
+                        <button type="button" class="ghost-chip" data-selection-preset="profit_focus">수익형</button>
+                        <button type="button" class="ghost-chip" data-selection-preset="longtail_explore">롱테일 탐색형</button>
                     </div>
                     <div class="grade-select-row grade-select-axis-row">
                         <span class="grade-select-axis-label">수익성</span>
@@ -1159,12 +1435,12 @@ def _render_home() -> str:
                         <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="D">D</button>
                     </div>
                     <div class="grade-select-row grade-select-axis-row">
-                        <span class="grade-select-axis-label">공략성</span>
+                        <span class="grade-select-axis-label">노출도</span>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="1">1</button>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="2">2</button>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="3">3</button>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="4">4</button>
-                        <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">선택 조합 선별</button>
+                        <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">선택 조합 적용</button>
                     </div>
                 </section>
                 <p class="input-help compact-help">
@@ -1180,14 +1456,14 @@ def _render_home() -> str:
             <section class="panel launcher-panel">
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">Quick Start</p>
+                        <p class="panel-kicker">빠른 시작</p>
                         <h2>빠른 시작</h2>
                     </div>
                 </div>
                 <section class="quickstart-panel">
                     <div class="quickstart-head">
                         <div>
-                            <p class="panel-kicker">Mode</p>
+                            <p class="panel-kicker">모드</p>
                             <h3>시작 모드</h3>
                         </div>
                         <span class="badge" id="quickStartModeBadge">키워드 발굴</span>
@@ -1215,7 +1491,7 @@ def _render_home() -> str:
                     <section class="control-stage-block launcher-card control-stage-expand" data-control-block="expand" data-control-card="expand">
                         <div class="launcher-head">
                             <div>
-                                <p class="panel-kicker">Expand Entry</p>
+                                <p class="panel-kicker">확장 시작점</p>
                                 <h3>확장 시작점</h3>
                             </div>
                             <span class="badge" id="selectedCollectedCount">선택 0건</span>
@@ -1277,7 +1553,7 @@ def _render_home() -> str:
                     <section class="control-stage-block launcher-card control-stage-analyze" data-control-block="analyze" data-control-card="analyze">
                         <div class="launcher-head">
                             <div>
-                                <p class="panel-kicker">Analyze Entry</p>
+                                <p class="panel-kicker">분석 시작점</p>
                                 <h3>분석 시작점</h3>
                             </div>
                             <span class="badge" id="manualAnalyzeCount">직접 입력 0건</span>
@@ -1325,10 +1601,10 @@ def _render_home() -> str:
                 <section class="title-settings-card launcher-card control-stage-block control-stage-title" data-control-block="title">
                     <div class="launcher-head">
                         <div>
-                            <p class="panel-kicker">Title Entry</p>
+                            <p class="panel-kicker">제목 생성 시작점</p>
                             <h3>제목 생성 시작점</h3>
                         </div>
-                        <span class="badge" id="titleModeBadge">template</span>
+                        <span class="badge" id="titleModeBadge">템플릿</span>
                     </div>
                     <div class="form-grid">
                         <input id="titleMode" type="hidden" value="template" />
@@ -1390,14 +1666,14 @@ def _render_home() -> str:
                                 {title_auto_retry_help}
                             </span>
                             <div class="title-auto-retry-row">
-                                <label class="check-chip"><input id="titleAutoRetryEnabled" type="checkbox" checked />기준 미달 제목 1회 자동 재작성</label>
+                                <label class="check-chip"><input id="titleAutoRetryEnabled" type="checkbox" checked />기준 미달 제목 자동 재작성</label>
                                 <label class="title-auto-retry-threshold">
                                     <span>최소 점수</span>
                                     <input id="titleAutoRetryThreshold" type="number" min="70" max="100" step="1" value="84" />
                                 </label>
                             </div>
                             <p id="titleAutoRetrySummary" class="input-help compact-help">
-                                84점 미만만 자동 재작성
+                                84점 미만은 자동 재작성 후 2회 실패 시 상위 모델로 자동 승격
                             </p>
                         </div>
 
@@ -1415,6 +1691,30 @@ def _render_home() -> str:
                             </div>
                             <p id="titleIssueContextSummary" class="input-help compact-help">
                                 AI 요청당 상위 3개 키워드에 실시간 이슈 반영
+                            </p>
+                        </div>
+
+                        <div class="field-block field-block-wide" data-title-mode-visibility="ai" hidden>
+                            <span class="field-label field-label-row">
+                                <span>이슈 소스 선택</span>
+                            </span>
+                            <div class="form-grid">
+                                <label class="field-block">
+                                    <span class="field-label">소스 모드</span>
+                                    <select id="titleIssueSourceMode">
+                                        {title_issue_source_mode_options}
+                                    </select>
+                                </label>
+                                <label class="field-block">
+                                    <span class="field-label">커스텀 도메인</span>
+                                    <input id="titleCommunityCustomDomains" type="text" placeholder="clien.net, dcinside.com" />
+                                </label>
+                            </div>
+                            <div class="option-row" id="titleCommunitySources">
+                                {title_community_source_chips}
+                            </div>
+                            <p id="titleCommunitySourceSummary" class="input-help compact-help">
+                                기본값은 네이버 카페, 블로그, 포스트를 반응형 소스로 사용합니다.
                             </p>
                         </div>
 
@@ -1443,7 +1743,7 @@ def _render_home() -> str:
                         </label>
 
                         <label class="field-block" data-title-mode-visibility="ai" hidden>
-                            <span class="field-label">Model</span>
+                            <span class="field-label">모델</span>
                             <select id="titleModel"></select>
                         </label>
 
@@ -1464,8 +1764,8 @@ def _render_home() -> str:
                         </div>
 
                         <label class="field-block" data-title-mode-visibility="ai" hidden>
-                            <span class="field-label">Fallback</span>
-                            <label class="check-chip"><input id="titleFallback" type="checkbox" checked />AI 실패 시 template 사용</label>
+                            <span class="field-label">예비 처리</span>
+                            <label class="check-chip"><input id="titleFallback" type="checkbox" checked />AI 실패 시 템플릿 사용</label>
                         </label>
 
                         <div class="field-block field-block-wide title-prompt-block" data-title-mode-visibility="ai" hidden>
@@ -1500,11 +1800,13 @@ def _render_home() -> str:
             <section class="panel results-panel">
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">Workbench</p>
+                        <p class="panel-kicker">작업대</p>
                         <h2>키워드 작업대</h2>
                     </div>
                 </div>
                 <div class="results-panel-tools">
+                    <button type="button" class="ghost-chip" data-utility-open="history" aria-pressed="false">실행 기록</button>
+                    <button type="button" class="ghost-chip" data-utility-open="vault" aria-pressed="false">키워드 보관함</button>
                     <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">오류 / 진단</button>
                     <button type="button" class="ghost-chip" data-utility-open="logs" aria-pressed="false">실행 로그</button>
                     <button type="button" class="ghost-chip" id="exportTitleCsvButton">제목 결과 CSV</button>
@@ -1518,7 +1820,9 @@ def _render_home() -> str:
                 <div class="utility-drawer-head">
                     <div class="utility-drawer-tabs">
                         <button type="button" class="ghost-chip" data-utility-tab="settings" aria-pressed="false">운영 설정</button>
-                        <button type="button" class="ghost-chip" data-utility-tab="queue" aria-pressed="false">예약 / Queue</button>
+                        <button type="button" class="ghost-chip" data-utility-tab="history" aria-pressed="false">실행 기록</button>
+                        <button type="button" class="ghost-chip" data-utility-tab="vault" aria-pressed="false">키워드 보관함</button>
+                        <button type="button" class="ghost-chip" data-utility-tab="queue" aria-pressed="false">예약 / 대기열</button>
                         <button type="button" class="ghost-chip" data-utility-tab="diagnostics" aria-pressed="true">오류 / 진단</button>
                         <button type="button" class="ghost-chip" data-utility-tab="logs" aria-pressed="false">실행 로그</button>
                     </div>
@@ -1529,7 +1833,7 @@ def _render_home() -> str:
                         <div class="settings-shell">
                             <div class="settings-hero">
                                 <div>
-                                    <p class="panel-kicker">Ops</p>
+                                    <p class="panel-kicker">운영</p>
                                     <h2>운영 설정</h2>
                                     <p class="settings-copy">
                                         예약모드와 장시간 실행을 대비해 요청 간격, 일일 한도, 인증 오류 보호를 여기서 관리합니다.
@@ -1563,7 +1867,7 @@ def _render_home() -> str:
                                 <section class="settings-card api-registry-card">
                                     <div class="collector-panel-head">
                                         <div>
-                                            <p class="panel-kicker">AI Access</p>
+                                            <p class="panel-kicker">AI 연결</p>
                                             <h3>AI API 등록</h3>
                                         </div>
                                         <span class="badge" id="titleApiRegistryCount">0개 연결</span>
@@ -1597,7 +1901,7 @@ def _render_home() -> str:
                                 <section class="settings-card">
                                     <div class="collector-panel-head">
                                         <div>
-                                            <p class="panel-kicker">Mode</p>
+                                            <p class="panel-kicker">모드</p>
                                             <h3>운영 모드</h3>
                                         </div>
                                     </div>
@@ -1619,7 +1923,7 @@ def _render_home() -> str:
                                 <section class="settings-card" id="operationGuardCard">
                                     <div class="collector-panel-head">
                                         <div>
-                                            <p class="panel-kicker">Guard</p>
+                                            <p class="panel-kicker">보호</p>
                                             <h3>보호 옵션</h3>
                                         </div>
                                     </div>
@@ -1672,14 +1976,162 @@ def _render_home() -> str:
                             </div>
                         </div>
                     </section>
+                    <section class="utility-drawer-view" data-utility-panel="history" hidden>
+                        <div class="queue-shell">
+                            <div class="settings-hero">
+                                <div>
+                                    <p class="panel-kicker">기록</p>
+                                    <h2>실행 기록</h2>
+                                    <p class="settings-copy">
+                                        어떤 조건으로 돌렸는지, 어디까지 실행했는지, 결과가 몇 건이었는지를 브라우저에 남깁니다.
+                                        설정 복원과 같은 단계 재실행을 여기서 바로 할 수 있습니다.
+                                    </p>
+                                </div>
+                                <div class="settings-hero-actions">
+                                    <button type="button" class="ghost-chip" id="refreshExecutionHistoryButton">새로고침</button>
+                                    <button type="button" class="ghost-btn" id="clearExecutionHistoryButton">기록 비우기</button>
+                                </div>
+                            </div>
+                            <div class="settings-status-grid">
+                                <article class="collector-stat-card">
+                                    <span>저장된 실행</span>
+                                    <strong id="executionHistoryCountLabel">0건</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>최근 실행</span>
+                                    <strong id="executionHistoryLatestLabel">없음</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>마지막 단계</span>
+                                    <strong id="executionHistoryStageLabel">-</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>현재 검색</span>
+                                    <strong id="executionHistoryFilterLabel">전체</strong>
+                                </article>
+                            </div>
+                            <div class="settings-card">
+                                <div class="settings-form-grid">
+                                    <label class="field-block">
+                                        <span class="field-label">기록 검색</span>
+                                        <input id="executionHistorySearchInput" type="search" placeholder="카테고리, 시드, 단계 검색" />
+                                    </label>
+                                    <label class="field-block">
+                                        <span class="field-label">표시 개수</span>
+                                        <select id="executionHistoryLimitInput">
+                                            <option value="10">최근 10건</option>
+                                            <option value="20" selected>최근 20건</option>
+                                            <option value="50">최근 50건</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <div id="executionHistoryStatus" class="settings-hint">
+                                    실행이 끝나면 자동으로 저장됩니다.
+                                </div>
+                                <div id="executionHistoryList" class="queue-item-list">
+                                    <div class="collector-empty">저장된 실행 기록이 없습니다.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="utility-drawer-view" data-utility-panel="vault" hidden>
+                        <div class="queue-shell">
+                            <div class="settings-hero">
+                                <div>
+                                    <p class="panel-kicker">보관</p>
+                                    <h2>키워드 보관함</h2>
+                                    <p class="settings-copy">
+                                        나중에 다시 쓰고 싶은 키워드를 보관합니다. 선별 결과나 분석 표에서 바로 담아두고,
+                                        메모를 남기거나 시드 입력으로 다시 가져올 수 있습니다.
+                                    </p>
+                                </div>
+                                <div class="settings-hero-actions">
+                                    <button type="button" class="ghost-chip" id="refreshKeywordVaultButton">새로고침</button>
+                                    <button type="button" class="ghost-btn" id="clearKeywordVaultButton">보관함 비우기</button>
+                                </div>
+                            </div>
+                            <div class="settings-status-grid">
+                                <article class="collector-stat-card">
+                                    <span>보관 키워드</span>
+                                    <strong id="keywordVaultCountLabel">0건</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>발행 완료</span>
+                                    <strong id="keywordVaultPublishedCountLabel">0건</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>초안 / 보류</span>
+                                    <strong id="keywordVaultDraftCountLabel">0건</strong>
+                                </article>
+                                <article class="collector-stat-card">
+                                    <span>현재 검색</span>
+                                    <strong id="keywordVaultFilterLabel">전체</strong>
+                                </article>
+                            </div>
+                            <div class="queue-panel-grid">
+                                <section class="settings-card">
+                                    <div class="collector-panel-head">
+                                        <div>
+                                            <p class="panel-kicker">빠른 추가</p>
+                                            <h3>직접 넣기</h3>
+                                        </div>
+                                    </div>
+                                    <div class="settings-form-grid">
+                                        <label class="field-block field-block-wide">
+                                            <span class="field-label">키워드 목록</span>
+                                            <textarea
+                                                id="keywordVaultQuickAddInput"
+                                                rows="5"
+                                                placeholder="줄바꿈으로 여러 키워드를 넣으세요&#10;예:&#10;포터블 모니터&#10;삼성 무빙스타일"
+                                            ></textarea>
+                                        </label>
+                                    </div>
+                                    <div class="queue-form-actions">
+                                        <span id="keywordVaultQuickAddCountLabel" class="queue-inline-meta">0건 준비</span>
+                                        <button type="button" class="ghost-btn" id="keywordVaultQuickAddButton">보관함에 추가</button>
+                                    </div>
+                                </section>
+                                <section class="settings-card">
+                                    <div class="collector-panel-head">
+                                        <div>
+                                            <p class="panel-kicker">검색</p>
+                                            <h3>보관함 필터</h3>
+                                        </div>
+                                    </div>
+                                    <div class="settings-form-grid">
+                                        <label class="field-block">
+                                            <span class="field-label">키워드 검색</span>
+                                            <input id="keywordVaultSearchInput" type="search" placeholder="키워드, 메모, 출처 검색" />
+                                        </label>
+                                        <label class="field-block">
+                                            <span class="field-label">상태</span>
+                                            <select id="keywordVaultStatusFilter">
+                                                <option value="all">전체</option>
+                                                <option value="saved">보관</option>
+                                                <option value="draft">초안 예정</option>
+                                                <option value="published">발행 완료</option>
+                                                <option value="hold">보류</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div id="keywordVaultStatus" class="settings-hint">
+                                        결과 표의 `보관` 버튼으로 담은 키워드도 여기 모입니다.
+                                    </div>
+                                </section>
+                            </div>
+                            <div id="keywordVaultList" class="queue-item-list">
+                                <div class="collector-empty">보관된 키워드가 없습니다.</div>
+                            </div>
+                        </div>
+                    </section>
                     <section class="utility-drawer-view" data-utility-panel="queue" hidden>
                         <div class="queue-shell">
                             <div class="settings-hero">
                                 <div>
-                                    <p class="panel-kicker">Queue</p>
+                                    <p class="panel-kicker">예약</p>
                                     <h2>예약 작업</h2>
                                     <p class="settings-copy">
-                                        현재 화면의 수집, 확장, 분석, 제목 설정을 묶어서 시드 배치 Queue나 일일 카테고리 루틴으로 등록합니다.
+                                        현재 화면의 수집, 확장, 분석, 제목 설정을 묶어서 시드 배치 예약이나 일일 카테고리 루틴으로 등록합니다.
                                     </p>
                                 </div>
                                 <div class="settings-hero-actions">
@@ -1690,7 +2142,7 @@ def _render_home() -> str:
                             </div>
                             <div class="settings-status-grid">
                                 <article class="collector-stat-card">
-                                    <span>Runner 상태</span>
+                                    <span>실행기 상태</span>
                                     <strong id="queueRunnerStateLabel">불러오는 중</strong>
                                 </article>
                                 <article class="collector-stat-card">
@@ -1710,8 +2162,8 @@ def _render_home() -> str:
                                 <section class="settings-card">
                                     <div class="collector-panel-head">
                                         <div>
-                                            <p class="panel-kicker">Batch</p>
-                                            <h3>시드 배치 Queue</h3>
+                                            <p class="panel-kicker">배치</p>
+                                            <h3>시드 배치 예약</h3>
                                         </div>
                                     </div>
                                     <div class="settings-form-grid">
@@ -1743,7 +2195,7 @@ def _render_home() -> str:
                                 <section class="settings-card">
                                     <div class="collector-panel-head">
                                         <div>
-                                            <p class="panel-kicker">Routine</p>
+                                            <p class="panel-kicker">루틴</p>
                                             <h3>일일 카테고리 루틴</h3>
                                         </div>
                                     </div>
@@ -1809,7 +2261,7 @@ def _render_home() -> str:
                                 <section class="settings-card queue-list-card">
                                     <div class="collector-panel-head">
                                         <div>
-                                            <p class="panel-kicker">Jobs</p>
+                                            <p class="panel-kicker">작업</p>
                                             <h3>최근 작업</h3>
                                         </div>
                                     </div>
@@ -1820,7 +2272,7 @@ def _render_home() -> str:
                                 <section class="settings-card queue-list-card">
                                     <div class="collector-panel-head">
                                         <div>
-                                            <p class="panel-kicker">Routines</p>
+                                            <p class="panel-kicker">루틴</p>
                                             <h3>등록된 루틴</h3>
                                         </div>
                                     </div>
@@ -1838,7 +2290,7 @@ def _render_home() -> str:
                         <div class="debug-box">
                             <div class="debug-box-head">
                                 <div>
-                                    <p class="panel-kicker">Debug</p>
+                                    <p class="panel-kicker">진단</p>
                                     <h3>오류 및 진단</h3>
                                 </div>
                                 <button type="button" class="ghost-btn debug-clear-btn" id="clearDebugButton">진단 초기화</button>
@@ -1850,7 +2302,7 @@ def _render_home() -> str:
                     <section class="utility-drawer-view" data-utility-panel="logs" hidden>
                         <div class="panel-head">
                             <div>
-                                <p class="panel-kicker">Logs</p>
+                                <p class="panel-kicker">실행 로그</p>
                                 <h2>실행 로그</h2>
                             </div>
                         </div>
@@ -1880,6 +2332,11 @@ def guides_index() -> HTMLResponse:
 @router.get("/guides/{guide_slug}", response_class=HTMLResponse, include_in_schema=False)
 def guide_detail(guide_slug: str) -> HTMLResponse:
     return HTMLResponse(_render_guide_detail(guide_slug))
+
+
+@router.get("/recommended-usage", response_class=HTMLResponse, include_in_schema=False)
+def recommended_usage() -> HTMLResponse:
+    return HTMLResponse(_render_recommended_usage())
 
 
 @router.get("/title-prompt-editor", response_class=HTMLResponse, include_in_schema=False)

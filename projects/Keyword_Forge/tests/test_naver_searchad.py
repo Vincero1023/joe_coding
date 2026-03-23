@@ -342,8 +342,9 @@ def test_build_searchad_keyword_tool_index_uses_client_and_returns_stats() -> No
     keyword = "driver insurance compare"
 
     class _FakeClient:
-        def fetch_keyword_tool_stats(self, keywords, *, keyword_batch_size):
-            assert keyword_batch_size == 1
+        def fetch_keyword_tool_stats(self, keywords, *, keyword_batch_size, max_workers):
+            assert keyword_batch_size == 5
+            assert max_workers == 4
             assert keywords == [keyword]
             return {
                 normalize_key(keyword): KeywordStats(
@@ -369,3 +370,62 @@ def test_build_searchad_keyword_tool_index_uses_client_and_returns_stats() -> No
     )
 
     assert result[normalize_key(keyword)].mobile_searches == 410.0
+
+
+def test_searchad_client_splits_keyword_tool_batches_when_large_chunk_fails() -> None:
+    keywords = [
+        "driver insurance compare",
+        "tooth insurance compare",
+    ]
+    opener_calls = []
+
+    def fake_opener(request, timeout):
+        opener_calls.append(request.full_url)
+        if "hintKeywords=driverinsurancecompare%2Ctoothinsurancecompare" in request.full_url:
+            raise Exception("batch too large")
+        if "hintKeywords=driverinsurancecompare" in request.full_url:
+            return _FakeHttpResponse(
+                {
+                    "keywordList": [
+                        {
+                            "relKeyword": "driverinsurancecompare",
+                            "monthlyPcQcCnt": "90",
+                            "monthlyMobileQcCnt": "410",
+                            "monthlyAvePcClkCnt": 3.4,
+                            "monthlyAveMobileClkCnt": 22.1,
+                        }
+                    ]
+                }
+            )
+        return _FakeHttpResponse(
+            {
+                "keywordList": [
+                    {
+                        "relKeyword": "toothinsurancecompare",
+                        "monthlyPcQcCnt": "40",
+                        "monthlyMobileQcCnt": "160",
+                        "monthlyAvePcClkCnt": 1.4,
+                        "monthlyAveMobileClkCnt": 8.1,
+                    }
+                ]
+            }
+        )
+
+    client = NaverSearchAdClient(
+        NaverSearchAdCredentials(
+            api_key="api-key",
+            secret_key="secret-key",
+            customer_id="1234567",
+        ),
+        opener=fake_opener,
+    )
+
+    result = client.fetch_keyword_tool_stats(
+        keywords,
+        keyword_batch_size=2,
+        max_workers=1,
+    )
+
+    assert len(opener_calls) == 3
+    assert result[normalize_key(keywords[0])].mobile_searches == 410.0
+    assert result[normalize_key(keywords[1])].mobile_searches == 160.0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -17,6 +18,7 @@ from app.analyzer.naver_searchad import _normalize_keyword_tool_hint
 _BASE_URL = "https://openapi.naver.com"
 _BLOG_SEARCH_URI = "/v1/search/blog.json"
 _DEFAULT_TIMEOUT = 8.0
+_DEFAULT_MAX_WORKERS = 6
 _DEFAULT_CREDENTIALS_PATH = Path(".local") / "credentials" / "naver_search.credentials.json"
 _LEGACY_CREDENTIALS_PATH = Path("naver_search.credentials.json")
 
@@ -75,6 +77,7 @@ class NaverOpenSearchCredentials:
 class NaverOpenSearchSettings:
     enabled: bool = False
     timeout: float = _DEFAULT_TIMEOUT
+    max_workers: int = _DEFAULT_MAX_WORKERS
 
     @classmethod
     def from_input(cls, input_data: Any) -> "NaverOpenSearchSettings":
@@ -93,9 +96,16 @@ class NaverOpenSearchSettings:
             minimum=1.0,
             maximum=30.0,
         )
+        max_workers = _coerce_int(
+            search_api.get("max_workers"),
+            default=_DEFAULT_MAX_WORKERS,
+            minimum=1,
+            maximum=12,
+        )
         return cls(
             enabled=enabled,
             timeout=timeout,
+            max_workers=max_workers,
         )
 
 
@@ -111,31 +121,68 @@ class NaverOpenSearchClient:
         self._timeout = timeout
         self._opener = opener or urlopen
 
-    def fetch_blog_totals(self, keywords: list[str]) -> dict[str, KeywordStats]:
+    def fetch_blog_totals(
+        self,
+        keywords: list[str],
+        *,
+        max_workers: int = _DEFAULT_MAX_WORKERS,
+    ) -> dict[str, KeywordStats]:
         results: dict[str, KeywordStats] = {}
+        pending_keywords: list[str] = []
         for keyword in keywords:
             normalized_keyword = normalize_text(keyword)
             if not normalized_keyword:
                 continue
+            key = normalize_key(normalized_keyword)
+            if not key or key in results:
+                continue
+            pending_keywords.append(normalized_keyword)
 
-            query_keyword = _normalize_keyword_tool_hint(normalized_keyword) or normalized_keyword
+        if not pending_keywords:
+            return results
 
-            payload = self._get_json(
-                _BLOG_SEARCH_URI,
-                query_params={
-                    "query": query_keyword,
-                    "display": "1",
-                    "start": "1",
-                    "sort": "sim",
-                },
-            )
-            total = parse_blog_total_response(payload)
-            results[normalize_key(normalized_keyword)] = KeywordStats(
-                keyword=normalized_keyword,
-                blog_results=total,
-                source="naver_blog_search",
-            )
+        worker_count = max(1, min(max_workers, len(pending_keywords)))
+        if worker_count == 1:
+            for keyword in pending_keywords:
+                item = self._fetch_blog_total(keyword)
+                if item is not None:
+                    results[normalize_key(keyword)] = item
+            return results
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            future_map = {
+                executor.submit(self._fetch_blog_total, keyword): keyword
+                for keyword in pending_keywords
+            }
+            for future in as_completed(future_map):
+                keyword = future_map[future]
+                item = future.result()
+                if item is not None:
+                    results[normalize_key(keyword)] = item
         return results
+
+    def _fetch_blog_total(self, keyword: str) -> KeywordStats | None:
+        normalized_keyword = normalize_text(keyword)
+        if not normalized_keyword:
+            return None
+
+        query_keyword = _normalize_keyword_tool_hint(normalized_keyword) or normalized_keyword
+
+        payload = self._get_json(
+            _BLOG_SEARCH_URI,
+            query_params={
+                "query": query_keyword,
+                "display": "1",
+                "start": "1",
+                "sort": "sim",
+            },
+        )
+        total = parse_blog_total_response(payload)
+        return KeywordStats(
+            keyword=normalized_keyword,
+            blog_results=total,
+            source="naver_blog_search",
+        )
 
     def _get_json(self, uri: str, *, query_params: dict[str, str]) -> dict[str, Any]:
         query = urlencode(query_params)
@@ -194,7 +241,10 @@ def build_blog_search_index(
 
     resolved_client = client or NaverOpenSearchClient(credentials, timeout=settings.timeout)
     try:
-        return resolved_client.fetch_blog_totals(pending_keywords)
+        return resolved_client.fetch_blog_totals(
+            pending_keywords,
+            max_workers=settings.max_workers,
+        )
     except NaverOpenSearchError:
         return {}
 
@@ -312,6 +362,14 @@ def _coerce_bool(value: Any, fallback: Any, *, default: bool) -> bool:
 def _coerce_float(value: Any, *, default: float, minimum: float, maximum: float) -> float:
     try:
         number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, number))
+
+
+def _coerce_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
     except (TypeError, ValueError):
         return default
     return max(minimum, min(maximum, number))

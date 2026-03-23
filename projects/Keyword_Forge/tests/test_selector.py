@@ -383,6 +383,70 @@ def test_selector_builds_longtail_suggestions_from_clustered_keywords() -> None:
     assert any("보험" in item["longtail_keyword"] for item in suggestions)
 
 
+def test_selector_uses_editorial_fallback_and_still_builds_general_longtails() -> None:
+    result = run(
+        {
+            "analyzed_keywords": [
+                {
+                    "keyword": "컴퓨터 모니터",
+                    "profitability_grade": "D",
+                    "attackability_grade": "4",
+                    "combo_grade": "D4",
+                    "golden_bucket": "hold",
+                    "score": 39.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.98,
+                    "metrics": {"volume": 16260.0, "cpc": 2653.0},
+                },
+                {
+                    "keyword": "포터블 모니터",
+                    "profitability_grade": "D",
+                    "attackability_grade": "3",
+                    "combo_grade": "D3",
+                    "golden_bucket": "hold",
+                    "score": 39.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.98,
+                    "metrics": {"volume": 24610.0, "cpc": 1163.0},
+                },
+                {
+                    "keyword": "벤큐 2546k",
+                    "profitability_grade": "D",
+                    "attackability_grade": "1",
+                    "combo_grade": "D1",
+                    "golden_bucket": "experimental",
+                    "score": 34.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.98,
+                    "metrics": {"volume": 2730.0, "cpc": 70.0},
+                },
+                {
+                    "keyword": "벤큐 ma270s",
+                    "profitability_grade": "D",
+                    "attackability_grade": "1",
+                    "combo_grade": "D1",
+                    "golden_bucket": "experimental",
+                    "score": 34.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.98,
+                    "metrics": {"volume": 1500.0, "cpc": 70.0},
+                },
+            ],
+        }
+    )
+
+    selected_keywords = result["selected_keywords"]
+    assert len(selected_keywords) == 4
+    assert all(item["selection_mode"] == "editorial_support" for item in selected_keywords)
+    assert any(item["keyword"] == "벤큐 2546k" for item in selected_keywords)
+    assert any(item["keyword"] == "포터블 모니터" for item in selected_keywords)
+
+    longtail_keywords = [item["longtail_keyword"] for item in result["longtail_suggestions"]]
+    assert longtail_keywords
+    assert any(keyword == "컴퓨터 모니터 추천 기준" for keyword in longtail_keywords)
+    assert any("벤큐 2546k" in keyword for keyword in longtail_keywords)
+
+
 def test_selector_keeps_guide_and_checklist_suffixes_optional() -> None:
     analyzed_keywords = [
         {

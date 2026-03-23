@@ -10,9 +10,13 @@ from app.analyzer.scorer import (
     classify_golden_bucket,
     classify_profitability_grade,
 )
+from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
 from app.selector.cannibalization import build_cannibalization_report
 from app.selector.content_map import build_content_map
 from app.selector.longtail import build_longtail_map, resolve_longtail_options
+
+
+_EDITORIAL_FALLBACK_LIMIT = 8
 
 
 def is_golden_keyword(item: dict[str, Any]) -> bool:
@@ -208,6 +212,8 @@ def _resolve_attackability_grade(item: dict[str, Any]) -> str:
         float(metrics.get("competition", 0.0) or 0.0),
         float(metrics.get("search_volume_score", metrics.get("volume_score", 0.0)) or 0.0),
         DEFAULT_CONFIG,
+        total_clicks=float(metrics.get("total_clicks", 0.0) or 0.0),
+        search_volume=float(metrics.get("volume", 0.0) or 0.0),
     )
     return classify_attackability_grade(attackability_score, DEFAULT_CONFIG)
 
@@ -242,22 +248,37 @@ def _matches_combo_filter(
 def _select_fallback_candidates(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ranked_items = sorted(
         (item for item in items if isinstance(item, dict)),
-        key=lambda item: (
-            float(item.get("confidence", item.get("metrics", {}).get("confidence", 0.0)) or 0.0),
-            float(item.get("score", 0.0) or 0.0),
-            float(item.get("metrics", {}).get("cpc", 0.0) or 0.0),
-            float(item.get("metrics", {}).get("volume", 0.0) or 0.0),
-        ),
+        key=_fallback_candidate_sort_key,
         reverse=True,
     )
 
-    primary = [
-        _decorate_fallback_item(item)
+    exploratory = [
+        _decorate_editorial_support_item(item, reason="editorial_longtail_seed")
+        for item in ranked_items
+        if _is_measured_candidate(item) and _resolve_golden_bucket(item) == "experimental"
+    ]
+    exposure_first = [
+        _decorate_editorial_support_item(item, reason="high_exposure_seed")
+        for item in ranked_items
+        if _is_measured_candidate(item)
+        and _resolve_golden_bucket(item) == "hold"
+        and _resolve_attackability_grade(item) in {"1", "2", "3"}
+        and float(item.get("score", 0.0) or 0.0) >= 30.0
+    ]
+    measured = [
+        _decorate_editorial_support_item(item, reason="measured_seed")
         for item in ranked_items
         if _is_measured_candidate(item) and float(item.get("score", 0.0) or 0.0) >= 30.0
     ]
-    if primary:
-        return primary[:3]
+
+    editorial_pool = _merge_unique_candidates(
+        exploratory,
+        exposure_first,
+        measured,
+        limit=_EDITORIAL_FALLBACK_LIMIT,
+    )
+    if editorial_pool:
+        return editorial_pool
 
     secondary = [
         _decorate_fallback_item(item)
@@ -282,6 +303,14 @@ def _decorate_fallback_item(item: dict[str, Any]) -> dict[str, Any]:
         **item,
         "selection_mode": "fallback",
         "selection_reason": "top_scored_candidate",
+    }
+
+
+def _decorate_editorial_support_item(item: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    return {
+        **item,
+        "selection_mode": "editorial_support",
+        "selection_reason": reason,
     }
 
 
@@ -314,3 +343,45 @@ def _decorate_default_selected_item(item: dict[str, Any]) -> dict[str, Any]:
         "selection_mode": "golden_combo",
         "selection_reason": golden_bucket or "golden_combo",
     }
+
+
+def _fallback_candidate_sort_key(item: dict[str, Any]) -> tuple[float, float, float, float, float, float]:
+    bucket_rank = {
+        "experimental": 2.0,
+        "hold": 1.0,
+        "promising": 0.5,
+        "gold": 0.0,
+    }.get(_resolve_golden_bucket(item), 0.0)
+    attackability_rank = {
+        "1": 4.0,
+        "2": 3.0,
+        "3": 2.0,
+        "4": 1.0,
+    }.get(_resolve_attackability_grade(item), 0.0)
+    specificity = float(len(tokenize_text(normalize_text(item.get("keyword")))))
+    confidence = float(item.get("confidence", item.get("metrics", {}).get("confidence", 0.0)) or 0.0)
+    score = float(item.get("score", 0.0) or 0.0)
+    volume = float(item.get("metrics", {}).get("volume", 0.0) or 0.0)
+    return (
+        bucket_rank,
+        attackability_rank,
+        specificity,
+        confidence,
+        score,
+        volume,
+    )
+
+
+def _merge_unique_candidates(*groups: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            keyword_key = normalize_key(normalize_text(item.get("keyword")))
+            if not keyword_key or keyword_key in seen:
+                continue
+            seen.add(keyword_key)
+            merged.append(item)
+            if len(merged) >= limit:
+                return merged
+    return merged

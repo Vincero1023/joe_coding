@@ -11,6 +11,24 @@ from app.title.rules import NAVER_HOME_MAX_LENGTH
 from app.title.templates import build_blog_titles, build_naver_home_titles
 from app.title.types import TitleOutputItem
 
+_MODEL_ESCALATION_TRIGGER_FAILURES = 2
+_MODEL_ESCALATION_MAP: dict[str, dict[str, str]] = {
+    "openai": {
+        "gpt-4o-mini": "gpt-4.1-mini",
+    },
+    "gemini": {
+        "gemini-2.5-flash-lite": "gemini-2.5-flash",
+        "gemini-2.5-flash": "gemini-2.5-pro",
+    },
+    "vertex": {
+        "gemini-2.5-flash-lite": "gemini-2.5-flash",
+        "gemini-2.5-flash": "gemini-2.5-pro",
+    },
+    "anthropic": {
+        "claude-haiku-4-5": "claude-sonnet-4-6",
+    },
+}
+
 
 def generate_titles(
     items: list[dict[str, Any]],
@@ -37,6 +55,8 @@ def generate_titles(
                 quality_retry_threshold=options.quality_retry_threshold if options else TITLE_QUALITY_PASS_SCORE,
                 issue_context_enabled=options.issue_context_enabled if options else False,
                 issue_context_limit=options.issue_context_limit if options else 0,
+                issue_source_mode=options.issue_source_mode if options else "",
+                community_sources=list(options.community_sources) if options else [],
             ),
         )
 
@@ -58,6 +78,8 @@ def generate_titles(
                 quality_retry_threshold=options.quality_retry_threshold,
                 issue_context_enabled=options.issue_context_enabled,
                 issue_context_limit=options.issue_context_limit,
+                issue_source_mode=options.issue_source_mode,
+                community_sources=list(options.community_sources),
             ),
         )
 
@@ -102,6 +124,8 @@ def generate_titles(
                 quality_retry_threshold=options.quality_retry_threshold,
                 issue_context_enabled=options.issue_context_enabled,
                 issue_context_limit=options.issue_context_limit,
+                issue_source_mode=options.issue_source_mode,
+                community_sources=list(options.community_sources),
             ),
         )
 
@@ -136,6 +160,8 @@ def generate_titles(
                 quality_retry_threshold=options.quality_retry_threshold,
                 issue_context_enabled=options.issue_context_enabled,
                 issue_context_limit=options.issue_context_limit,
+                issue_source_mode=options.issue_source_mode,
+                community_sources=list(options.community_sources),
             ),
             options=options,
             allow_auto_retry=used_mode in {"ai", "ai_with_template_fallback"} and options.auto_retry_enabled,
@@ -216,9 +242,14 @@ def _finalize_generated_results(
 ) -> tuple[list[TitleOutputItem], dict[str, Any]]:
     enriched_results, quality_summary = enrich_title_results(results)
     auto_retry_meta = _build_auto_retry_meta()
+    model_escalation_meta = _build_model_escalation_meta(
+        enabled=bool(options and _resolve_escalated_model(options.provider, options.model)),
+        trigger_failure_count=_MODEL_ESCALATION_TRIGGER_FAILURES,
+        source_model=options.model if options else "",
+    )
 
     if allow_auto_retry and options is not None:
-        enriched_results, quality_summary, auto_retry_meta = _auto_retry_low_quality_results(
+        enriched_results, quality_summary, auto_retry_meta, model_escalation_meta = _auto_retry_low_quality_results(
             results,
             enriched_results,
             options,
@@ -226,6 +257,12 @@ def _finalize_generated_results(
 
     meta["quality_summary"] = quality_summary
     meta["auto_retry"] = auto_retry_meta
+    meta["model_escalation"] = model_escalation_meta
+    meta["final_model"] = (
+        str(model_escalation_meta.get("target_model") or "").strip()
+        if int(model_escalation_meta.get("accepted_count") or 0) > 0
+        else meta.get("model")
+    )
     return enriched_results, meta
 
 
@@ -233,7 +270,7 @@ def _auto_retry_low_quality_results(
     original_results: list[TitleOutputItem],
     enriched_results: list[TitleOutputItem],
     options: TitleGenerationOptions,
-) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any]]:
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
     retry_threshold = _resolve_quality_retry_threshold(options.quality_retry_threshold)
     retry_keywords = [
         normalize_text(item.get("keyword"))
@@ -241,9 +278,21 @@ def _auto_retry_low_quality_results(
         if _should_retry_for_quality(item.get("quality_report", {}), retry_threshold)
     ]
     retry_keywords = [keyword for keyword in retry_keywords if keyword]
+    escalation_options = _build_model_escalation_options(options, retry_threshold)
+    base_escalation_meta = _build_model_escalation_meta(
+        enabled=bool(escalation_options),
+        trigger_failure_count=_MODEL_ESCALATION_TRIGGER_FAILURES,
+        source_model=options.model,
+        target_model=escalation_options.model if escalation_options else "",
+    )
     if not retry_keywords:
         quality_summary = _build_quality_summary_from_items(enriched_results)
-        return enriched_results, quality_summary, _build_auto_retry_meta(retry_threshold=retry_threshold)
+        return (
+            enriched_results,
+            quality_summary,
+            _build_auto_retry_meta(retry_threshold=retry_threshold),
+            base_escalation_meta,
+        )
 
     retried_by_keyword: dict[str, TitleOutputItem] = {}
     retry_error_messages: list[str] = []
@@ -290,34 +339,12 @@ def _auto_retry_low_quality_results(
                 },
             }
 
-    current_report_by_keyword = {
-        normalize_text(item.get("keyword")): item.get("quality_report", {})
-        for item in enriched_results
-        if normalize_text(item.get("keyword"))
-    }
-
-    accepted_retry_keywords: list[str] = []
-    final_results: list[TitleOutputItem] = []
-
-    for item in original_results:
-        keyword = normalize_text(item.get("keyword"))
-        retry_item = retried_by_keyword.get(keyword)
-        if not retry_item:
-            final_results.append(item)
-            continue
-
-        retried_enriched_items, _ = enrich_title_results([retry_item])
-        retried_candidate = retried_enriched_items[0]
-        current_report = current_report_by_keyword.get(keyword, {})
-        retry_report = retried_candidate.get("quality_report", {})
-
-        if _should_accept_retry(current_report, retry_report):
-            accepted_retry_keywords.append(keyword)
-            final_results.append(retry_item)
-        else:
-            final_results.append(item)
-
-    final_enriched_results, quality_summary = enrich_title_results(final_results)
+    retry_results, accepted_retry_keywords = _merge_retry_candidates(
+        current_results=original_results,
+        current_enriched_results=enriched_results,
+        retry_candidates=retried_by_keyword,
+    )
+    retry_enriched_results, quality_summary = enrich_title_results(retry_results)
     auto_retry_meta = _build_auto_retry_meta(
         attempted_keywords=retry_keywords,
         accepted_keywords=accepted_retry_keywords,
@@ -325,7 +352,41 @@ def _auto_retry_low_quality_results(
         error_messages=retry_error_messages,
         retry_threshold=retry_threshold,
     )
-    return final_enriched_results, quality_summary, auto_retry_meta
+    if not escalation_options:
+        return retry_enriched_results, quality_summary, auto_retry_meta, base_escalation_meta
+
+    escalation_keywords = [
+        normalize_text(item.get("keyword"))
+        for item in retry_enriched_results
+        if _should_retry_for_quality(item.get("quality_report", {}), retry_threshold)
+    ]
+    escalation_keywords = [keyword for keyword in escalation_keywords if keyword]
+    if not escalation_keywords:
+        return retry_enriched_results, quality_summary, auto_retry_meta, base_escalation_meta
+
+    escalated_candidates, escalation_error_messages = _request_retry_candidates(
+        original_items_by_keyword,
+        escalation_keywords,
+        escalation_options,
+    )
+    final_results, accepted_escalation_keywords = _merge_retry_candidates(
+        current_results=retry_results,
+        current_enriched_results=retry_enriched_results,
+        retry_candidates=escalated_candidates,
+    )
+    final_enriched_results, quality_summary = enrich_title_results(final_results)
+    escalation_meta = _build_model_escalation_meta(
+        enabled=True,
+        trigger_failure_count=_MODEL_ESCALATION_TRIGGER_FAILURES,
+        triggered=True,
+        source_model=options.model,
+        target_model=escalation_options.model,
+        attempted_keywords=escalation_keywords,
+        accepted_keywords=accepted_escalation_keywords,
+        remaining_retry_count=int(quality_summary.get("retry_count", 0)),
+        error_messages=escalation_error_messages,
+    )
+    return final_enriched_results, quality_summary, auto_retry_meta, escalation_meta
 
 
 def _should_retry_for_quality(report: dict[str, Any], retry_threshold: int) -> bool:
@@ -371,6 +432,17 @@ def _build_quality_retry_prompt(existing_prompt: str, retry_threshold: int) -> s
     if not base_prompt:
         return retry_guidance
     return f"{base_prompt}\n\n{retry_guidance}"
+
+
+def _build_model_escalation_prompt(existing_prompt: str, retry_threshold: int) -> str:
+    escalation_guidance = (
+        "Model escalation guidance:\n"
+        "- This is the rescue pass after two failed quality attempts.\n"
+        "- Prefer the safest clean structure over forced novelty.\n"
+        "- If the issue angle is weak, choose a cleaner comparison, checklist, update, or decision-point frame.\n"
+        "- Keep every title clearly distinct without drifting away from the keyword intent."
+    )
+    return f"{_build_quality_retry_prompt(existing_prompt, retry_threshold)}\n\n{escalation_guidance}"
 
 
 def _build_quality_summary_from_items(items: list[TitleOutputItem]) -> dict[str, Any]:
@@ -421,6 +493,137 @@ def _build_auto_retry_meta(
     }
 
 
+def _build_model_escalation_meta(
+    *,
+    enabled: bool,
+    trigger_failure_count: int,
+    triggered: bool = False,
+    source_model: str = "",
+    target_model: str = "",
+    attempted_keywords: list[str] | None = None,
+    accepted_keywords: list[str] | None = None,
+    remaining_retry_count: int = 0,
+    error_messages: list[str] | None = None,
+) -> dict[str, Any]:
+    attempted_keywords = attempted_keywords or []
+    accepted_keywords = accepted_keywords or []
+    error_messages = error_messages or []
+    return {
+        "enabled": enabled,
+        "trigger_failure_count": max(1, int(trigger_failure_count or _MODEL_ESCALATION_TRIGGER_FAILURES)),
+        "triggered": triggered,
+        "source_model": str(source_model or "").strip(),
+        "target_model": str(target_model or "").strip(),
+        "attempted_count": len(attempted_keywords),
+        "attempted_keywords": attempted_keywords,
+        "accepted_count": len(accepted_keywords),
+        "accepted_keywords": accepted_keywords,
+        "remaining_retry_count": remaining_retry_count,
+        "error_messages": error_messages[:3],
+    }
+
+
+def _merge_retry_candidates(
+    *,
+    current_results: list[TitleOutputItem],
+    current_enriched_results: list[TitleOutputItem],
+    retry_candidates: dict[str, TitleOutputItem],
+) -> tuple[list[TitleOutputItem], list[str]]:
+    current_report_by_keyword = {
+        normalize_text(item.get("keyword")): item.get("quality_report", {})
+        for item in current_enriched_results
+        if normalize_text(item.get("keyword"))
+    }
+
+    accepted_keywords: list[str] = []
+    merged_results: list[TitleOutputItem] = []
+
+    for item in current_results:
+        keyword = normalize_text(item.get("keyword"))
+        retry_item = retry_candidates.get(keyword)
+        if not retry_item:
+            merged_results.append(item)
+            continue
+
+        retried_enriched_items, _ = enrich_title_results([retry_item])
+        retried_candidate = retried_enriched_items[0]
+        current_report = current_report_by_keyword.get(keyword, {})
+        retry_report = retried_candidate.get("quality_report", {})
+
+        if _should_accept_retry(current_report, retry_report):
+            accepted_keywords.append(keyword)
+            merged_results.append(retry_item)
+        else:
+            merged_results.append(item)
+
+    return merged_results, accepted_keywords
+
+
+def _request_retry_candidates(
+    original_items_by_keyword: dict[str, TitleOutputItem],
+    retry_keywords: list[str],
+    retry_options: TitleGenerationOptions,
+) -> tuple[dict[str, TitleOutputItem], list[str]]:
+    retried_by_keyword: dict[str, TitleOutputItem] = {}
+    retry_error_messages: list[str] = []
+    retry_input_items = [
+        {
+            **_strip_generated_fields(original_items_by_keyword.get(keyword, {"keyword": keyword})),
+            "keyword": keyword,
+        }
+        for keyword in retry_keywords
+    ]
+
+    for chunk in _chunk_keywords(retry_input_items, retry_options.batch_size):
+        try:
+            response_items = request_ai_titles(
+                chunk,
+                options=retry_options,
+            )
+        except TitleProviderError as exc:
+            retry_error_messages.append(str(exc))
+            continue
+
+        for item in response_items:
+            keyword = normalize_text(item.get("keyword"))
+            titles = item.get("titles") if isinstance(item, dict) else None
+            if not keyword or not _is_valid_title_bundle(titles):
+                continue
+            source_item = original_items_by_keyword.get(keyword, {"keyword": keyword})
+            retried_by_keyword[keyword] = {
+                **_strip_generated_fields(source_item),
+                "keyword": keyword,
+                "titles": {
+                    "naver_home": list(titles["naver_home"]),
+                    "blog": list(titles["blog"]),
+                },
+            }
+
+    return retried_by_keyword, retry_error_messages
+
+
+def _build_model_escalation_options(
+    options: TitleGenerationOptions,
+    retry_threshold: int,
+) -> TitleGenerationOptions | None:
+    escalated_model = _resolve_escalated_model(options.provider, options.model)
+    if not escalated_model:
+        return None
+    return replace(
+        options,
+        model=escalated_model,
+        batch_size=max(1, min(options.batch_size, 4)),
+        system_prompt=_build_model_escalation_prompt(options.system_prompt, retry_threshold),
+    )
+
+
+def _resolve_escalated_model(provider: str, model: str) -> str:
+    normalized_provider = str(provider or "").strip().lower()
+    normalized_model = normalize_text(model)
+    provider_map = _MODEL_ESCALATION_MAP.get(normalized_provider, {})
+    return str(provider_map.get(normalized_model, "")).strip()
+
+
 def _resolve_quality_retry_threshold(value: int | float | None) -> int:
     try:
         number = int(value or TITLE_QUALITY_PASS_SCORE)
@@ -444,6 +647,8 @@ def _build_meta(
     quality_retry_threshold: int = TITLE_QUALITY_PASS_SCORE,
     issue_context_enabled: bool = False,
     issue_context_limit: int = 0,
+    issue_source_mode: str = "",
+    community_sources: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "requested_mode": requested_mode,
@@ -459,4 +664,6 @@ def _build_meta(
         "quality_retry_threshold": _resolve_quality_retry_threshold(quality_retry_threshold),
         "issue_context_enabled": issue_context_enabled,
         "issue_context_limit": max(0, int(issue_context_limit or 0)),
+        "issue_source_mode": str(issue_source_mode or "").strip(),
+        "community_sources": list(community_sources or []),
     }

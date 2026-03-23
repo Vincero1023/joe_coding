@@ -121,6 +121,7 @@ def _build_title_input(
     selected_result: dict[str, Any],
     analyzed_result: dict[str, Any],
 ) -> dict[str, Any]:
+    collector_config = input_data.get("collector", {}) if isinstance(input_data.get("collector"), dict) else {}
     title_defaults = {
         "selected_keywords": _get_list(selected_result, "selected_keywords"),
         "keyword_clusters": _get_list(selected_result, "keyword_clusters"),
@@ -132,6 +133,11 @@ def _build_title_input(
         ),
         "analyzed_keywords": _get_list(analyzed_result, "analyzed_keywords"),
         "title_options": input_data.get("title_options", {}),
+        "mode": input_data.get("mode", collector_config.get("mode", "")),
+        "category": input_data.get("category", collector_config.get("category", "")),
+        "seed_input": input_data.get("seed_input", collector_config.get("seed_input", "")),
+        "collector": collector_config,
+        "title_export": _build_title_export_input(input_data),
     }
     return _merge_stage_config(title_defaults, input_data.get("title"))
 
@@ -160,6 +166,28 @@ def _build_analyzer_input(
         "naver_search_client_secret": input_data.get("naver_search_client_secret", ""),
     }
     return _merge_stage_config(analyzer_defaults, input_data.get("analyzer"))
+
+
+def _build_title_export_input(input_data: dict[str, Any]) -> dict[str, Any]:
+    raw_export = input_data.get("title_export") if isinstance(input_data.get("title_export"), dict) else {}
+    enabled = _coerce_boolish(raw_export.get("enabled"), default=True)
+    return {
+        **raw_export,
+        "enabled": enabled,
+    }
+
+
+def _coerce_boolish(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def _merge_stage_config(defaults: dict[str, Any], overrides: Any) -> dict[str, Any]:

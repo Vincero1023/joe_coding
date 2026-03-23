@@ -20,7 +20,7 @@ const STAGES = [
     {
         key: "selected",
         label: "4단계 선별",
-        description: "골든 키워드 조건으로 최종 후보를 걸러냅니다.",
+        description: "수익형 후보와 글감 후보를 다음 단계용으로 정리합니다.",
         resultKey: "selected_keywords",
     },
     {
@@ -161,6 +161,27 @@ const TITLE_TEMPERATURE_PRESETS = [
 const TITLE_TEMPERATURE_DEFAULT = "0.7";
 const TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT = 84;
 const TITLE_ISSUE_CONTEXT_LIMIT_DEFAULT = 3;
+const TITLE_ISSUE_SOURCE_MODE_DEFAULT = "mixed";
+const TITLE_ISSUE_SOURCE_MODE_LIBRARY = Array.isArray(window.KEYWORD_FORGE_TITLE_ISSUE_SOURCE_MODES)
+    ? window.KEYWORD_FORGE_TITLE_ISSUE_SOURCE_MODES
+    : [
+        { key: "news", label: "뉴스형" },
+        { key: "reaction", label: "반응형" },
+        { key: "mixed", label: "혼합형" },
+    ];
+const TITLE_COMMUNITY_SOURCE_LIBRARY = Array.isArray(window.KEYWORD_FORGE_TITLE_COMMUNITY_SOURCES)
+    ? window.KEYWORD_FORGE_TITLE_COMMUNITY_SOURCES
+    : [
+        { key: "cafe_naver", label: "네이버 카페", domains: ["cafe.naver.com"], is_default: true },
+        { key: "blog_naver", label: "네이버 블로그", domains: ["blog.naver.com"], is_default: true },
+        { key: "post_naver", label: "네이버 포스트", domains: ["post.naver.com"], is_default: true },
+        { key: "dcinside", label: "디시인사이드", domains: ["dcinside.com", "gall.dcinside.com"], is_default: false },
+        { key: "clien", label: "클리앙", domains: ["clien.net"], is_default: false },
+        { key: "ppomppu", label: "뽐뿌", domains: ["ppomppu.co.kr"], is_default: false },
+    ];
+const TITLE_COMMUNITY_SOURCE_DEFAULT_KEYS = TITLE_COMMUNITY_SOURCE_LIBRARY
+    .filter((item) => Boolean(item?.is_default))
+    .map((item) => String(item.key || "").trim());
 const TITLE_PRESET_LIBRARY = Array.isArray(window.KEYWORD_FORGE_TITLE_PRESETS)
     ? window.KEYWORD_FORGE_TITLE_PRESETS
     : [];
@@ -197,22 +218,27 @@ const PROFITABILITY_ORDER = ["A", "B", "C", "D"];
 const ATTACKABILITY_ORDER = ["1", "2", "3", "4"];
 const GRADE_PRESET_MAP = {
     all: {
+        label: "전체",
         profitability: [...PROFITABILITY_ORDER],
         attackability: [...ATTACKABILITY_ORDER],
     },
-    golden_candidate: {
+    balanced: {
+        label: "균형형",
         profitability: ["A", "B", "C"],
         attackability: ["1", "2", "3"],
     },
     profit_focus: {
+        label: "수익형",
         profitability: ["A", "B"],
         attackability: [...ATTACKABILITY_ORDER],
     },
-    easy_exposure: {
-        profitability: [...PROFITABILITY_ORDER],
-        attackability: ["1", "2"],
+    longtail_explore: {
+        label: "롱테일 탐색형",
+        profitability: ["B", "C", "D"],
+        attackability: ["1", "2", "3"],
     },
 };
+const SELECTION_PRESET_ORDER = ["all", "balanced", "profit_focus", "longtail_explore"];
 const TITLE_RESULT_MODE_FILTER_OPTIONS = [
     { value: "all", label: "전체" },
     { value: "single", label: "핵심키워드" },
@@ -586,7 +612,7 @@ async function runTitleStage() {
     addLog(
         titleOptions.mode === "ai"
             ? `제목 생성 시작: ${titleOptions.provider} / ${titleOptions.model} 모델을 사용합니다.`
-            : "제목 생성 시작: template 규칙 기반 제목을 생성합니다.",
+            : "제목 생성 시작: 템플릿 규칙 기반 제목을 생성합니다.",
     );
     clearStageAndDownstream("titled");
     const result = await executeStage({
@@ -1207,6 +1233,9 @@ function buildTitleOptions() {
         quality_retry_threshold: formState.quality_retry_threshold,
         issue_context_enabled: formState.issue_context_enabled,
         issue_context_limit: formState.issue_context_limit,
+        issue_source_mode: formState.issue_source_mode,
+        community_sources: formState.community_sources,
+        community_custom_domains: formState.community_custom_domains,
         preset_key: formState.preset_key,
         provider,
         model,
@@ -1236,7 +1265,7 @@ function formatTitleKeywordModeSummary(rawModes) {
 function buildTitleRunSummary(titleOptions) {
     const modeSummary = formatTitleKeywordModeSummary(titleOptions.keyword_modes);
     if (titleOptions.mode !== "ai") {
-        return `template 규칙 기반 / ${modeSummary}`;
+        return `템플릿 규칙 기반 / ${modeSummary}`;
     }
     if (!String(titleOptions.provider || "").trim()) {
         return `AI 미등록 / ${modeSummary}`;
@@ -1249,6 +1278,14 @@ function buildTitleRunSummary(titleOptions) {
     ].filter(Boolean);
     if (titleOptions.issue_context_enabled) {
         parts.push(`실시간 이슈 ${normalizeTitleIssueContextLimit(titleOptions.issue_context_limit)}개/요청`);
+        const issueSourceMode = normalizeTitleIssueSourceMode(titleOptions.issue_source_mode);
+        parts.push(
+            issueSourceMode === "news"
+                ? "뉴스형"
+                : issueSourceMode === "reaction"
+                    ? "반응형"
+                    : "혼합형",
+        );
     }
     return `${parts.join(" / ")} / ${modeSummary}`;
 }
@@ -1602,7 +1639,7 @@ function renderTitleSettingsState() {
     elements.titleApiKey.disabled = !isAiMode;
     elements.titleTemperature.disabled = !isAiMode;
     elements.titleFallback.disabled = !isAiMode;
-    elements.titleModeBadge.textContent = isAiMode ? `ai:${elements.titleProvider.value}` : "template";
+    elements.titleModeBadge.textContent = isAiMode ? `AI:${elements.titleProvider.value}` : "템플릿";
 }
 
 function getTitleSettingsFormState() {
@@ -2003,12 +2040,12 @@ function getQuickStartConfig() {
                 : (selectedCount === 0
                     ? "선별 결과를 먼저 만들면 제목 생성만 따로 실행할 수 있습니다."
                     : "AI 모드라면 운영 설정에서 API를 먼저 등록하세요."),
-            description: "template 또는 등록된 AI 연결을 사용해 제목 묶음을 만들고, 자동 재작성과 프롬프트 저장본도 그대로 반영합니다.",
+            description: "템플릿 또는 등록된 AI 연결을 사용해 제목 묶음을 만들고, 자동 재작성과 프롬프트 저장본도 그대로 반영합니다.",
             meta: [
                 `선별 ${selectedCount}건`,
                 titleMode === "ai"
                     ? (selectedProvider ? `AI ${formatTitleProviderLabel(selectedProvider)}` : "AI 미등록")
-                    : "template",
+                    : "템플릿",
                 formatTitleKeywordModeSummary(getTitleSettingsFormState().keyword_modes),
             ],
             primaryLabel: canRun ? "제목 생성 시작" : (selectedCount === 0 ? "선별 결과 준비" : "API 등록 필요"),
@@ -4374,7 +4411,6 @@ function buildExpandInput() {
 
 async function executeExpandAnalyzeStageStream(inputData) {
     const expandedStartedAt = Date.now();
-    const analyzedStartedAt = expandedStartedAt;
     const startedAtLabel = new Date(expandedStartedAt).toISOString();
 
     state.stageStatus.expanded = {
@@ -5495,6 +5531,10 @@ function bindElements() {
     elements.titleIssueContextEnabled = document.getElementById("titleIssueContextEnabled");
     elements.titleIssueContextLimit = document.getElementById("titleIssueContextLimit");
     elements.titleIssueContextSummary = document.getElementById("titleIssueContextSummary");
+    elements.titleIssueSourceMode = document.getElementById("titleIssueSourceMode");
+    elements.titleCommunitySourceInputs = Array.from(document.querySelectorAll("[data-title-community-source]"));
+    elements.titleCommunityCustomDomains = document.getElementById("titleCommunityCustomDomains");
+    elements.titleCommunitySourceSummary = document.getElementById("titleCommunitySourceSummary");
     elements.titlePreset = document.getElementById("titlePreset");
     elements.titlePresetDescription = document.getElementById("titlePresetDescription");
     elements.titleProvider = document.getElementById("titleProvider");
@@ -5646,6 +5686,8 @@ function bindEvents() {
         elements.titleAutoRetryThreshold,
         elements.titleIssueContextEnabled,
         elements.titleIssueContextLimit,
+        elements.titleIssueSourceMode,
+        elements.titleCommunityCustomDomains,
         elements.titlePreset,
         elements.titleProvider,
         elements.titleModel,
@@ -5658,6 +5700,10 @@ function bindEvents() {
     elements.titleModeRadios.forEach((radio) => {
         radio.addEventListener("change", handleTitleSettingsChange);
         radio.addEventListener("input", handleTitleSettingsChange);
+    });
+    elements.titleCommunitySourceInputs.forEach((input) => {
+        input.addEventListener("change", handleTitleSettingsChange);
+        input.addEventListener("input", handleTitleSettingsChange);
     });
     elements.openTitlePromptEditorButton?.addEventListener("click", openTitlePromptEditor);
     elements.openApiRegistrySettingsButton?.addEventListener("click", () => {
@@ -6097,7 +6143,7 @@ async function executeExpandAnalyzeStageStream(inputData) {
     state.stageStatus.analyzed = {
         state: "running",
         message: "\uc2e4\uc2dc\uac04 \ubd84\uc11d \uc911",
-        startedAt: analyzedStartedAt,
+        startedAt: null,
         finishedAt: null,
         durationMs: null,
     };
@@ -6127,7 +6173,7 @@ async function executeExpandAnalyzeStageStream(inputData) {
                     applyExpandStreamEvent(eventPayload, expandedStartedAt);
                 }
                 if (eventPayload?.event === "analysis") {
-                    applyAnalyzeStreamEvent(eventPayload, analyzedStartedAt);
+                    applyAnalyzeStreamEvent(eventPayload, state.stageStatus.analyzed?.startedAt || Date.now());
                 }
             },
             { signal: streamController.signal },
@@ -6143,20 +6189,22 @@ async function executeExpandAnalyzeStageStream(inputData) {
             result.analyzed_keywords || [],
         );
 
-        const expandedDurationMs = Date.now() - expandedStartedAt;
-        const analyzedDurationMs = Date.now() - analyzedStartedAt;
+        const finishedAt = Date.now();
+        const expandedDurationMs = finishedAt - expandedStartedAt;
+        const analyzedStartedAt = state.stageStatus.analyzed?.startedAt || finishedAt;
+        const analyzedDurationMs = finishedAt - analyzedStartedAt;
         state.stageStatus.expanded = {
             state: "success",
             message: `${result.expanded_keywords.length}\uac74 \uc644\ub8cc`,
             startedAt: expandedStartedAt,
-            finishedAt: Date.now(),
+            finishedAt,
             durationMs: expandedDurationMs,
         };
         state.stageStatus.analyzed = {
             state: "success",
             message: `${result.analyzed_keywords.length}\uac74 \uc644\ub8cc`,
             startedAt: analyzedStartedAt,
-            finishedAt: Date.now(),
+            finishedAt,
             durationMs: analyzedDurationMs,
         };
         state.diagnostics.expanded = {
@@ -6177,7 +6225,7 @@ async function executeExpandAnalyzeStageStream(inputData) {
             status: "success",
             endpoint: "/expand/analyze/stream",
             requestId: response.requestId,
-            startedAt: startedAtLabel,
+            startedAt: new Date(analyzedStartedAt).toISOString(),
             durationMs: analyzedDurationMs,
             request: sanitizeSensitiveData(inputData),
             responseSummary: buildResponseSummary("analyzed", result),
@@ -6185,22 +6233,24 @@ async function executeExpandAnalyzeStageStream(inputData) {
         };
         return result;
     } catch (error) {
-        const durationMs = Date.now() - analyzedStartedAt;
+        const finishedAt = Date.now();
+        const analyzedStartedAt = state.stageStatus.analyzed?.startedAt || finishedAt;
+        const expandedDurationMs = finishedAt - expandedStartedAt;
+        const analyzedDurationMs = finishedAt - analyzedStartedAt;
         if (isAbortLikeError(error)) {
-            const finishedAt = Date.now();
             state.stageStatus.expanded = {
                 state: "cancelled",
                 message: "\uc0ac\uc6a9\uc790 \uc911\uc9c0",
                 startedAt: expandedStartedAt,
                 finishedAt,
-                durationMs,
+                durationMs: expandedDurationMs,
             };
             state.stageStatus.analyzed = {
                 state: "cancelled",
                 message: "\uc0ac\uc6a9\uc790 \uc911\uc9c0",
                 startedAt: analyzedStartedAt,
                 finishedAt,
-                durationMs,
+                durationMs: analyzedDurationMs,
             };
             state.diagnostics.expanded = {
                 stageKey: "expanded",
@@ -6209,7 +6259,7 @@ async function executeExpandAnalyzeStageStream(inputData) {
                 endpoint: "/expand/analyze/stream",
                 requestId: "",
                 startedAt: startedAtLabel,
-                durationMs,
+                durationMs: expandedDurationMs,
                 request: sanitizeSensitiveData(inputData),
             };
             state.diagnostics.analyzed = {
@@ -6218,8 +6268,8 @@ async function executeExpandAnalyzeStageStream(inputData) {
                 status: "cancelled",
                 endpoint: "/expand/analyze/stream",
                 requestId: "",
-                startedAt: startedAtLabel,
-                durationMs,
+                startedAt: new Date(analyzedStartedAt).toISOString(),
+                durationMs: analyzedDurationMs,
                 request: sanitizeSensitiveData(inputData),
             };
             renderAll();
@@ -6230,22 +6280,22 @@ async function executeExpandAnalyzeStageStream(inputData) {
             stageKey: "analyzed",
             endpoint: "/expand/analyze/stream",
             request: inputData,
-            startedAt: startedAtLabel,
-            durationMs,
+            startedAt: new Date(analyzedStartedAt).toISOString(),
+            durationMs: analyzedDurationMs,
         });
         state.stageStatus.expanded = {
             state: "error",
             message: normalizedError.message,
             startedAt: expandedStartedAt,
-            finishedAt: Date.now(),
-            durationMs: normalizedError.durationMs,
+            finishedAt,
+            durationMs: expandedDurationMs,
         };
         state.stageStatus.analyzed = {
             state: "error",
             message: normalizedError.message,
             startedAt: analyzedStartedAt,
-            finishedAt: Date.now(),
-            durationMs: normalizedError.durationMs,
+            finishedAt,
+            durationMs: analyzedDurationMs,
         };
         state.diagnostics.expanded = {
             stageKey: "expanded",
@@ -6254,7 +6304,7 @@ async function executeExpandAnalyzeStageStream(inputData) {
             endpoint: "/expand/analyze/stream",
             requestId: normalizedError.requestId,
             startedAt: startedAtLabel,
-            durationMs: normalizedError.durationMs,
+            durationMs: expandedDurationMs,
             request: sanitizeSensitiveData(inputData),
             error: normalizedError,
         };
@@ -6264,8 +6314,8 @@ async function executeExpandAnalyzeStageStream(inputData) {
             status: "error",
             endpoint: "/expand/analyze/stream",
             requestId: normalizedError.requestId,
-            startedAt: startedAtLabel,
-            durationMs: normalizedError.durationMs,
+            startedAt: new Date(analyzedStartedAt).toISOString(),
+            durationMs: analyzedDurationMs,
             request: sanitizeSensitiveData(inputData),
             error: normalizedError,
         };
@@ -6552,7 +6602,7 @@ function renderTitleSettingsState() {
     elements.titleApiKey.disabled = !isAiMode;
     elements.titleTemperature.disabled = !isAiMode;
     elements.titleFallback.disabled = !isAiMode;
-    elements.titleModeBadge.textContent = isAiMode ? `ai:${elements.titleProvider.value}` : "template";
+    elements.titleModeBadge.textContent = isAiMode ? `AI:${elements.titleProvider.value}` : "템플릿";
 }
 
 function resetAll() {
@@ -7219,7 +7269,7 @@ async function runTitleStage() {
     addLog(
         titleOptions.mode === "ai"
             ? `제목 생성 시작: ${titleOptions.provider} / ${titleOptions.model} 모델을 사용합니다.`
-            : "제목 생성 시작: template 규칙 기반 제목을 생성합니다.",
+            : "제목 생성 시작: 템플릿 규칙 기반 제목을 생성합니다.",
     );
     clearStageAndDownstream("titled");
     const result = await executeStage({
@@ -7398,14 +7448,12 @@ function renderResults() {
     }
 
     if (selectedItems.length || selectedState !== "pending") {
-        const selectedTitle = selectedProfile?.mode === "combo_filter"
-            ? "조합 선별 키워드"
-            : (selectedProfile?.mode === "grade_filter" ? "등급 선별 키워드" : "골든 후보 키워드");
-        const selectedSubtitle = selectedProfile?.mode === "combo_filter"
-            ? `${(selectedProfile.allowed_profitability_grades || []).join(", ")} 수익성 · ${(selectedProfile.allowed_attackability_grades || []).join(", ")} 공략성 조합으로 선별한 결과입니다.`
-            : (selectedProfile?.allowed_grades?.length
-                ? `${selectedProfile.allowed_grades.join(", ")} 등급 키워드를 그대로 다음 단계로 보낸 결과입니다.`
-                : (selectedItems.length ? "기본 골든 후보 규칙으로 자동 선별한 결과입니다." : ""));
+        const selectedTitle = typeof window.buildSelectionResultTitle === "function"
+            ? window.buildSelectionResultTitle(selectedItems, selectedProfile)
+            : "선별 키워드";
+        const selectedSubtitle = typeof window.buildSelectionResultSubtitle === "function"
+            ? window.buildSelectionResultSubtitle(selectedItems, selectedProfile)
+            : "";
         resultViews.push({
             key: "selected",
             stageLabel: "4단계 선별",
@@ -8802,11 +8850,26 @@ function findMatchingTitlePresetKey(settings = {}) {
     const provider = normalizeTitleProvider(rawProvider);
     const model = String(settings.model || "").trim();
     const temperature = normalizeTitleTemperatureValue(settings.temperature);
+    const issueSourceMode = Object.prototype.hasOwnProperty.call(settings, "issue_source_mode")
+        ? normalizeTitleIssueSourceMode(settings.issue_source_mode)
+        : "";
+    const communitySources = Object.prototype.hasOwnProperty.call(settings, "community_sources")
+        ? normalizeTitleCommunitySourceKeys(settings.community_sources)
+        : null;
+    const communityCustomDomains = Object.prototype.hasOwnProperty.call(settings, "community_custom_domains")
+        ? normalizeTitleCommunityCustomDomains(settings.community_custom_domains)
+        : null;
     const matchedPreset = TITLE_PRESET_LIBRARY.find((preset) => (
         !preset?.is_manual
         && normalizeTitleProvider(preset.provider) === provider
         && String(preset.model || "").trim() === model
         && normalizeTitleTemperatureValue(preset.temperature) === temperature
+        && (!issueSourceMode || normalizeTitleIssueSourceMode(preset.issue_source_mode) === issueSourceMode)
+        && (!communitySources || compareStringLists(
+            normalizeTitleCommunitySourceKeys(preset.community_sources),
+            communitySources,
+        ))
+        && (!communityCustomDomains || communityCustomDomains.length === 0)
     ));
     return matchedPreset?.key || "";
 }
@@ -8824,7 +8887,13 @@ function buildTitlePresetDescription(presetKey) {
     if (!preset) {
         return "Provider, 모델, temperature를 직접 조합합니다. 추가 프롬프트는 그대로 함께 적용됩니다.";
     }
-    return `${preset.label}: ${preset.description} / ${formatTitleProviderLabel(preset.provider)} · ${preset.model} · temperature ${normalizeTitleTemperatureValue(preset.temperature)}`;
+    const issueSourceMode = normalizeTitleIssueSourceMode(preset.issue_source_mode);
+    const sourceModeLabel = issueSourceMode === "news"
+        ? "뉴스형"
+        : issueSourceMode === "reaction"
+            ? "반응형"
+            : "혼합형";
+    return `${preset.label}: ${preset.description} / ${formatTitleProviderLabel(preset.provider)} · ${preset.model} · temperature ${normalizeTitleTemperatureValue(preset.temperature)} · ${sourceModeLabel}`;
 }
 
 function updateTitlePresetDescription() {
@@ -8966,7 +9035,7 @@ function buildTitleAutoRetrySummary() {
     if (!isEnabled) {
         return "자동 재작성 꺼짐";
     }
-    return `${retryThreshold}점 미만만 자동 재작성`;
+    return `${retryThreshold}점 미만은 자동 재작성 후 2회 실패 시 상위 모델로 자동 승격`;
 }
 
 function updateTitleAutoRetrySummary() {
@@ -8989,6 +9058,105 @@ function normalizeTitleIssueContextLimit(value) {
     return Math.min(5, Math.max(1, parsed));
 }
 
+function normalizeTitleIssueSourceMode(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return TITLE_ISSUE_SOURCE_MODE_LIBRARY.some((item) => String(item?.key || "").trim() === normalized)
+        ? normalized
+        : TITLE_ISSUE_SOURCE_MODE_DEFAULT;
+}
+
+function normalizeTitleCommunitySourceKeys(values, useDefaultsWhenEmpty = false) {
+    const allowedKeys = new Set(
+        TITLE_COMMUNITY_SOURCE_LIBRARY.map((item) => String(item?.key || "").trim()).filter(Boolean),
+    );
+    const rawValues = Array.isArray(values)
+        ? values
+        : String(values || "")
+            .split(/[\n,]/g);
+    const seen = new Set();
+    const normalized = rawValues
+        .map((value) => String(value || "").trim())
+        .filter((value) => value && allowedKeys.has(value) && !seen.has(value) && seen.add(value));
+    if (normalized.length || !useDefaultsWhenEmpty) {
+        return normalized;
+    }
+    return [...TITLE_COMMUNITY_SOURCE_DEFAULT_KEYS];
+}
+
+function normalizeTitleCommunityCustomDomains(value) {
+    const rawValues = Array.isArray(value)
+        ? value
+        : String(value || "")
+            .split(/[\n,]/g);
+    const seen = new Set();
+    return rawValues
+        .map((item) => normalizeDomainToken(item))
+        .filter((item) => item && !seen.has(item) && seen.add(item));
+}
+
+function compareStringLists(left, right) {
+    const normalizedLeft = Array.isArray(left) ? left.map((item) => String(item || "").trim()) : [];
+    const normalizedRight = Array.isArray(right) ? right.map((item) => String(item || "").trim()) : [];
+    if (normalizedLeft.length !== normalizedRight.length) {
+        return false;
+    }
+    return normalizedLeft.every((item, index) => item === normalizedRight[index]);
+}
+
+function normalizeDomainToken(value) {
+    let normalized = String(value || "").trim().toLowerCase();
+    if (!normalized) {
+        return "";
+    }
+    normalized = normalized.replace(/^https?:\/\//, "");
+    normalized = normalized.replace(/^www\./, "");
+    normalized = normalized.split("/")[0].split("?")[0].split("#")[0].trim();
+    return normalized.replace(/^\.+/, "");
+}
+
+function applyTitleCommunitySourceSelection(sourceKeys, useDefaultsWhenEmpty = false) {
+    const selectedKeys = new Set(normalizeTitleCommunitySourceKeys(sourceKeys, useDefaultsWhenEmpty));
+    (elements.titleCommunitySourceInputs || []).forEach((input) => {
+        input.checked = selectedKeys.has(String(input.value || "").trim());
+    });
+}
+
+function getSelectedTitleCommunitySourceKeys() {
+    return normalizeTitleCommunitySourceKeys(
+        (elements.titleCommunitySourceInputs || [])
+            .filter((input) => Boolean(input?.checked))
+            .map((input) => String(input.value || "").trim()),
+    );
+}
+
+function buildTitleCommunitySourceSummaryText() {
+    const mode = normalizeTitleIssueSourceMode(elements.titleIssueSourceMode?.value || TITLE_ISSUE_SOURCE_MODE_DEFAULT);
+    const selectedKeys = getSelectedTitleCommunitySourceKeys();
+    const selectedLabels = TITLE_COMMUNITY_SOURCE_LIBRARY
+        .filter((item) => selectedKeys.includes(String(item?.key || "").trim()))
+        .map((item) => String(item?.label || "").trim())
+        .filter(Boolean);
+    const customDomains = normalizeTitleCommunityCustomDomains(elements.titleCommunityCustomDomains?.value);
+    const customLabel = customDomains.length ? `커스텀 ${customDomains.join(", ")}` : "";
+    const sourceLabels = [...selectedLabels, customLabel].filter(Boolean);
+
+    if (!Boolean(elements.titleIssueContextEnabled?.checked)) {
+        return "실시간 이슈 반영이 꺼져 있습니다.";
+    }
+    if (mode === "news") {
+        return "뉴스형: 뉴스/공식 발표 신호를 우선 반영합니다.";
+    }
+    if (!sourceLabels.length) {
+        return mode === "reaction"
+            ? "반응형: 선택한 커뮤니티가 없어 반응 신호를 붙이지 않습니다."
+            : "혼합형: 뉴스는 반영하고, 커뮤니티는 선택된 소스가 없습니다.";
+    }
+    if (mode === "reaction") {
+        return `반응형: ${sourceLabels.join(", ")} 제목 반응을 우선 반영합니다.`;
+    }
+    return `혼합형: 뉴스 + ${sourceLabels.join(", ")} 반응을 함께 반영합니다.`;
+}
+
 function buildTitleIssueContextSummary() {
     const isAiMode = String(elements.titleMode?.value || "template").trim() === "ai";
     const isEnabled = Boolean(elements.titleIssueContextEnabled?.checked);
@@ -8999,7 +9167,7 @@ function buildTitleIssueContextSummary() {
     if (!isEnabled) {
         return "실시간 이슈 반영 꺼짐";
     }
-    return `AI 요청당 상위 ${issueLimit}개 키워드에 네이버 검색 상위 뉴스/콘텐츠 이슈 반영`;
+    return `AI 요청당 상위 ${issueLimit}개 키워드에 네이버 검색 이슈를 반영합니다. ${buildTitleCommunitySourceSummaryText()}`;
 }
 
 function updateTitleIssueContextSummary() {
@@ -9012,6 +9180,9 @@ function updateTitleIssueContextSummary() {
         return;
     }
     elements.titleIssueContextSummary.textContent = buildTitleIssueContextSummary();
+    if (elements.titleCommunitySourceSummary) {
+        elements.titleCommunitySourceSummary.textContent = buildTitleCommunitySourceSummaryText();
+    }
 }
 
 function setTitleModelOptions(provider, preferredValue = "") {
@@ -9068,12 +9239,20 @@ function applyTitlePresetSelection(presetKey) {
         setTitleProviderOptions(selectedProvider, registry);
         setTitleModelOptions(selectedProvider, preset.model);
         elements.titleTemperature.value = normalizeTitleTemperatureValue(preset.temperature);
+        if (elements.titleIssueSourceMode) {
+            elements.titleIssueSourceMode.value = normalizeTitleIssueSourceMode(preset.issue_source_mode);
+        }
+        applyTitleCommunitySourceSelection(preset.community_sources, true);
+        if (elements.titleCommunityCustomDomains) {
+            elements.titleCommunityCustomDomains.value = "";
+        }
     } else {
         if (elements.titlePreset) {
             elements.titlePreset.value = MANUAL_TITLE_PRESET_KEY;
         }
     }
 
+    updateTitleIssueContextSummary();
     updateTitlePresetDescription();
     return String(elements.titlePreset?.value || MANUAL_TITLE_PRESET_KEY);
 }
@@ -9296,6 +9475,9 @@ function loadTitleSettings() {
         quality_retry_threshold: TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT,
         issue_context_enabled: true,
         issue_context_limit: TITLE_ISSUE_CONTEXT_LIMIT_DEFAULT,
+        issue_source_mode: TITLE_ISSUE_SOURCE_MODE_DEFAULT,
+        community_sources: [...TITLE_COMMUNITY_SOURCE_DEFAULT_KEYS],
+        community_custom_domains: "",
         preset_key: DEFAULT_TITLE_PRESET_KEY,
         provider: "openai",
         model: TITLE_PROVIDER_DEFAULT_MODELS.openai,
@@ -9311,6 +9493,9 @@ function loadTitleSettings() {
     let apiRegistry = loadTitleApiRegistry();
     const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY);
     const hasStoredSettings = Boolean(storedSettings && typeof storedSettings === "object");
+    const hasStoredCommunitySources = Boolean(
+        hasStoredSettings && Object.prototype.hasOwnProperty.call(storedSettings, "community_sources"),
+    );
     const settings = { ...defaults, ...(hasStoredSettings ? storedSettings : {}) };
     apiRegistry = migrateLegacyTitleApiKey(settings, apiRegistry);
     applyTitleApiRegistryToForm(apiRegistry);
@@ -9359,6 +9544,15 @@ function loadTitleSettings() {
             normalizeTitleIssueContextLimit(settings.issue_context_limit),
         );
     }
+    if (elements.titleIssueSourceMode) {
+        elements.titleIssueSourceMode.value = normalizeTitleIssueSourceMode(settings.issue_source_mode);
+    }
+    applyTitleCommunitySourceSelection(settings.community_sources, !hasStoredCommunitySources);
+    if (elements.titleCommunityCustomDomains) {
+        elements.titleCommunityCustomDomains.value = normalizeTitleCommunityCustomDomains(
+            settings.community_custom_domains,
+        ).join(", ");
+    }
     renderTitlePromptProfilePicker(settings);
     setTitleSystemPromptValue(resolveStoredTitlePrompt(settings, promptProfiles));
     applyTitleKeywordModes(settings.keyword_modes);
@@ -9405,12 +9599,11 @@ function handleTitleSettingsChange(event) {
         event?.target === elements.titleProvider
         || event?.target === elements.titleModel
         || event?.target === elements.titleTemperature
+        || event?.target === elements.titleIssueSourceMode
+        || event?.target === elements.titleCommunityCustomDomains
+        || elements.titleCommunitySourceInputs?.includes?.(event?.target)
     ) {
-        const matchingPresetKey = findMatchingTitlePresetKey({
-            provider: elements.titleProvider?.value,
-            model: elements.titleModel?.value,
-            temperature: elements.titleTemperature?.value,
-        });
+        const matchingPresetKey = findMatchingTitlePresetKey(getTitleSettingsFormState());
         if (elements.titlePreset) {
             elements.titlePreset.value = matchingPresetKey || MANUAL_TITLE_PRESET_KEY;
         }
@@ -9478,6 +9671,15 @@ function renderTitleSettingsState() {
     if (elements.titleIssueContextLimit) {
         elements.titleIssueContextLimit.disabled = !isAiMode || !Boolean(elements.titleIssueContextEnabled?.checked);
     }
+    if (elements.titleIssueSourceMode) {
+        elements.titleIssueSourceMode.disabled = !isAiMode || !Boolean(elements.titleIssueContextEnabled?.checked);
+    }
+    (elements.titleCommunitySourceInputs || []).forEach((input) => {
+        input.disabled = !isAiMode || !Boolean(elements.titleIssueContextEnabled?.checked);
+    });
+    if (elements.titleCommunityCustomDomains) {
+        elements.titleCommunityCustomDomains.disabled = !isAiMode || !Boolean(elements.titleIssueContextEnabled?.checked);
+    }
     if (elements.openTitlePromptEditorButton) {
         elements.openTitlePromptEditorButton.disabled = !isAiMode;
     }
@@ -9491,8 +9693,8 @@ function renderTitleSettingsState() {
     updateTitleTemperatureDescription();
     updateTitlePromptSummary();
     elements.titleModeBadge.textContent = isAiMode
-        ? (selectedProvider ? `ai:${selectedProvider}` : "ai:미등록")
-        : "template";
+        ? (selectedProvider ? `AI:${selectedProvider}` : "AI:미등록")
+        : "템플릿";
 }
 
 function getTitleSettingsFormState() {
@@ -9515,6 +9717,9 @@ function getTitleSettingsFormState() {
         quality_retry_threshold: normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold?.value),
         issue_context_enabled: Boolean(elements.titleIssueContextEnabled?.checked),
         issue_context_limit: normalizeTitleIssueContextLimit(elements.titleIssueContextLimit?.value),
+        issue_source_mode: normalizeTitleIssueSourceMode(elements.titleIssueSourceMode?.value),
+        community_sources: getSelectedTitleCommunitySourceKeys(),
+        community_custom_domains: normalizeTitleCommunityCustomDomains(elements.titleCommunityCustomDomains?.value),
         preset_key: presetKey,
         provider,
         model,
@@ -10238,18 +10443,15 @@ function buildTitleGenerationSummaryText(meta, items) {
         return qualitySummary;
     }
     if (usedMode === "template") {
-        return `template 규칙 기반 · ${qualitySummary}`;
+        return `템플릿 규칙 기반 · ${qualitySummary}`;
     }
 
-    const presetLabel = String(meta.preset_label || "").trim();
-    const providerLabel = meta.provider ? formatTitleProviderLabel(meta.provider) : "";
-    const modelLabel = String(meta.model || "").trim();
-    const modelSummary = [presetLabel, providerLabel, modelLabel].filter(Boolean).join(" · ");
+    const modelSummary = buildTitleGenerationModelSummary(meta, " · ");
     if (usedMode === "template_fallback") {
-        return `${modelSummary || "AI 모드"} 실패 후 template fallback · ${qualitySummary}`;
+        return `${modelSummary || "AI 모드"} 실패 후 템플릿 대체 · ${qualitySummary}`;
     }
     if (usedMode === "ai_with_template_fallback") {
-        return `${modelSummary || "AI 모드"} 일부 template fallback · ${qualitySummary}`;
+        return `${modelSummary || "AI 모드"} 일부 템플릿 대체 · ${qualitySummary}`;
     }
     return `${modelSummary || "AI 모드"} · ${qualitySummary}`;
 }
@@ -10266,20 +10468,31 @@ function buildEnhancedTitleGenerationSummaryText(meta, items) {
         return [modeSummary, qualitySummary].filter(Boolean).join(" / ");
     }
     if (usedMode === "template") {
-        return ["template 규칙 기반", modeSummary, qualitySummary].filter(Boolean).join(" / ");
+        return ["템플릿 규칙 기반", modeSummary, qualitySummary].filter(Boolean).join(" / ");
     }
 
-    const presetLabel = String(meta.preset_label || "").trim();
-    const providerLabel = meta.provider ? formatTitleProviderLabel(meta.provider) : "";
-    const modelLabel = String(meta.model || "").trim();
-    const modelSummary = [presetLabel, providerLabel, modelLabel].filter(Boolean).join(" / ");
+    const modelSummary = buildTitleGenerationModelSummary(meta, " / ");
     if (usedMode === "template_fallback") {
-        return [modelSummary || "AI 모드", "template fallback", modeSummary, qualitySummary].filter(Boolean).join(" / ");
+        return [modelSummary || "AI 모드", "템플릿 대체", modeSummary, qualitySummary].filter(Boolean).join(" / ");
     }
     if (usedMode === "ai_with_template_fallback") {
-        return [modelSummary || "AI 모드", "partial template fallback", modeSummary, qualitySummary].filter(Boolean).join(" / ");
+        return [modelSummary || "AI 모드", "일부 템플릿 대체", modeSummary, qualitySummary].filter(Boolean).join(" / ");
     }
     return [modelSummary || "AI 모드", modeSummary, qualitySummary].filter(Boolean).join(" / ");
+}
+
+function buildTitleGenerationModelSummary(meta, separator = " / ") {
+    if (!meta || typeof meta !== "object") {
+        return "";
+    }
+    const presetLabel = String(meta.preset_label || "").trim();
+    const providerLabel = meta.provider ? formatTitleProviderLabel(meta.provider) : "";
+    const requestedModelLabel = String(meta.model || "").trim();
+    const finalModelLabel = String(meta.final_model || requestedModelLabel).trim();
+    const modelLabel = requestedModelLabel && finalModelLabel && requestedModelLabel !== finalModelLabel
+        ? `${requestedModelLabel} -> ${finalModelLabel}`
+        : (finalModelLabel || requestedModelLabel);
+    return [presetLabel, providerLabel, modelLabel].filter(Boolean).join(separator);
 }
 
 function buildGeneratedTitleModeSummary(meta, items) {
@@ -10692,6 +10905,15 @@ async function rerunSingleTitle(keyword) {
     return regeneratedItem;
 }
 
+function buildTitleExportRequestContext() {
+    const collectorMode = typeof getCollectorMode === "function" ? getCollectorMode() : "category";
+    return {
+        mode: collectorMode,
+        category: collectorMode === "category" ? String(elements.categoryInput?.value || "").trim() : "",
+        seed_input: String(elements.seedInput?.value || "").trim(),
+    };
+}
+
 async function rerunFlaggedTitles() {
     const flaggedKeywords = (state.results.titled?.generated_titles || [])
         .filter((item) => Boolean(getTitleQualityReport(item).retry_recommended))
@@ -10906,18 +11128,18 @@ function handleTitleResultInlineClickV3(event) {
     }
     const action = trigger.getAttribute("data-inline-action") || "";
     if (action === "rerun_title") {
-        runWithGuard(runThroughTitle, "title rerun");
+        runWithGuard(runThroughTitle, "제목 다시 생성 중");
         return;
     }
     if (action === "rerun_title_flagged") {
-        runWithGuard(rerunFlaggedTitleTargets, "flagged title rerun");
+        runWithGuard(rerunFlaggedTitleTargets, "기준 미달 제목 다시 생성 중");
         return;
     }
     if (action === "rerun_title_single") {
         const targetIdentity = trigger.getAttribute("data-title-target-id") || "";
         const targetItem = findGeneratedTitleItem(targetIdentity);
         const keyword = String(targetItem?.keyword || "").trim();
-        runWithGuard(() => rerunTitleTarget(targetIdentity), `${keyword || "title"} rerun`);
+        runWithGuard(() => rerunTitleTarget(targetIdentity), `${keyword || "제목"} 다시 생성 중`);
     }
 }
 
@@ -11438,13 +11660,14 @@ async function runTitleStage() {
     addLog(
         titleOptions.mode === "ai"
             ? `제목 생성 시작: ${titleOptions.provider} / ${titleOptions.model} 모델을 사용합니다.`
-            : "제목 생성 시작: template 규칙 기반으로 제목을 생성합니다.",
+            : "제목 생성 시작: 템플릿 규칙 기반으로 제목을 생성합니다.",
     );
     clearStageAndDownstream("titled");
     const result = await executeStage({
         stageKey: "titled",
         endpoint: "/generate-title",
         inputData: {
+            ...buildTitleExportRequestContext(),
             selected_keywords: titleTargets,
             title_options: titleOptions,
         },
@@ -11453,6 +11676,23 @@ async function runTitleStage() {
     state.results.titled = result;
     promoteKeywordStatuses(result.generated_titles || [], "titled");
     addLog(`제목 생성 완료: ${countItems(result.generated_titles)}세트`, "success");
+    const exportArtifacts = Array.isArray(result.generation_meta?.export_artifacts)
+        ? result.generation_meta.export_artifacts
+        : result.generation_meta?.export_artifact
+            ? [result.generation_meta.export_artifact]
+            : [];
+    if (exportArtifacts.length) {
+        const recordedCount = recordWorkedKeywords((result.generated_titles || []).map((item) => item?.keyword));
+        if (recordedCount) {
+            addLog("자동 저장된 제목을 최근 작업 이력에 반영했습니다.", "success");
+        }
+    }
+    if (exportArtifacts.length) {
+        addLog(
+            `제목 결과 파일 저장: ${exportArtifacts.map((item) => item.filename).filter(Boolean).join(", ")}`,
+            "success",
+        );
+    }
     renderAll();
     return result;
 }

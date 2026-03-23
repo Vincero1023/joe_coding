@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
+from app.title.issue_sources import DEFAULT_COMMUNITY_SOURCE_KEYS, DEFAULT_ISSUE_SOURCE_MODE
+
 
 @dataclass(frozen=True)
 class TitlePreset:
@@ -12,9 +14,49 @@ class TitlePreset:
     model: str
     temperature: float
     prompt_guidance: str
+    issue_source_mode: str = DEFAULT_ISSUE_SOURCE_MODE
+    community_sources: tuple[str, ...] = DEFAULT_COMMUNITY_SOURCE_KEYS
 
 
 TITLE_PRESETS: tuple[TitlePreset, ...] = (
+    TitlePreset(
+        key="openai_mixed_stable",
+        label="혼합형 안정형",
+        description="기본 운영용 추천 프리셋입니다. 뉴스와 커뮤니티 반응을 함께 보되 과열 없이 안정적으로 묶습니다.",
+        provider="openai",
+        model="gpt-4.1-mini",
+        temperature=0.5,
+        issue_source_mode="mixed",
+        community_sources=DEFAULT_COMMUNITY_SOURCE_KEYS,
+        prompt_guidance=(
+            "Preset focus:\n"
+            "- Use mixed issue sourcing as the default operating mode: combine news or official update signals with selected community reaction cues.\n"
+            "- Keep titles grounded in timely evidence, but do not overfit to noisy community chatter.\n"
+            "- For naver_home titles, prefer one stable issue or update angle and one calm comparison, checkpoint, or reversal angle.\n"
+            "- When community reaction and news signals conflict, favor the safer and more verifiable framing.\n"
+            "- Keep wording editorial, specific, and useful rather than provocative.\n"
+            "- In YMYL areas, keep hedged wording and avoid turning reaction noise into certainty."
+        ),
+    ),
+    TitlePreset(
+        key="openai_reaction_aggressive",
+        label="반응형 공격형",
+        description="차별화 실험용 프리셋입니다. 선택한 커뮤니티 반응과 비교 포인트를 더 전면에 세웁니다.",
+        provider="openai",
+        model="gpt-4.1-mini",
+        temperature=0.8,
+        issue_source_mode="reaction",
+        community_sources=DEFAULT_COMMUNITY_SOURCE_KEYS,
+        prompt_guidance=(
+            "Preset focus:\n"
+            "- Prioritize selected-domain community reaction cues over general news framing.\n"
+            "- Pull stronger angles from comparison points, 후기, 체감, 의외의 차이, 장단점, 불만, 선택 기준, and decision friction when they are actually present.\n"
+            "- Let naver_home titles feel more alive, reactive, and discussion-driven, but still keep them editorial rather than clickbait.\n"
+            "- Favor sharper wording and clearer contrast than the stable preset.\n"
+            "- Do not invent outrage, certainty, or rumors. Treat community signals as reaction evidence only.\n"
+            "- In YMYL areas, stay restrained even in reaction mode."
+        ),
+    ),
     TitlePreset(
         key="openai_home_issue_safe",
         label="홈판 이슈형",
@@ -119,7 +161,7 @@ TITLE_PRESETS: tuple[TitlePreset, ...] = (
 )
 
 TITLE_PRESET_MAP = {preset.key: preset for preset in TITLE_PRESETS}
-DEFAULT_TITLE_PRESET_KEY = "openai_home_issue_safe"
+DEFAULT_TITLE_PRESET_KEY = "openai_mixed_stable"
 MANUAL_TITLE_PRESET_KEY = "manual"
 
 
@@ -147,6 +189,8 @@ def build_title_preset_payload(*, include_manual: bool = True) -> list[dict[str,
                 "model": "",
                 "temperature": None,
                 "prompt_guidance": "",
+                "issue_source_mode": "",
+                "community_sources": [],
                 "is_manual": True,
                 "is_default": False,
             }

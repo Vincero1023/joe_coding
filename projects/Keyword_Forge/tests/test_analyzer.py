@@ -125,6 +125,8 @@ def test_dual_axis_labels_are_attached_to_analyzed_keywords() -> None:
     )
     assert analyzed[0]["golden_bucket"] in {"gold", "promising", "experimental", "hold"}
     assert "click_potential_score" in analyzed[0]["metrics"]
+    assert "click_yield_score" in analyzed[0]["metrics"]
+    assert "exposure_signal_score" in analyzed[0]["metrics"]
     assert "opportunity_score" in analyzed[0]["metrics"]
     assert "competition_score" in analyzed[0]["metrics"]
 
@@ -139,6 +141,27 @@ def test_dual_axis_helpers_classify_gold_combo() -> None:
     assert profitability_grade == "A"
     assert attackability_grade == "2"
     assert classify_golden_bucket(profitability_grade, attackability_grade) == "gold"
+
+
+def test_attackability_score_rewards_real_click_activity() -> None:
+    base_score = calculate_attackability_score(
+        2.0,
+        35.0,
+        0.4,
+        60.0,
+        total_clicks=0.0,
+        search_volume=2400.0,
+    )
+    active_score = calculate_attackability_score(
+        2.0,
+        35.0,
+        0.4,
+        60.0,
+        total_clicks=84.0,
+        search_volume=2400.0,
+    )
+
+    assert active_score > base_score
 
 
 def test_analyzer_matches_sample_detail_for_moderate_blog_counts() -> None:

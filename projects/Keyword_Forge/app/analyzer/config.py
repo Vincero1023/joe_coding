@@ -11,10 +11,11 @@ class AnalyzerConfig:
     profitability_monetization_weight: float = 0.65
     profitability_volume_weight: float = 0.20
     profitability_click_weight: float = 0.15
-    attackability_opportunity_weight: float = 0.45
-    attackability_rarity_weight: float = 0.25
-    attackability_competition_weight: float = 0.15
+    attackability_opportunity_weight: float = 0.30
+    attackability_rarity_weight: float = 0.05
+    attackability_competition_weight: float = 0.25
     attackability_volume_weight: float = 0.15
+    attackability_click_weight: float = 0.25
     profitability_a_threshold: float = 72.0
     profitability_b_threshold: float = 56.0
     profitability_c_threshold: float = 38.0

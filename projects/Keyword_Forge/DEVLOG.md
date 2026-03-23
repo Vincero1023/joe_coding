@@ -33,6 +33,64 @@
 ---
 
 ## Date
+- 2026-03-24 02:29 (KST)
+
+## What changed (변경점)
+- `app/title/exporter.py`, `tests/test_title.py`, `tests/test_pipeline.py`에서 제목 결과 `output/` 기본 export를 `csv` 단일 파일로 바꾸고, `xlsx/md`는 명시 요청 시에만 생성되도록 정리했다.
+- `app/web_assets/app.js`에서 제목 자동 저장이 일어나면 2주 중복 판정용 최근 작업 이력도 함께 기록되도록 연결해, `output` 저장과 중복 차단 흐름이 어긋나지 않게 맞췄다.
+- `app/web_assets/app_overrides.js`, `app/title/targets.py`에서 `전체` 조합 선별이 실제로는 자동 선별로 내려가던 버그를 고치고, 제목 기본 타깃 모드도 `단일 + 롱테일 V1`로 통일했다.
+
+## Why (원인/배경)
+- 실제 사용 흐름은 `output` 폴더 산출물을 바로 자동 블로그 작성기로 넘기는 쪽인데, 기본 export가 다중 포맷이라 산출물이 과했고 2주 중복 이력도 브라우저 CSV 수동 다운로드에만 묶여 있었다.
+- 또 `A~D / 1~4 전체 선택`이 UI상으로는 전체 조합처럼 보였지만 실행 시에는 필터 없음으로 처리돼, 오사카 같은 대형 시드에서도 자동 선별 8건만 남는 문제가 있었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `node --check app/web_assets/app.js`
+- [x] `node --check app/web_assets/app_overrides.js`
+- [x] `pytest -q tests/test_title.py tests/test_pipeline.py`
+- [x] `pytest -q` (`146 passed`)
+- [x] `Status/수익형 키워드 발굴&제목 생성기-2026-03-23T17-19-46.html`에서 오사카 실행 로그 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: `전체` 조합을 눌러도 실제로는 자동 선별이 돌아가 글감 후보가 과하게 줄고, `output` 자동 저장만 쓰면 2주 중복 판정이 느슨하게 보였다.
+- 원인: 프런트가 `전체 선택`을 명시 필터가 아닌 “선택 안 함”처럼 취급했고, 최근 작업 이력 기록도 `CSV 다운로드 버튼` 경로에만 연결돼 있었다.
+- 해결: `전체 선택`을 실제 `combo_filter(all)`로 보내도록 수정하고, 제목 자동 저장 시에도 최근 작업 이력을 적재하도록 연결했으며, 제목 기본 모드는 `단일 + V1`로 맞췄다.
+
+## Next (다음 작업)
+- 브라우저에서 오사카 같은 대형 시드로 `전체 조합` 실행 후 실제 선별/제목 건수가 기대치대로 늘어나는지 수동 확인하기
+- 필요하면 `글감 탐색 전용` 선별 프리셋을 별도로 추가해 자동 선별과 전체 조합의 목적 차이를 더 명확히 드러내기
+
+---
+
+## Date
+- 2026-03-23 09:30 (KST)
+
+## What changed (변경점)
+- `app/analyzer/main.py`, `app/analyzer/naver_searchad.py`, `app/analyzer/naver_open_search.py`에서 실측 분석 수집을 병렬화하고 SearchAd keyword tool 배치/worker 설정을 추가해 분석 대기 시간을 줄였다.
+- `app/analyzer/scorer.py`, `app/selector/service.py`, `app/web.py`, `app/web_assets/app_overrides.js`에서 `공략성` 축을 실제 클릭 활동이 반영되는 `노출도` 중심 해석으로 다듬고 관련 설명/UI 문구를 함께 정리했다.
+- `app/title/issue_sources.py`, `app/title/exporter.py`, `app/title/ai_client.py`, `app/title/main.py`, `app/api/routes/generate_title.py`, `app/pipeline/service.py`에 `news / reaction / mixed` 이슈 소스 모드와 제목 결과 `csv/xlsx/md` export를 추가했고, `output/`도 git ignore에 포함했다.
+
+## Why (원인/배경)
+- 분석 단계는 SearchAd keyword tool, bid 조회, blog 검색량 조회를 거의 직렬로 수행하고 있어 키워드 수가 늘면 체감 대기 시간이 급격히 길어졌다.
+- 제목 단계는 실시간 이슈를 참고하더라도 어떤 소스를 얼마나 반영했는지 제어가 어려웠고, 생성 결과를 바로 재사용할 수 있는 산출물도 남지 않았다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `pytest -q tests/test_analyzer.py tests/test_naver_open_search.py tests/test_naver_searchad.py tests/test_title.py tests/test_pipeline.py tests/test_web_routes.py`
+- [x] `pytest -q` (`139 passed`)
+- [x] 회귀(기존 기능) 이상 없음
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 분석 실측 수집이 느리고 `공략성` 축이 실제 클릭 신호를 충분히 반영하지 못했다.
+- 원인: 측정 소스 호출이 직렬 위주였고, `공략성` 가중치도 opportunity/희소성 쪽에 상대적으로 치우쳐 있었다.
+- 해결: 실측 수집을 병렬화하고 SearchAd 청크 실패 시 분할 재시도를 넣었으며, 공격 축에는 click yield / exposure signal을 추가해 `노출도` 해석으로 정리했다.
+
+## Next (다음 작업)
+- 실제 로컬 API key와 네이버 응답 환경에서 병렬 수집 체감 시간과 rate limit 안정성을 한 번 더 수동 확인하기
+- 제목 `issue_source_mode`와 export artifact를 메인 UI에서 더 잘 드러내고, 필요하면 결과물 파일명/저장 위치 옵션을 세분화하기
+
+---
+
+## Date
 - 2026-03-22 10:07 (KST)
 
 ## What changed (변경점)

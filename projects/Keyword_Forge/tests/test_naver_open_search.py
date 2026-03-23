@@ -124,7 +124,7 @@ def test_naver_open_search_client_fetches_blog_totals() -> None:
         opener=fake_opener,
     )
 
-    result = client.fetch_blog_totals([keyword])
+    result = client.fetch_blog_totals([keyword], max_workers=1)
 
     assert "/v1/search/blog.json" in opener_calls[0]["url"]
     assert "query=driverinsurancecompare" in opener_calls[0]["url"]
@@ -135,8 +135,9 @@ def test_build_blog_search_index_uses_client_and_returns_stats() -> None:
     keyword = "driver insurance compare"
 
     class _FakeClient:
-        def fetch_blog_totals(self, keywords):
+        def fetch_blog_totals(self, keywords, *, max_workers):
             assert keywords == [keyword]
+            assert max_workers == 6
             return {
                 normalize_key(keyword): KeywordStats(
                     keyword=keyword,

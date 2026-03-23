@@ -12,7 +12,7 @@ TITLE_KEYWORD_MODE_LABELS: dict[str, str] = {
     "longtail_exploratory": "롱테일 V2",
     "longtail_experimental": "롱테일 V3",
 }
-DEFAULT_TITLE_KEYWORD_MODES: tuple[str, ...] = ("single",)
+DEFAULT_TITLE_KEYWORD_MODES: tuple[str, ...] = ("single", "longtail_selected")
 _MODE_ORDER: tuple[str, ...] = (
     "single",
     "longtail_selected",

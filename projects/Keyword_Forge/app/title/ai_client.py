@@ -13,6 +13,13 @@ from urllib.request import Request, urlopen
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
 from app.selector.serp_summary import build_search_url, fetch_naver_serp_html, parse_serp_titles
 from app.title.category_detector import detect_category
+from app.title.issue_sources import (
+    DEFAULT_ISSUE_SOURCE_MODE,
+    describe_community_domains,
+    match_domain_against_allowlist,
+    normalize_issue_source_mode,
+    resolve_community_source_domains,
+)
 from app.title.quality import TITLE_QUALITY_PASS_SCORE
 from app.title.presets import DEFAULT_TITLE_PRESET_KEY, get_title_preset
 from app.title.rules import NAVER_HOME_MAX_LENGTH
@@ -34,7 +41,7 @@ _DEFAULT_MODELS = {
 _ISSUE_CONTEXT_MAX_LIMIT = 5
 _ISSUE_CONTEXT_DEFAULT_LIMIT = 3
 _ISSUE_CONTEXT_HEADLINE_LIMIT = 3
-_ISSUE_CONTEXT_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
+_ISSUE_CONTEXT_CACHE: dict[tuple[str, ...], dict[str, Any]] = {}
 _ISSUE_CONTEXT_STOPWORD_KEYS = {
     normalize_key(token)
     for token in (
@@ -172,6 +179,37 @@ _PROMPT_CATEGORY_PATTERNS = {
     ),
 }
 
+_COMMUNITY_COMPARISON_TERMS = (
+    "비교",
+    "차이",
+    "장단점",
+    "vs",
+    "가성비",
+    "가격",
+    "순위",
+    "추천",
+)
+_COMMUNITY_PAIN_TERMS = (
+    "후기",
+    "불만",
+    "실패",
+    "주의",
+    "단점",
+    "문제",
+    "부작용",
+    "환불",
+    "아쉬움",
+)
+_COMMUNITY_REACTION_TERMS = (
+    "후기",
+    "체감",
+    "직접",
+    "실사용",
+    "리뷰",
+    "경험",
+    "반응",
+)
+
 _PROMPT_CATEGORY_PRIORITY = (
     "real_estate",
     "economy_stock",
@@ -237,6 +275,8 @@ class TitleGenerationOptions:
     quality_retry_threshold: int = TITLE_QUALITY_PASS_SCORE
     issue_context_enabled: bool = True
     issue_context_limit: int = _ISSUE_CONTEXT_DEFAULT_LIMIT
+    issue_source_mode: str = DEFAULT_ISSUE_SOURCE_MODE
+    community_sources: tuple[str, ...] = ()
 
     @classmethod
     def from_input(cls, input_data: Any) -> "TitleGenerationOptions":
@@ -261,6 +301,22 @@ class TitleGenerationOptions:
         max_output_tokens = _coerce_int(raw.get("max_output_tokens"), default=1200, minimum=200, maximum=4000)
         batch_size = _coerce_int(raw.get("batch_size"), default=8, minimum=1, maximum=20)
 
+        has_explicit_community_sources = (
+            "community_sources" in raw
+            or "community_source_domains" in raw
+            or "community_custom_domains" in raw
+        )
+        preset_issue_source_mode = normalize_issue_source_mode(preset.issue_source_mode if preset else DEFAULT_ISSUE_SOURCE_MODE)
+        preset_community_sources = list(preset.community_sources) if preset else []
+        community_sources = tuple(
+            resolve_community_source_domains(
+                raw.get("community_sources", raw.get("community_source_domains"))
+                if has_explicit_community_sources
+                else preset_community_sources,
+                raw.get("community_custom_domains"),
+                use_default_when_empty=not has_explicit_community_sources and not bool(preset_community_sources),
+            )
+        )
         return cls(
             mode=mode,
             provider=provider,
@@ -288,6 +344,8 @@ class TitleGenerationOptions:
                 minimum=1,
                 maximum=_ISSUE_CONTEXT_MAX_LIMIT,
             ),
+            issue_source_mode=normalize_issue_source_mode(raw.get("issue_source_mode") or preset_issue_source_mode),
+            community_sources=community_sources,
         )
 
     @property
@@ -561,6 +619,7 @@ def _build_user_prompt_from_items(input_items: list[Any]) -> str:
         "- If current-issue evidence is weak, use update, checkpoint, comparison, or decision framing instead of fabricating controversy.\n"
         "- Never invent unsupported facts, rankings, official changes, prices, dates, or percentages. Use concrete signals only when they are provided.\n"
         "- If live issue context or recent headlines are provided, use them as framing cues for home-feed style without copying them verbatim.\n"
+        "- If community reaction or community headlines are provided, treat them as selected-domain reaction cues rather than universal public consensus.\n"
         "- Treat live issue context as search-result evidence, not as confirmed fact.\n"
         "- Usually split the 2 naver_home titles into issue/update + debate/comparison and issue/update + reversal/question/surprise.\n"
         "- Make the 2 naver_home titles differ in angle such as issue, debate, comparison, reversal, question, update, or decision point.\n"
@@ -593,6 +652,8 @@ def _normalize_prompt_items(input_items: list[Any]) -> list[dict[str, str]]:
         source_hint = _build_source_hint(item)
         issue_context_summary = _build_issue_context_summary(item)
         recent_headlines = _build_issue_headline_summary(item)
+        community_reaction_summary = _build_community_reaction_summary(item)
+        community_headlines = _build_community_headline_summary(item)
         normalized_items.append(
             {
                 "keyword": keyword,
@@ -608,6 +669,8 @@ def _normalize_prompt_items(input_items: list[Any]) -> list[dict[str, str]]:
                 "source_hint": source_hint,
                 "issue_context_summary": issue_context_summary,
                 "recent_headlines": recent_headlines,
+                "community_reaction_summary": community_reaction_summary,
+                "community_headlines": community_headlines,
             }
         )
 
@@ -636,6 +699,10 @@ def _format_prompt_item(index: int, item: dict[str, str]) -> str:
         lines.append(f"- live issue context: {item['issue_context_summary']}")
     if item.get("recent_headlines"):
         lines.append(f"- recent headlines: {item['recent_headlines']}")
+    if item.get("community_reaction_summary"):
+        lines.append(f"- community reaction: {item['community_reaction_summary']}")
+    if item.get("community_headlines"):
+        lines.append(f"- community headlines: {item['community_headlines']}")
     return "\n".join(lines)
 
 
@@ -784,6 +851,9 @@ def _build_issue_context_summary(item: dict[str, Any]) -> str:
         return ""
 
     parts: list[str] = []
+    issue_source_mode = normalize_issue_source_mode(issue_context.get("issue_source_mode"))
+    parts.append(f"mode {issue_source_mode}")
+
     fetched_at = normalize_text(issue_context.get("fetched_at"))
     if fetched_at:
         parts.append(f"fetched {fetched_at[:10]}")
@@ -792,6 +862,12 @@ def _build_issue_context_summary(item: dict[str, Any]) -> str:
     news_count = _coerce_int(issue_context.get("news_count"), default=0, minimum=0, maximum=20)
     if title_count > 0:
         parts.append(f"news {news_count}/{title_count}")
+
+    community_reaction = issue_context.get("community_reaction_summary")
+    if isinstance(community_reaction, dict):
+        community_count = _coerce_int(community_reaction.get("title_count"), default=0, minimum=0, maximum=20)
+        if title_count > 0 and community_count > 0:
+            parts.append(f"community {community_count}/{title_count}")
 
     source_mix = issue_context.get("source_mix")
     if isinstance(source_mix, dict):
@@ -817,9 +893,13 @@ def _build_issue_headline_summary(item: dict[str, Any]) -> str:
     if not isinstance(issue_context, dict):
         return ""
 
-    headline_candidates = issue_context.get("news_headlines")
-    if not isinstance(headline_candidates, list) or not headline_candidates:
-        headline_candidates = issue_context.get("top_headlines")
+    issue_source_mode = normalize_issue_source_mode(issue_context.get("issue_source_mode"))
+    if issue_source_mode == "reaction":
+        headline_candidates = None
+    else:
+        headline_candidates = issue_context.get("news_headlines")
+        if not isinstance(headline_candidates, list) or not headline_candidates:
+            headline_candidates = issue_context.get("top_headlines")
     if not isinstance(headline_candidates, list):
         return ""
 
@@ -831,6 +911,262 @@ def _build_issue_headline_summary(item: dict[str, Any]) -> str:
     if not normalized_headlines:
         return ""
     return " | ".join(normalized_headlines[:2])
+
+
+def _build_community_reaction_summary(item: dict[str, Any]) -> str:
+    issue_context = item.get("issue_context")
+    if not isinstance(issue_context, dict):
+        return ""
+
+    community_reaction = issue_context.get("community_reaction_summary")
+    if not isinstance(community_reaction, dict):
+        return ""
+
+    parts: list[str] = []
+    title_count = _coerce_int(community_reaction.get("title_count"), default=0, minimum=0, maximum=20)
+    if title_count > 0:
+        parts.append(f"{title_count} reaction titles")
+
+    source_mix = community_reaction.get("source_mix")
+    if isinstance(source_mix, dict):
+        source_parts = [
+            f"{_format_community_source_label(source)} {int(count)}"
+            for source, count in source_mix.items()
+            if normalize_text(source) and int(count or 0) > 0
+        ]
+        if source_parts:
+            parts.append(f"sources {', '.join(source_parts[:3])}")
+
+    terms = community_reaction.get("terms")
+    if isinstance(terms, list):
+        normalized_terms = [normalize_text(term) for term in terms if normalize_text(term)]
+        if normalized_terms:
+            parts.append(f"terms {', '.join(normalized_terms[:4])}")
+
+    comparison_axes = community_reaction.get("comparison_axes")
+    if isinstance(comparison_axes, list):
+        normalized_axes = [normalize_text(term) for term in comparison_axes if normalize_text(term)]
+        if normalized_axes:
+            parts.append(f"compare {', '.join(normalized_axes[:3])}")
+
+    pain_points = community_reaction.get("pain_points")
+    if isinstance(pain_points, list):
+        normalized_points = [normalize_text(term) for term in pain_points if normalize_text(term)]
+        if normalized_points:
+            parts.append(f"watchouts {', '.join(normalized_points[:3])}")
+
+    return " / ".join(parts[:4])
+
+
+def _build_community_headline_summary(item: dict[str, Any]) -> str:
+    issue_context = item.get("issue_context")
+    if not isinstance(issue_context, dict):
+        return ""
+
+    community_reaction = issue_context.get("community_reaction_summary")
+    if not isinstance(community_reaction, dict):
+        return ""
+
+    headline_candidates = community_reaction.get("headlines")
+    if not isinstance(headline_candidates, list):
+        return ""
+
+    normalized_headlines = [
+        _truncate_prompt_text(normalize_text(headline), 52)
+        for headline in headline_candidates
+        if normalize_text(headline)
+    ]
+    if not normalized_headlines:
+        return ""
+    return " | ".join(normalized_headlines[:2])
+
+
+def resolve_issue_context(
+    raw_context: dict[str, Any],
+    *,
+    issue_source_mode: str = DEFAULT_ISSUE_SOURCE_MODE,
+    community_sources: tuple[str, ...] | list[str] = (),
+) -> dict[str, Any]:
+    if not isinstance(raw_context, dict):
+        return {}
+
+    normalized_keyword = normalize_text(raw_context.get("query") or raw_context.get("keyword"))
+    normalized_titles = _coerce_issue_titles(raw_context.get("top_titles"))
+    if not normalized_titles:
+        return {
+            **raw_context,
+            "issue_source_mode": normalize_issue_source_mode(issue_source_mode),
+            "community_sources": list(community_sources),
+        }
+
+    source_counts = Counter(
+        normalize_text(item.get("source_bucket"))
+        for item in normalized_titles
+        if normalize_text(item.get("source_bucket"))
+    )
+    news_headlines = [
+        normalize_text(item.get("title"))
+        for item in normalized_titles
+        if normalize_text(item.get("source_bucket")) == "news" and normalize_text(item.get("title"))
+    ]
+    issue_context = {
+        **raw_context,
+        "query": normalized_keyword,
+        "fetched_at": normalize_text(raw_context.get("fetched_at"))
+        or datetime.now().astimezone().isoformat(timespec="seconds"),
+        "search_url": normalize_text(raw_context.get("search_url"))
+        or (build_search_url(normalized_keyword) if normalized_keyword else ""),
+        "title_count": _coerce_int(
+            raw_context.get("title_count"),
+            default=len(normalized_titles),
+            minimum=0,
+            maximum=20,
+        ) or len(normalized_titles),
+        "news_count": _coerce_int(
+            raw_context.get("news_count"),
+            default=len(news_headlines),
+            minimum=0,
+            maximum=20,
+        ) if not news_headlines else len(news_headlines),
+        "source_mix": dict(source_counts) if source_counts else dict(raw_context.get("source_mix") or {}),
+        "issue_terms": _coerce_text_list(raw_context.get("issue_terms") or raw_context.get("common_terms"))
+        or _extract_issue_terms(normalized_keyword, normalized_titles),
+        "top_headlines": [
+            normalize_text(item.get("title"))
+            for item in normalized_titles[:_ISSUE_CONTEXT_HEADLINE_LIMIT]
+            if normalize_text(item.get("title"))
+        ],
+        "news_headlines": (
+            news_headlines[:_ISSUE_CONTEXT_HEADLINE_LIMIT]
+            or _coerce_text_list(raw_context.get("news_headlines"))
+        ),
+        "issue_source_mode": normalize_issue_source_mode(issue_source_mode),
+        "community_sources": list(community_sources),
+    }
+    community_reaction = _build_community_reaction_data(
+        normalized_keyword,
+        normalized_titles,
+        list(community_sources),
+    )
+    if community_reaction:
+        issue_context["community_reaction_summary"] = community_reaction
+    return issue_context
+
+
+def _coerce_issue_titles(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+
+    normalized_items: list[dict[str, Any]] = []
+    for index, item in enumerate(value, start=1):
+        if isinstance(item, dict):
+            title = normalize_text(item.get("title"))
+            if not title:
+                continue
+            normalized_items.append(
+                {
+                    "rank": _coerce_int(item.get("rank"), default=index, minimum=1, maximum=20),
+                    "title": title,
+                    "url": normalize_text(item.get("url")),
+                    "domain": normalize_text(item.get("domain")),
+                    "source_bucket": normalize_text(item.get("source_bucket")),
+                    "intent_key": normalize_text(item.get("intent_key")),
+                }
+            )
+            continue
+
+        title = normalize_text(item)
+        if not title:
+            continue
+        normalized_items.append(
+            {
+                "rank": index,
+                "title": title,
+                "url": "",
+                "domain": "",
+                "source_bucket": "",
+                "intent_key": "",
+            }
+        )
+    return normalized_items
+
+
+def _build_community_reaction_data(
+    keyword: str,
+    titles: list[dict[str, Any]],
+    community_sources: list[str],
+) -> dict[str, Any]:
+    if not titles or not community_sources:
+        return {}
+
+    matched_titles = [
+        item
+        for item in titles
+        if match_domain_against_allowlist(item.get("domain", ""), community_sources)
+    ]
+    if not matched_titles:
+        return {}
+
+    source_counts = Counter(
+        normalize_text(item.get("domain"))
+        for item in matched_titles
+        if normalize_text(item.get("domain"))
+    )
+    terms = _extract_issue_terms(keyword, matched_titles)
+    comparison_axes = _extract_matching_terms(matched_titles, _COMMUNITY_COMPARISON_TERMS)
+    pain_points = _extract_matching_terms(matched_titles, _COMMUNITY_PAIN_TERMS)
+    reaction_cues = _extract_matching_terms(matched_titles, _COMMUNITY_REACTION_TERMS)
+    return {
+        "title_count": len(matched_titles),
+        "selected_sources": describe_community_domains(community_sources),
+        "source_mix": dict(source_counts),
+        "terms": terms[:4],
+        "comparison_axes": comparison_axes[:3],
+        "pain_points": pain_points[:3],
+        "reaction_cues": reaction_cues[:3],
+        "headlines": [
+            normalize_text(item.get("title"))
+            for item in matched_titles[:_ISSUE_CONTEXT_HEADLINE_LIMIT]
+            if normalize_text(item.get("title"))
+        ],
+    }
+
+
+def _extract_matching_terms(titles: list[dict[str, Any]], terms: tuple[str, ...]) -> list[str]:
+    original_map = {normalize_key(term): term for term in terms if normalize_key(term)}
+    counter: Counter[str] = Counter()
+
+    for item in titles:
+        raw_title = normalize_text(item.get("title"))
+        if not raw_title:
+            continue
+        title_key = normalize_key(raw_title)
+        if not title_key:
+            continue
+        matched_keys = {
+            term_key
+            for term_key in original_map
+            if term_key and term_key in title_key
+        }
+        for term_key in matched_keys:
+            counter[term_key] += 1
+
+    return [
+        original_map[term_key]
+        for term_key, _count in counter.most_common(4)
+        if term_key in original_map
+    ]
+
+
+def _format_community_source_label(value: Any) -> str:
+    labels = describe_community_domains([str(value or "")])
+    return labels[0] if labels else normalize_text(value)
+
+
+def _coerce_text_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [normalize_text(item) for item in value if normalize_text(item)]
 
 
 def _attach_live_issue_contexts(
@@ -856,8 +1192,14 @@ def _attach_live_issue_contexts(
             keyword = normalize_text(raw_item)
             item = {"keyword": keyword}
 
-        if keyword and not isinstance(item.get("issue_context"), dict) and remaining > 0:
-            issue_context = _fetch_live_issue_context(keyword)
+        if isinstance(item.get("issue_context"), dict):
+            item["issue_context"] = resolve_issue_context(
+                item["issue_context"],
+                issue_source_mode=options.issue_source_mode,
+                community_sources=options.community_sources,
+            )
+        elif keyword and remaining > 0:
+            issue_context = _fetch_live_issue_context(keyword, options=options)
             if issue_context:
                 item["issue_context"] = issue_context
             remaining -= 1
@@ -870,9 +1212,18 @@ def _attach_live_issue_contexts(
     return enriched_items
 
 
-def _fetch_live_issue_context(keyword: str) -> dict[str, Any]:
+def _fetch_live_issue_context(keyword: str, *, options: TitleGenerationOptions | None = None) -> dict[str, Any]:
     normalized_keyword = normalize_text(keyword)
-    cache_key = (normalize_key(normalized_keyword), _build_prompt_today_label())
+    issue_source_mode = normalize_issue_source_mode(
+        options.issue_source_mode if options is not None else DEFAULT_ISSUE_SOURCE_MODE
+    )
+    community_sources = tuple(options.community_sources if options is not None else ())
+    cache_key = (
+        normalize_key(normalized_keyword),
+        _build_prompt_today_label(),
+        issue_source_mode,
+        "|".join(community_sources),
+    )
     if cache_key in _ISSUE_CONTEXT_CACHE:
         return dict(_ISSUE_CONTEXT_CACHE[cache_key])
 
@@ -887,32 +1238,16 @@ def _fetch_live_issue_context(keyword: str) -> dict[str, Any]:
     if not titles:
         return {}
 
-    title_count = len(titles)
-    source_counts = Counter(
-        normalize_text(item.get("source_bucket"))
-        for item in titles
-        if normalize_text(item.get("source_bucket"))
+    issue_context = resolve_issue_context(
+        {
+            "query": normalized_keyword,
+            "fetched_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "search_url": build_search_url(normalized_keyword),
+            "top_titles": titles,
+        },
+        issue_source_mode=issue_source_mode,
+        community_sources=community_sources,
     )
-    news_headlines = [
-        normalize_text(item.get("title"))
-        for item in titles
-        if normalize_text(item.get("source_bucket")) == "news" and normalize_text(item.get("title"))
-    ]
-    issue_context = {
-        "query": normalized_keyword,
-        "fetched_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "search_url": build_search_url(normalized_keyword),
-        "title_count": title_count,
-        "news_count": len(news_headlines),
-        "source_mix": dict(source_counts),
-        "issue_terms": _extract_issue_terms(normalized_keyword, titles),
-        "top_headlines": [
-            normalize_text(item.get("title"))
-            for item in titles[:_ISSUE_CONTEXT_HEADLINE_LIMIT]
-            if normalize_text(item.get("title"))
-        ],
-        "news_headlines": news_headlines[:_ISSUE_CONTEXT_HEADLINE_LIMIT],
-    }
     _ISSUE_CONTEXT_CACHE[cache_key] = dict(issue_context)
     return issue_context
 

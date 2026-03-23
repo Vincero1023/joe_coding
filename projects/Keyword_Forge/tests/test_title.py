@@ -1,4 +1,8 @@
 from unittest.mock import patch
+import csv
+from pathlib import Path
+
+from openpyxl import load_workbook
 
 from app.title.ai_client import (
     TitleGenerationOptions,
@@ -150,6 +154,7 @@ def test_title_generator_supports_ai_mode() -> None:
                     "provider": "openai",
                     "api_key": "test-key",
                     "model": "gpt-4o-mini",
+                    "keyword_modes": ["single"],
                 },
             }
         )
@@ -181,6 +186,82 @@ def test_title_generator_falls_back_to_template_when_api_key_missing() -> None:
     assert result["generation_meta"]["fallback_reason"] == "missing_api_key"
     assert len(result["generated_titles"][0]["titles"]["naver_home"]) == 2
     assert result["generated_titles"][0]["quality_report"]["summary"]
+
+
+def test_title_generator_exports_csv_by_default_when_enabled(tmp_path: Path) -> None:
+    result = run(
+        {
+            "category": "비즈니스경제",
+            "seed_input": "보험 추천",
+            "selected_keywords": [
+                {
+                    "keyword": "보험 추천",
+                    "score": 1.0,
+                }
+            ],
+            "title_export": {
+                "enabled": True,
+                "output_dir": str(tmp_path),
+            },
+        }
+    )
+
+    export_artifact = result["generation_meta"]["export_artifact"]
+    artifact_path = Path(export_artifact["path"])
+    assert artifact_path.exists()
+    assert artifact_path.suffix == ".csv"
+    assert export_artifact["category"] == "비즈니스경제"
+    assert export_artifact["seed_keyword"] == "보험 추천"
+    export_artifacts = result["generation_meta"]["export_artifacts"]
+    assert [item["format"] for item in export_artifacts] == ["csv"]
+    assert all(Path(item["path"]).exists() for item in export_artifacts)
+
+    with artifact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+
+    assert rows[0] == [
+        "keyword",
+        "duplicate",
+        "recent_used_date",
+        "naver_home_1",
+        "naver_home_2",
+        "blog_1",
+        "blog_2",
+    ]
+    assert rows[1][0] == "보험 추천"
+
+
+def test_title_generator_can_export_multiple_formats_when_requested(tmp_path: Path) -> None:
+    result = run(
+        {
+            "category": "비즈니스경제",
+            "seed_input": "보험 추천",
+            "selected_keywords": [
+                {
+                    "keyword": "보험 추천",
+                    "score": 1.0,
+                }
+            ],
+            "title_export": {
+                "enabled": True,
+                "output_dir": str(tmp_path),
+                "formats": ["csv", "xlsx", "md"],
+            },
+        }
+    )
+
+    export_artifacts = result["generation_meta"]["export_artifacts"]
+    assert [item["format"] for item in export_artifacts] == ["csv", "xlsx", "md"]
+
+    workbook_path = next(Path(item["path"]) for item in export_artifacts if item["format"] == "xlsx")
+    workbook = load_workbook(workbook_path)
+    assert workbook.sheetnames == ["summary", "titles"]
+    assert workbook["titles"]["A2"].value == "보험 추천"
+
+    markdown_path = next(Path(item["path"]) for item in export_artifacts if item["format"] == "md")
+    markdown_text = markdown_path.read_text(encoding="utf-8")
+    assert "# Title Export" in markdown_text
+    assert "## 보험 추천" in markdown_text
 
 
 def test_title_generation_options_keep_custom_system_prompt() -> None:
@@ -215,11 +296,12 @@ def test_title_generation_options_apply_preset_defaults() -> None:
     assert options.provider == "openai"
     assert options.model == "gpt-4.1-mini"
     assert options.temperature == 0.2
+    assert options.issue_source_mode == "mixed"
     assert "Preset guidance" in options.effective_system_prompt
     assert "Additional guidance" in options.effective_system_prompt
 
 
-def test_title_generation_options_use_home_issue_preset_by_default_in_ai_mode() -> None:
+def test_title_generation_options_use_mixed_stable_preset_by_default_in_ai_mode() -> None:
     options = TitleGenerationOptions.from_input(
         {
             "title_options": {
@@ -228,17 +310,35 @@ def test_title_generation_options_use_home_issue_preset_by_default_in_ai_mode() 
         }
     )
 
-    assert options.preset_key == "openai_home_issue_safe"
+    assert options.preset_key == "openai_mixed_stable"
     assert options.provider == "openai"
     assert options.model == "gpt-4.1-mini"
-    assert options.temperature == 0.7
+    assert options.temperature == 0.5
     assert options.issue_context_enabled is True
     assert options.issue_context_limit == 3
-    assert "Naver home-feed exposure" in options.effective_system_prompt
-    assert "When the issue signal is weak" in options.effective_system_prompt
-    assert "Never invent unsupported facts" in options.effective_system_prompt
-    assert "Every title must contain all meaningful keyword tokens" in options.effective_system_prompt
-    assert "Do not drop or paraphrase modifier tokens" in options.effective_system_prompt
+    assert options.issue_source_mode == "mixed"
+    assert options.community_sources == ("cafe.naver.com", "blog.naver.com", "post.naver.com")
+    assert "mixed issue sourcing as the default operating mode" in options.effective_system_prompt
+    assert "community reaction cues" in options.effective_system_prompt
+
+
+def test_title_generation_options_apply_reaction_aggressive_preset_defaults() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "preset_key": "openai_reaction_aggressive",
+            }
+        }
+    )
+
+    assert options.preset_key == "openai_reaction_aggressive"
+    assert options.provider == "openai"
+    assert options.model == "gpt-4.1-mini"
+    assert options.temperature == 0.8
+    assert options.issue_source_mode == "reaction"
+    assert options.community_sources == ("cafe.naver.com", "blog.naver.com", "post.naver.com")
+    assert "Prioritize selected-domain community reaction cues" in options.effective_system_prompt
 
 
 def test_ai_prompt_builder_includes_category_overlay_and_metrics() -> None:
@@ -289,7 +389,7 @@ def test_ai_prompt_builder_includes_category_overlay_and_metrics() -> None:
     assert "target context: single" in prompt
     assert "source hints: selected_keyword" in prompt
     assert "source keywords 서울 청약 경쟁률, 서울 분양" in prompt
-    assert "live issue context: fetched 2026-03-21 / news 2/5" in prompt
+    assert "live issue context: mode mixed / fetched 2026-03-21 / news 2/5" in prompt
     assert "recent headlines: 서울 청약 경쟁률 이번주 일정 바뀌나" in prompt
 
 
@@ -330,6 +430,46 @@ def test_request_ai_titles_includes_live_issue_context_in_prompt() -> None:
     assert "서울 청약 경쟁률 이번주 일정 바뀌나" in prompt
     assert "news 2/3" in prompt
     assert "required keyword tokens: 서울, 청약, 경쟁률" in prompt
+
+
+def test_request_ai_titles_includes_selected_community_reaction_in_prompt() -> None:
+    html = """
+    <html>
+      <body>
+        <a href="https://news.example.com/a" class="news_tit">보험 추천 이번주 비교 포인트</a>
+        <a href="https://cafe.naver.com/post1" class="title_link">보험 추천 후기 비교 포인트</a>
+        <a href="https://blog.naver.com/post2" class="title_link">보험 추천 가입 조건 정리</a>
+      </body>
+    </html>
+    """
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "openai",
+                "api_key": "test-key",
+                "issue_context_enabled": True,
+                "issue_context_limit": 1,
+                "issue_source_mode": "reaction",
+                "community_sources": ["cafe_naver"],
+            }
+        }
+    )
+
+    with patch.dict("app.title.ai_client._ISSUE_CONTEXT_CACHE", {}, clear=True), patch(
+        "app.title.ai_client.fetch_naver_serp_html",
+        return_value=html,
+    ), patch(
+        "app.title.ai_client._request_openai_titles",
+        return_value=[],
+    ) as mocked_request:
+        request_ai_titles([{"keyword": "보험 추천"}], options)
+
+    prompt = mocked_request.call_args.args[0]
+    assert "community reaction:" in prompt
+    assert "community headlines:" in prompt
+    assert "후기" in prompt
+    assert "보험 추천 후기 비교 포인트" in prompt
 
 
 def test_request_ai_titles_supports_vertex_provider() -> None:
@@ -542,6 +682,156 @@ def test_title_generator_auto_retries_low_quality_ai_titles() -> None:
     assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
     assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is False
     assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 80
+
+
+def test_title_generator_escalates_model_after_two_failed_quality_attempts() -> None:
+    """
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=[
+            [
+                {
+                    "keyword": "蹂댄뿕 異붿쿇",
+                    "titles": {
+                        "naver_home": ["蹂댄뿕 異붿쿇", "蹂댄뿕 異붿쿇"],
+                        "blog": ["蹂댄뿕 異붿쿇", "蹂댄뿕 異붿쿇"],
+                    },
+                }
+            ],
+            [
+                {
+                    "keyword": "蹂댄뿕 異붿쿇",
+                    "titles": {
+                        "naver_home": ["蹂댄뿕 異붿쿇 鍮꾧탳", "蹂댄뿕 異붿쿇 鍮꾧탳"],
+                        "blog": ["蹂댄뿕 異붿쿇 媛?대뱶", "蹂댄뿕 異붿쿇 媛?대뱶"],
+                    },
+                }
+            ],
+            [
+                {
+                    "keyword": "蹂댄뿕 異붿쿇",
+                    "titles": {
+                        "naver_home": [
+                            "蹂댄뿕 異붿쿇 吏湲?鍮꾧탳 ?ъ씤??2媛吏",
+                            "蹂댄뿕 異붿쿇 ?좏깮 湲곗? ?щ씪吏??댁쑀",
+                        ],
+                        "blog": [
+                            "蹂댄뿕 異붿쿇 鍮꾧탳 媛?대뱶",
+                            "蹂댄뿕 異붿쿇 泥댄겕由ъ뒪??,
+                        ],
+                    },
+                }
+            ],
+        ],
+    ) as mocked_request:
+        result = run(
+            {
+                "selected_keywords": [
+                    {
+                        "keyword": "蹂댄뿕 異붿쿇",
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "mode": "ai",
+                    "provider": "openai",
+                    "api_key": "test-key",
+                    "model": "gpt-4o-mini",
+                    "keyword_modes": ["single"],
+                },
+            }
+        )
+
+    assert mocked_request.call_count == 3
+    assert mocked_request.call_args_list[0].kwargs["options"].model == "gpt-4o-mini"
+    assert mocked_request.call_args_list[1].kwargs["options"].model == "gpt-4o-mini"
+    assert mocked_request.call_args_list[2].kwargs["options"].model == "gpt-4.1-mini"
+    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 1
+    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 0
+    assert result["generation_meta"]["model_escalation"]["enabled"] is True
+    assert result["generation_meta"]["model_escalation"]["triggered"] is True
+    assert result["generation_meta"]["model_escalation"]["source_model"] == "gpt-4o-mini"
+    assert result["generation_meta"]["model_escalation"]["target_model"] == "gpt-4.1-mini"
+    assert result["generation_meta"]["model_escalation"]["attempted_count"] == 1
+    assert result["generation_meta"]["model_escalation"]["accepted_count"] == 1
+    assert result["generation_meta"]["final_model"] == "gpt-4.1-mini"
+    assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is False
+    assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 84
+    """
+
+    keyword = "insurance plan"
+
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=[
+            [
+                {
+                    "keyword": keyword,
+                    "titles": {
+                        "naver_home": [keyword, keyword],
+                        "blog": [keyword, keyword],
+                    },
+                }
+            ],
+            [
+                {
+                    "keyword": keyword,
+                    "titles": {
+                        "naver_home": [f"{keyword}!!", f"{keyword}!!"],
+                        "blog": [f"{keyword}!!", f"{keyword}!!"],
+                    },
+                }
+            ],
+            [
+                {
+                    "keyword": keyword,
+                    "titles": {
+                        "naver_home": [
+                            f"{keyword} compare 2 options",
+                            f"{keyword} choice checklist",
+                        ],
+                        "blog": [
+                            f"{keyword} compare guide",
+                            f"{keyword} signup checklist",
+                        ],
+                    },
+                }
+            ],
+        ],
+    ) as mocked_request:
+        result = run(
+            {
+                "selected_keywords": [
+                    {
+                        "keyword": keyword,
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "mode": "ai",
+                    "provider": "openai",
+                    "api_key": "test-key",
+                    "model": "gpt-4o-mini",
+                    "keyword_modes": ["single"],
+                },
+            }
+        )
+
+    assert mocked_request.call_count == 3
+    assert mocked_request.call_args_list[0].kwargs["options"].model == "gpt-4o-mini"
+    assert mocked_request.call_args_list[1].kwargs["options"].model == "gpt-4o-mini"
+    assert mocked_request.call_args_list[2].kwargs["options"].model == "gpt-4.1-mini"
+    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 1
+    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 0
+    assert result["generation_meta"]["model_escalation"]["enabled"] is True
+    assert result["generation_meta"]["model_escalation"]["triggered"] is True
+    assert result["generation_meta"]["model_escalation"]["source_model"] == "gpt-4o-mini"
+    assert result["generation_meta"]["model_escalation"]["target_model"] == "gpt-4.1-mini"
+    assert result["generation_meta"]["model_escalation"]["attempted_count"] == 1
+    assert result["generation_meta"]["model_escalation"]["accepted_count"] == 1
+    assert result["generation_meta"]["final_model"] == "gpt-4.1-mini"
+    assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is False
+    assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 84
 
 
 def test_title_generator_quality_retry_preserves_prompt_context() -> None:
@@ -760,6 +1050,42 @@ def test_title_generator_builds_longtail_targets_for_keyword_modes() -> None:
         for item in result["generated_titles"]
         if item["target_mode"] == "longtail_experimental"
     )
+
+
+def test_build_title_targets_defaults_to_single_and_v1_modes() -> None:
+    items, summary = build_title_targets(
+        {
+            "selected_keywords": [
+                {
+                    "keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
+                    "score": 76.0,
+                    "metrics": {"volume": 1200.0, "cpc": 210.0},
+                }
+            ],
+            "keyword_clusters": [
+                {
+                    "cluster_id": "cluster-01",
+                    "representative_keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
+                    "topic_terms": ["\ubcf4\ud5d8", "\ucd94\ucc9c", "\uac00\uc785"],
+                    "all_keywords": ["\ubcf4\ud5d8 \ucd94\ucc9c", "\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8"],
+                }
+            ],
+            "longtail_suggestions": [
+                {
+                    "suggestion_id": "longtail-01",
+                    "representative_keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
+                    "longtail_keyword": "\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8",
+                    "verification_status": "pass",
+                    "verified_score": 68.0,
+                }
+            ],
+        }
+    )
+
+    assert summary["requested_modes"] == ["single", "longtail_selected"]
+    assert summary["mode_counts"]["single"] == 1
+    assert summary["mode_counts"]["longtail_selected"] == 1
+    assert {item["target_mode"] for item in items} == {"single", "longtail_selected"}
 
 
 def test_title_generator_supports_explicit_title_targets() -> None:

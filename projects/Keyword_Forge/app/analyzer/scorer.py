@@ -190,14 +190,19 @@ def calculate_attackability_score(
     competition_ratio: float,
     volume_score: float,
     config: AnalyzerConfig = DEFAULT_CONFIG,
+    *,
+    total_clicks: float = 0.0,
+    search_volume: float = 0.0,
 ) -> float:
     opportunity_score = _scale_opportunity_ratio(opportunity_ratio)
     competition_score = _scale_competition_ratio(competition_ratio)
+    click_signal_score = _build_click_signal_score(total_clicks, search_volume, volume_score)
     weighted_score = (
         (opportunity_score * config.attackability_opportunity_weight)
         + (rarity_score * config.attackability_rarity_weight)
         + (competition_score * config.attackability_competition_weight)
         + (volume_score * config.attackability_volume_weight)
+        + (click_signal_score * config.attackability_click_weight)
     )
     rounded_score = float(math.floor(weighted_score + 0.5))
     if volume_score < 25.0:
@@ -344,19 +349,36 @@ def _score_item(
         metrics.get("competition", 0.0),
         metrics["volume_score"],
         config,
+        total_clicks=metrics.get("total_clicks", 0.0),
+        search_volume=metrics.get("volume", 0.0),
     )
     profitability_grade = classify_profitability_grade(profitability_score, config)
     attackability_grade = classify_attackability_grade(attackability_score, config)
     combo_grade = f"{profitability_grade}{attackability_grade}"
     golden_bucket = classify_golden_bucket(profitability_grade, attackability_grade)
 
+    click_yield = _calculate_click_yield(
+        metrics.get("total_clicks", 0.0),
+        metrics.get("volume", 0.0),
+    )
+    click_potential_score = _scale_click_potential(
+        metrics.get("total_clicks", 0.0),
+        metrics["volume_score"],
+    )
+    click_yield_score = _scale_click_yield(click_yield)
+    exposure_signal_score = _build_click_signal_score(
+        metrics.get("total_clicks", 0.0),
+        metrics.get("volume", 0.0),
+        metrics["volume_score"],
+    )
+
     metrics = {
         **metrics,
         "confidence": round(confidence, 2),
-        "click_potential_score": _scale_click_potential(
-            metrics.get("total_clicks", 0.0),
-            metrics["volume_score"],
-        ),
+        "click_potential_score": click_potential_score,
+        "click_yield": click_yield,
+        "click_yield_score": click_yield_score,
+        "exposure_signal_score": exposure_signal_score,
         "opportunity_score": _scale_opportunity_ratio(metrics.get("opportunity", 0.0)),
         "competition_score": _scale_competition_ratio(metrics.get("competition", 0.0)),
     }
@@ -609,6 +631,38 @@ def _scale_click_potential(total_clicks: float, volume_score: float) -> float:
     if total_clicks >= 1:
         return 25.0
     return 10.0
+
+
+def _calculate_click_yield(total_clicks: float, search_volume: float) -> float:
+    if total_clicks <= 0 or search_volume <= 0:
+        return 0.0
+    return round(total_clicks / max(search_volume, 1.0), 6)
+
+
+def _scale_click_yield(click_yield: float) -> float:
+    if click_yield <= 0:
+        return 0.0
+    if click_yield >= 0.05:
+        return 100.0
+    if click_yield >= 0.03:
+        return 85.0
+    if click_yield >= 0.015:
+        return 70.0
+    if click_yield >= 0.0075:
+        return 55.0
+    if click_yield >= 0.003:
+        return 40.0
+    return 20.0
+
+
+def _build_click_signal_score(total_clicks: float, search_volume: float, volume_score: float) -> float:
+    click_potential_score = _scale_click_potential(total_clicks, volume_score)
+    if total_clicks <= 0 and search_volume <= 0:
+        return click_potential_score
+
+    click_yield = _calculate_click_yield(total_clicks, search_volume)
+    click_yield_score = _scale_click_yield(click_yield)
+    return round((click_potential_score * 0.55) + (click_yield_score * 0.45), 1)
 
 
 def _estimate_ctr(monetization_score: float, rarity_score: float) -> float:

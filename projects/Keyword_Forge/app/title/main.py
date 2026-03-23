@@ -15,7 +15,8 @@ from typing import Any
 
 from app.core.interfaces import ModuleRunner
 from app.expander.utils.tokenizer import normalize_text
-from app.title.ai_client import TitleGenerationOptions
+from app.title.ai_client import TitleGenerationOptions, resolve_issue_context
+from app.title.exporter import export_generated_titles
 from app.title.targets import build_title_targets
 from app.title.title_generator import generate_titles
 
@@ -25,7 +26,7 @@ class TitleService:
         if isinstance(input_data, dict):
             items, target_summary = build_title_targets(input_data)
             options = TitleGenerationOptions.from_input(input_data)
-            items = _attach_issue_context_from_input(items, input_data)
+            items = _attach_issue_context_from_input(items, input_data, options=options)
         else:
             items = _coerce_input_items(input_data)
             target_summary = {}
@@ -33,6 +34,27 @@ class TitleService:
         generated, meta = generate_titles(items, options=options)
         if target_summary:
             meta["target_summary"] = target_summary
+        if isinstance(input_data, dict):
+            try:
+                export_payload = export_generated_titles(input_data, generated)
+            except Exception as exc:  # pragma: no cover - defensive runtime guard
+                meta["export_artifact_error"] = str(exc)
+            else:
+                if isinstance(export_payload, dict):
+                    primary_artifact = (
+                        export_payload.get("primary_artifact")
+                        if isinstance(export_payload.get("primary_artifact"), dict)
+                        else {}
+                    )
+                    artifact_list = (
+                        export_payload.get("artifacts")
+                        if isinstance(export_payload.get("artifacts"), list)
+                        else []
+                    )
+                    if primary_artifact:
+                        meta["export_artifact"] = primary_artifact
+                    if artifact_list:
+                        meta["export_artifacts"] = artifact_list
 
         if isinstance(input_data, list):
             return generated
@@ -108,6 +130,8 @@ def _coerce_input_items(input_data: Any) -> list[dict[str, Any]]:
 def _attach_issue_context_from_input(
     items: list[dict[str, Any]],
     input_data: dict[str, Any],
+    *,
+    options: TitleGenerationOptions,
 ) -> list[dict[str, Any]]:
     serp_summary = input_data.get("serp_competition_summary")
     if not isinstance(serp_summary, dict):
@@ -156,7 +180,11 @@ def _attach_issue_context_from_input(
         enriched_items.append(
             {
                 **item,
-                "issue_context": issue_context,
+                "issue_context": resolve_issue_context(
+                    issue_context,
+                    issue_source_mode=options.issue_source_mode,
+                    community_sources=options.community_sources,
+                ),
             }
         )
 

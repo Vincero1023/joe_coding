@@ -322,6 +322,8 @@ def _build_longtail_candidates(
             f"{base_phrase} {normalized_modifier or '적용'} 기준",
             f"{base_phrase} {normalized_modifier or '대상'} 확인 포인트",
         ])
+    else:
+        candidates.extend(_build_general_longtail_candidates(base_phrase, normalized_modifier))
 
     candidates.extend(_build_optional_suffix_candidates(base_phrase, normalized_modifier, optional_suffix_keys))
 
@@ -342,6 +344,25 @@ def _build_longtail_candidates(
         seen.add(candidate_key)
         normalized_candidates.append(cleaned)
     return normalized_candidates
+
+
+def _build_general_longtail_candidates(base_phrase: str, normalized_modifier: str) -> list[str]:
+    base_phrase = normalize_text(base_phrase)
+    normalized_modifier = normalize_text(normalized_modifier)
+    if not base_phrase:
+        return []
+
+    if normalized_modifier:
+        return [
+            f"{base_phrase} {normalized_modifier} 비교 포인트",
+            f"{base_phrase} {normalized_modifier} 고를 때 체크",
+        ]
+
+    return [
+        f"{base_phrase} 추천 기준",
+        f"{base_phrase} 비교 포인트",
+        f"{base_phrase} 고를 때 체크",
+    ]
 
 
 def _build_optional_suffix_candidates(

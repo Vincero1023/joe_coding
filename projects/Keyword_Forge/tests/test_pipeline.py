@@ -31,11 +31,19 @@ def _fake_autocomplete(query: str) -> list[str]:
     return fake_map.get(query, [])
 
 
-def test_generate_title_endpoint_returns_wrapped_title_sets() -> None:
+def test_generate_title_endpoint_returns_wrapped_title_sets(tmp_path: Path) -> None:
     response = client.post(
         "/generate-title",
         json={
             "input_data": {
+                "category": BUSINESS_CATEGORY,
+                "seed_input": INSURANCE,
+                "title_export": {
+                    "output_dir": str(tmp_path),
+                },
+                "title_options": {
+                    "keyword_modes": ["single"],
+                },
                 "selected_keywords": [
                     {
                         "keyword": INSURANCE,
@@ -60,6 +68,8 @@ def test_generate_title_endpoint_returns_wrapped_title_sets() -> None:
     assert len(result["generated_titles"]) == 1
     assert len(result["generated_titles"][0]["titles"]["naver_home"]) == 2
     assert len(result["generated_titles"][0]["titles"]["blog"]) == 2
+    assert Path(result["generation_meta"]["export_artifact"]["path"]).exists()
+    assert [item["format"] for item in result["generation_meta"]["export_artifacts"]] == ["csv"]
 
 
 def test_verify_longtail_endpoint_returns_verified_candidates() -> None:
@@ -172,7 +182,7 @@ def test_serp_competition_summary_endpoint_returns_query_summaries() -> None:
     assert len(result["queries"][0]["top_titles"]) == 3
 
 
-def test_pipeline_run_returns_all_stage_outputs() -> None:
+def test_pipeline_run_returns_all_stage_outputs(tmp_path: Path) -> None:
     with patch("app.collector.service.get_naver_autocomplete", side_effect=_fake_autocomplete), patch(
         "app.expander.engines.autocomplete_engine.get_naver_autocomplete",
         side_effect=_fake_autocomplete,
@@ -196,6 +206,12 @@ def test_pipeline_run_returns_all_stage_outputs() -> None:
                 "expander": {
                     "analysis_json_path": str(expander_sample_dir / "site_analysis.json"),
                 },
+                "title_export": {
+                    "output_dir": str(tmp_path),
+                },
+                "title_options": {
+                    "keyword_modes": ["single"],
+                },
             }
         )
 
@@ -209,9 +225,11 @@ def test_pipeline_run_returns_all_stage_outputs() -> None:
     assert "cannibalization_report" in result
     assert len(result["generated_titles"]) == len(result["selected_keywords"])
     assert all(len(item["titles"]["naver_home"]) == 2 for item in result["generated_titles"][:10])
+    assert Path(result["title_generation_meta"]["export_artifact"]["path"]).exists()
+    assert len(result["title_generation_meta"]["export_artifacts"]) == 1
 
 
-def test_pipeline_endpoint_runs_end_to_end() -> None:
+def test_pipeline_endpoint_runs_end_to_end(tmp_path: Path) -> None:
     with patch("app.collector.service.get_naver_autocomplete", side_effect=_fake_autocomplete), patch(
         "app.expander.engines.autocomplete_engine.get_naver_autocomplete",
         side_effect=_fake_autocomplete,
@@ -237,6 +255,12 @@ def test_pipeline_endpoint_runs_end_to_end() -> None:
                     "expander": {
                         "analysis_json_path": str(expander_sample_dir / "site_analysis.json"),
                     },
+                    "title_export": {
+                        "output_dir": str(tmp_path),
+                    },
+                    "title_options": {
+                        "keyword_modes": ["single"],
+                    },
                 }
             },
         )
@@ -248,6 +272,8 @@ def test_pipeline_endpoint_runs_end_to_end() -> None:
     assert result["keyword_clusters"]
     assert isinstance(result["longtail_suggestions"], list)
     assert len(result["generated_titles"]) == len(result["selected_keywords"])
+    assert Path(result["title_generation_meta"]["export_artifact"]["path"]).exists()
+    assert len(result["title_generation_meta"]["export_artifacts"]) == 1
 
 
 def test_build_title_input_includes_longtail_context() -> None:
@@ -278,9 +304,10 @@ def test_build_title_input_includes_longtail_context() -> None:
     assert result["longtail_options"] == selected_result["longtail_options"]
     assert result["analyzed_keywords"] == analyzed_result["analyzed_keywords"]
     assert result["title_options"]["keyword_modes"] == ["single", "longtail_selected", "longtail_exploratory"]
+    assert result["title_export"]["enabled"] is True
 
 
-def test_pipeline_passes_title_ai_options_to_title_stage() -> None:
+def test_pipeline_passes_title_ai_options_to_title_stage(tmp_path: Path) -> None:
     with patch(
         "app.collector.service.get_naver_autocomplete",
         side_effect=lambda query: [INSURANCE] if query == INSURANCE else [],
@@ -327,6 +354,12 @@ def test_pipeline_passes_title_ai_options_to_title_stage() -> None:
                     "api_key": "test-key",
                     "preset_key": "gemini_fast",
                     "keyword_modes": ["single", "longtail_exploratory", "longtail_experimental"],
+                    "issue_source_mode": "reaction",
+                    "community_sources": ["cafe_naver", "blog_naver"],
+                    "community_custom_domains": ["clien.net"],
+                },
+                "title_export": {
+                    "output_dir": str(tmp_path),
                 },
             }
         )
@@ -338,6 +371,9 @@ def test_pipeline_passes_title_ai_options_to_title_stage() -> None:
     assert result["title_generation_meta"]["model"] == "gemini-2.5-flash-lite"
     assert result["title_generation_meta"]["issue_context_enabled"] is True
     assert result["title_generation_meta"]["issue_context_limit"] == 3
+    assert result["title_generation_meta"]["issue_source_mode"] == "reaction"
+    assert "cafe.naver.com" in result["title_generation_meta"]["community_sources"]
+    assert "clien.net" in result["title_generation_meta"]["community_sources"]
     assert result["title_generation_meta"]["target_summary"]["requested_modes"] == [
         "single",
         "longtail_exploratory",
@@ -348,3 +384,8 @@ def test_pipeline_passes_title_ai_options_to_title_stage() -> None:
     assert requested_options.provider == "gemini"
     assert requested_options.issue_context_enabled is True
     assert requested_options.issue_context_limit == 3
+    assert requested_options.issue_source_mode == "reaction"
+    assert "cafe.naver.com" in requested_options.community_sources
+    assert "clien.net" in requested_options.community_sources
+    assert Path(result["title_generation_meta"]["export_artifact"]["path"]).exists()
+    assert [item["format"] for item in result["title_generation_meta"]["export_artifacts"]] == ["csv"]

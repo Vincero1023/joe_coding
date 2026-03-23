@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -86,23 +87,29 @@ def _merge_measured_stats_index(
         ),
     )
 
-    measured_indexes = [
-        build_searchad_keyword_tool_index(
+    builders = [
+        lambda: build_searchad_keyword_tool_index(
             input_data,
             keywords,
             stats_index=stats_index,
         ),
-        build_searchad_bid_index(
+        lambda: build_searchad_bid_index(
             input_data,
             keywords,
             stats_index=stats_index,
         ),
-        build_blog_search_index(
+        lambda: build_blog_search_index(
             input_data,
             keywords,
             stats_index=stats_index,
         ),
     ]
+
+    measured_indexes: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=len(builders)) as executor:
+        futures = [executor.submit(builder) for builder in builders]
+        for future in as_completed(futures):
+            measured_indexes.append(future.result())
 
     for measured_index in measured_indexes:
         _merge_stats_index(stats_index, measured_index)

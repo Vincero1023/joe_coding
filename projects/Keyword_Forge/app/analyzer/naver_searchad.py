@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -21,7 +22,8 @@ _AVERAGE_POSITION_URI = "/estimate/average-position-bid/keyword"
 _KEYWORD_TOOL_URI = "/keywordstool"
 _DEFAULT_TIMEOUT = 8.0
 _DEFAULT_BID_KEYWORD_BATCH_SIZE = 50
-_DEFAULT_KEYWORD_TOOL_BATCH_SIZE = 1
+_DEFAULT_KEYWORD_TOOL_BATCH_SIZE = 5
+_DEFAULT_KEYWORD_TOOL_MAX_WORKERS = 4
 _DEFAULT_CREDENTIALS_PATH = Path(".local") / "credentials" / "searchad.credentials.json"
 _LEGACY_CREDENTIALS_PATH = Path("searchad.credentials.json")
 _PC_TOP_POSITIONS = tuple(range(1, 11))
@@ -127,6 +129,7 @@ class SearchAdBidSettings:
     timeout: float = _DEFAULT_TIMEOUT
     bid_keyword_batch_size: int = _DEFAULT_BID_KEYWORD_BATCH_SIZE
     keyword_tool_batch_size: int = _DEFAULT_KEYWORD_TOOL_BATCH_SIZE
+    keyword_tool_max_workers: int = _DEFAULT_KEYWORD_TOOL_MAX_WORKERS
 
     @classmethod
     def from_input(cls, input_data: Any) -> "SearchAdBidSettings":
@@ -147,11 +150,18 @@ class SearchAdBidSettings:
             minimum=1,
             maximum=20,
         )
+        keyword_tool_max_workers = _coerce_int(
+            searchad.get("keyword_tool_max_workers"),
+            default=_DEFAULT_KEYWORD_TOOL_MAX_WORKERS,
+            minimum=1,
+            maximum=8,
+        )
         return cls(
             enabled=enabled,
             timeout=timeout,
             bid_keyword_batch_size=bid_keyword_batch_size,
             keyword_tool_batch_size=keyword_tool_batch_size,
+            keyword_tool_max_workers=keyword_tool_max_workers,
         )
 
 
@@ -219,28 +229,74 @@ class NaverSearchAdClient:
         keywords: list[str],
         *,
         keyword_batch_size: int = _DEFAULT_KEYWORD_TOOL_BATCH_SIZE,
+        max_workers: int = _DEFAULT_KEYWORD_TOOL_MAX_WORKERS,
     ) -> dict[str, KeywordStats]:
         if not keywords:
             return {}
 
         results: dict[str, KeywordStats] = {}
-        for chunk in _chunked_keywords(keywords, keyword_batch_size):
-            normalized_hints = [_normalize_keyword_tool_hint(keyword) for keyword in chunk]
-            payload = self._get_json(
-                _KEYWORD_TOOL_URI,
-                query_params={
-                    "hintKeywords": ",".join(normalized_hints),
-                    "showDetail": "1",
-                },
-            )
-            chunk_stats = parse_keyword_tool_response(
-                payload,
-                request_keywords=chunk,
-            )
-            for key, item in chunk_stats.items():
-                existing = results.get(key)
-                results[key] = item if existing is None else merge_keyword_stats(existing, item)
+        chunks = _chunked_keywords(keywords, keyword_batch_size)
+        if not chunks:
+            return results
+
+        worker_count = max(1, min(max_workers, len(chunks)))
+        if worker_count == 1:
+            for chunk in chunks:
+                chunk_stats = self._fetch_keyword_tool_chunk_with_fallback(chunk)
+                for key, item in chunk_stats.items():
+                    existing = results.get(key)
+                    results[key] = item if existing is None else merge_keyword_stats(existing, item)
+            return results
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            future_map = {
+                executor.submit(self._fetch_keyword_tool_chunk_with_fallback, chunk): chunk
+                for chunk in chunks
+            }
+            for future in as_completed(future_map):
+                chunk_stats = future.result()
+                for key, item in chunk_stats.items():
+                    existing = results.get(key)
+                    results[key] = item if existing is None else merge_keyword_stats(existing, item)
         return results
+
+    def _fetch_keyword_tool_chunk_with_fallback(
+        self,
+        keywords: list[str],
+    ) -> dict[str, KeywordStats]:
+        if not keywords:
+            return {}
+
+        try:
+            return self._fetch_keyword_tool_chunk(keywords)
+        except NaverSearchAdError:
+            if len(keywords) <= 1:
+                raise
+
+        midpoint = max(1, len(keywords) // 2)
+        merged: dict[str, KeywordStats] = {}
+        for chunk in (keywords[:midpoint], keywords[midpoint:]):
+            for key, item in self._fetch_keyword_tool_chunk_with_fallback(chunk).items():
+                existing = merged.get(key)
+                merged[key] = item if existing is None else merge_keyword_stats(existing, item)
+        return merged
+
+    def _fetch_keyword_tool_chunk(
+        self,
+        keywords: list[str],
+    ) -> dict[str, KeywordStats]:
+        normalized_hints = [_normalize_keyword_tool_hint(keyword) for keyword in keywords]
+        payload = self._get_json(
+            _KEYWORD_TOOL_URI,
+            query_params={
+                "hintKeywords": ",".join(normalized_hints),
+                "showDetail": "1",
+            },
+        )
+        return parse_keyword_tool_response(
+            payload,
+            request_keywords=keywords,
+        )
 
     def _post_json(self, uri: str, payload: dict[str, Any]) -> dict[str, Any]:
         request = Request(
@@ -352,6 +408,7 @@ def build_searchad_keyword_tool_index(
         return resolved_client.fetch_keyword_tool_stats(
             pending_keywords,
             keyword_batch_size=settings.keyword_tool_batch_size,
+            max_workers=settings.keyword_tool_max_workers,
         )
     except NaverSearchAdError:
         return {}
@@ -491,6 +548,19 @@ def parse_keyword_tool_response(
         raise NaverSearchAdResponseError("SearchAd keyword tool response is missing keywordList.")
 
     results: dict[str, KeywordStats] = {}
+    alias_map: dict[str, str] = {}
+    for request_keyword in request_keywords:
+        normalized_keyword = normalize_text(request_keyword)
+        if not normalized_keyword:
+            continue
+        for alias in (
+            normalized_keyword,
+            _normalize_keyword_tool_hint(normalized_keyword),
+        ):
+            alias_key = normalize_key(alias)
+            if alias_key and alias_key not in alias_map:
+                alias_map[alias_key] = normalized_keyword
+
     for index, request_keyword in enumerate(request_keywords):
         if index >= len(rows):
             continue
@@ -498,7 +568,13 @@ def parse_keyword_tool_response(
         if not isinstance(raw_item, dict):
             continue
 
-        keyword = normalize_text(request_keyword)
+        matched_keyword = normalize_text(request_keyword)
+        rel_keyword = normalize_text(raw_item.get("relKeyword") or raw_item.get("keyword"))
+        rel_key = normalize_key(rel_keyword)
+        if rel_key and rel_key in alias_map:
+            matched_keyword = alias_map[rel_key]
+
+        keyword = normalize_text(matched_keyword)
         key = normalize_key(keyword)
         if not keyword or not key:
             continue
