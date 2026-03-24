@@ -1314,6 +1314,42 @@ function canCancelQueueJob(job) {
     return !["completed", "partial", "failed", "canceled"].includes(status);
 }
 
+function getQueueJobItemValues(job) {
+    const items = Array.isArray(job?.items) ? job.items : [];
+    return items
+        .map((item) => String(item?.value || "").trim())
+        .filter(Boolean);
+}
+
+function formatQueueJobItemLabel(job) {
+    return String(job?.item_mode || "").trim() === "category" ? "카테고리" : "시드";
+}
+
+function renderQueueJobItemSummary(job) {
+    const values = getQueueJobItemValues(job);
+    if (!values.length) {
+        return "";
+    }
+    const label = formatQueueJobItemLabel(job);
+    const status = String(job?.status || "").trim();
+    const heading = ["completed", "partial", "failed", "canceled"].includes(status)
+        ? `실행 ${label}`
+        : `등록 ${label}`;
+    const previewValues = values.slice(0, 5).map((value) => escapeHtml(value));
+    const remainingCount = Math.max(0, values.length - previewValues.length);
+    const previewText = previewValues.join(", ");
+    const suffix = remainingCount > 0 ? ` 외 ${remainingCount}건` : "";
+    if (values.length <= 5) {
+        return `<div class="queue-path-note">${heading} ${escapeHtml(String(values.length))}건 · ${previewText}</div>`;
+    }
+    return `
+        <details class="queue-job-item-summary">
+            <summary>${heading} ${escapeHtml(String(values.length))}건 보기</summary>
+            <div class="queue-path-note">${previewText}${escapeHtml(suffix)}</div>
+        </details>
+    `;
+}
+
 function renderQueueJobCard(job) {
     const completedCount = Number(job?.completed_count || 0);
     const failedCount = Number(job?.failed_count || 0);
@@ -1366,6 +1402,7 @@ function renderQueueJobCard(job) {
                     <strong>${escapeHtml(String(canceledCount))}</strong>
                 </div>
             </div>
+            ${renderQueueJobItemSummary(job)}
             ${lastErrorMessage ? `<div class="queue-error">${escapeHtml(lastErrorMessage)}</div>` : ""}
             ${job?.artifact_path ? `<div class="queue-path-note">${escapeHtml(job.artifact_path)}</div>` : ""}
             <div class="queue-item-actions">
@@ -1459,11 +1496,11 @@ function renderQueuePanel() {
     if (elements.queueSeedBatchHint) {
         elements.queueSeedBatchHint.textContent = requestPending
             ? "Queue 요청을 처리 중입니다."
-            : "현재 수집, 확장, 분석, 제목 옵션을 그대로 묶어서 시드별 전체 파이프라인을 순차 실행합니다. API 키나 트렌드 쿠키가 있으면 상태 파일에도 함께 저장됩니다.";
+            : "시드 배치는 등록 시점의 현재 화면 설정을 그대로 묶어 시드별 전체 파이프라인을 순차 실행합니다. 등록 후 화면 설정을 바꿔도 이미 등록한 작업에는 반영되지 않으며, API 키나 트렌드 쿠키가 있으면 상태 파일에도 함께 저장됩니다.";
     }
     if (elements.queueRoutineHint) {
         elements.queueRoutineHint.textContent = selectedWeekdays.length
-            ? `${formatQueueWeekdays(selectedWeekdays)} ${String(elements.queueRoutineTimeInput?.value || "06:00")}에 선택한 ${selectedCategoryCount}개 카테고리 작업을 자동 생성합니다. 현재 인증 설정도 상태 파일에 저장될 수 있습니다.`
+            ? `${formatQueueWeekdays(selectedWeekdays)} ${String(elements.queueRoutineTimeInput?.value || "06:00")}에 선택한 ${selectedCategoryCount}개 카테고리 작업을 자동 생성합니다. 등록 시점의 현재 화면 설정으로 이후 작업을 만들며, 현재 인증 설정도 상태 파일에 저장될 수 있습니다.`
             : "요일을 최소 1개 선택해야 루틴을 등록할 수 있습니다.";
     }
     if (elements.pauseQueueRunnerButton) {

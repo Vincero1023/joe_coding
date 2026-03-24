@@ -29,7 +29,8 @@ _MODEL_ESCALATION_MAP: dict[str, dict[str, str]] = {
     },
 }
 _PRACTICAL_RESCUE_KIND_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("preorder", ("사전예약방법", "사전예약전체크포인트", "사전예약전체크포인트")),
+    ("preorder", ("사전예약", "예약방법", "예약일정", "신청방법", "오픈일정")),
+    ("value", ("가성비", "가격대", "최저가", "예산")),
     ("setting", ("설정팁", "설정방법", "연결방법")),
     ("real_use", ("실사용차이",)),
     ("pros_cons", ("장단점",)),
@@ -59,6 +60,8 @@ _PRODUCT_RESCUE_KEY_PATTERNS = (
     "dpi",
     "버튼",
 )
+_MOUSE_SETTING_KEY_PATTERNS = ("마우스", "트랙볼", "버티컬", "유니파잉", "dpi", "클릭")
+_KEYBOARD_SETTING_KEY_PATTERNS = ("키보드", "키패드", "한영", "배열", "키맵", "fn", "멀티페어링")
 
 
 def generate_titles(
@@ -429,6 +432,8 @@ def _auto_retry_low_quality_results(
 def _should_retry_for_quality(report: dict[str, Any], retry_threshold: int) -> bool:
     if not isinstance(report, dict):
         return False
+    if bool(report.get("recommended_pair_ready")):
+        return False
     if bool(report.get("retry_recommended")):
         return True
     return int(report.get("bundle_score") or 0) < retry_threshold
@@ -535,15 +540,21 @@ def _build_practical_rescue_item(item: dict[str, Any]) -> TitleOutputItem | None
     if not keyword or not keyword_key:
         return None
 
-    rescue_kind = _resolve_practical_rescue_kind(keyword_key)
+    category = detect_category(keyword)
+    rescue_kind = _resolve_practical_rescue_kind(keyword_key) or _resolve_generic_single_rescue_kind(
+        item,
+        keyword=keyword,
+        category=category,
+    )
     if not rescue_kind:
         return None
 
-    category = detect_category(keyword)
     naver_suffixes, blog_suffixes = _resolve_practical_rescue_suffixes(
         keyword=keyword,
         rescue_kind=rescue_kind,
         category=category,
+        target_mode=normalize_text(item.get("target_mode")),
+        source_selection_mode=normalize_text(item.get("source_selection_mode") or item.get("selection_mode")),
     )
     return {
         **_strip_generated_fields(item),
@@ -567,39 +578,216 @@ def _resolve_practical_rescue_suffixes(
     keyword: str,
     rescue_kind: str,
     category: str,
+    target_mode: str,
+    source_selection_mode: str,
 ) -> tuple[list[str], list[str]]:
     seed = _stable_rescue_seed(keyword)
+    keyword_key = normalize_key(keyword)
     use_product_rescue = category in _PRODUCT_CATEGORY_KEYS or _looks_product_like_keyword(keyword)
-    if rescue_kind == "setting":
+    keyword_variant = _resolve_practical_rescue_variant(keyword_key, rescue_kind=rescue_kind)
+    is_seed_anchor = normalize_key(source_selection_mode) == "seedanchor"
+    is_single_target = normalize_key(target_mode) == "single"
+    if rescue_kind == "preorder":
+        if keyword_variant == "how_to":
+            return _rotate_rescue_pair(
+                [
+                    (
+                        ["오픈 시간과 신청 링크", "본인 인증·결제 순서"],
+                        ["오픈 시간·링크·결제 순서 정리", "본인 인증·카드 혜택·실수 포인트 정리"],
+                    ),
+                    (
+                        ["접속 링크와 결제 수단", "준비물과 신청 순서"],
+                        ["접속 링크·결제 수단·준비물 정리", "신청 순서·제한 수량·실수 포인트 정리"],
+                    ),
+                    (
+                        ["오픈 일정과 인증 준비", "카드 혜택과 결제 조건"],
+                        ["오픈 일정·인증 준비·결제 조건 정리", "카드 혜택·신청 순서·실수 포인트 정리"],
+                    ),
+                ],
+                seed,
+            )
+        if keyword_variant == "checkpoint":
+            return _rotate_rescue_pair(
+                [
+                    (
+                        ["본인 인증과 결제 조건", "수령 일정과 제한 수량"],
+                        ["본인 인증·결제 조건·수령 일정 정리", "놓치기 쉬운 제한 수량·카드 혜택 정리"],
+                    ),
+                    (
+                        ["카드 혜택과 신청 제한", "접속 시간과 링크 점검"],
+                        ["카드 혜택·신청 제한·접속 시간 정리", "링크·수령 일정·결제 조건 점검"],
+                    ),
+                    (
+                        ["결제 수단과 수령 일정", "인증 단계와 신청 제한"],
+                        ["결제 수단·수령 일정·신청 제한 정리", "인증 단계·접속 링크·혜택 포인트 정리"],
+                    ),
+                ],
+                seed,
+            )
+        if is_seed_anchor and is_single_target:
+            return _rotate_rescue_pair(
+                [
+                    (
+                        ["오픈 일정과 신청 링크", "카드 혜택과 준비물"],
+                        ["오픈 일정·신청 링크·준비물 정리", "카드 혜택·결제 수단·실수 포인트 정리"],
+                    ),
+                    (
+                        ["오픈 시간과 결제 조건", "본인 인증과 수령 일정"],
+                        ["오픈 시간·결제 조건·수령 일정 정리", "본인 인증·신청 링크·혜택 포인트 정리"],
+                    ),
+                    (
+                        ["신청 링크와 인증 준비", "제한 수량과 카드 혜택"],
+                        ["신청 링크·인증 준비·제한 수량 정리", "카드 혜택·결제 수단·수령 일정 정리"],
+                    ),
+                ],
+                seed,
+            )
         return _rotate_rescue_pair(
             [
                 (
-                    ["블루투스 연결부터 끝내기", "버튼·감도 설정 보기"],
-                    ["블루투스 연결 순서와 점검 포인트", "버튼·감도 세팅 체크"],
+                    ["오픈 일정과 신청 링크", "혜택 놓치지 않는 순서"],
+                    ["오픈 일정·링크·혜택 정리", "신청 전에 꼭 볼 체크포인트"],
                 ),
                 (
-                    ["연결 오류 줄이는 순서", "처음 세팅할 때 볼 포인트"],
-                    ["연결 오류 줄이는 세팅 방법", "처음 설정할 때 막히는 부분 정리"],
+                    ["신청 일정 먼저 확인", "준비물과 신청 순서"],
+                    ["일정·준비물·신청 순서 정리", "신청 전에 막히는 부분 정리"],
                 ),
                 (
-                    ["자주 막히는 설정부터 끝내기", "실수 줄이는 체크포인트"],
-                    ["설정 순서와 체크포인트", "실수 줄이는 세팅 방법"],
+                    ["마감 전에 볼 포인트", "혜택 비교부터 보기"],
+                    ["마감 전에 볼 일정과 체크포인트", "혜택·일정·신청 순서 정리"],
+                ),
+                (
+                    ["오픈 시간과 링크 확인", "놓치기 쉬운 신청 조건"],
+                    ["오픈 시간·링크·조건 정리", "신청 전에 확인할 혜택 포인트"],
+                ),
+                (
+                    ["신청 동선부터 점검", "실수 줄이는 예약 순서"],
+                    ["신청 동선·준비물·일정 정리", "실수 줄이는 예약 체크포인트"],
                 ),
             ],
             seed,
-        ) if use_product_rescue else _rotate_rescue_pair(
+        )
+
+    if rescue_kind == "value":
+        if keyword_variant == "criteria":
+            return _rotate_rescue_pair(
+                [
+                    (
+                        ["위치·교통·추가요금", "후기보다 먼저 볼 기준"],
+                        ["위치·교통·추가요금 기준 정리", "후기보다 먼저 볼 가성비 기준 정리"],
+                    ),
+                    (
+                        ["조식·객실·취소 조건", "주말 요금과 역 거리"],
+                        ["조식·객실·취소 조건 정리", "주말 요금·역 거리·후기 분포 정리"],
+                    ),
+                    (
+                        ["1박 예산과 포함 옵션", "숨은 추가요금 체크"],
+                        ["1박 예산·포함 옵션·추가요금 정리", "가성비를 가르는 후기 포인트 정리"],
+                    ),
+                ],
+                seed,
+            ) if not use_product_rescue else _rotate_rescue_pair(
+                [
+                    (
+                        ["가격대·성능·유지비", "할인보다 먼저 볼 기준"],
+                        ["가격대·성능·유지비 기준 정리", "할인보다 먼저 볼 선택 기준 정리"],
+                    ),
+                    (
+                        ["체감 성능과 추가 비용", "가격 차이와 추천 대상"],
+                        ["체감 성능·추가 비용 정리", "가격 차이·추천 대상·주의점 정리"],
+                    ),
+                    (
+                        ["실사용 대비 가격 포인트", "유지비와 교체 주기"],
+                        ["실사용 대비 가격 포인트 정리", "유지비·교체 주기·체감 차이 정리"],
+                    ),
+                ],
+                seed,
+            )
+        return _rotate_rescue_pair(
             [
                 (
-                    ["자주 막히는 설정부터 끝내기", "실수 줄이는 체크포인트"],
-                    ["설정 순서와 체크포인트", "실수 줄이는 설정 방법"],
+                    ["위치·교통·추가요금", "예산 안에서 거르는 기준"],
+                    ["위치·교통·추가요금 기준 정리", "예산 안에서 거르는 가성비 기준 정리"],
                 ),
                 (
-                    ["처음 세팅할 때 볼 포인트", "내게 맞는 기준 찾기"],
-                    ["처음 설정할 때 막히는 부분 정리", "내게 맞는 설정 기준 정리"],
+                    ["조식 포함과 취소 조건", "후기보다 먼저 볼 포인트"],
+                    ["조식 포함·취소 조건·역 거리 정리", "후기보다 먼저 볼 가성비 포인트 정리"],
                 ),
                 (
-                    ["초기 설정부터 점검", "문제 줄이는 순서"],
-                    ["초기 설정 순서와 점검 포인트", "문제 줄이는 설정 체크"],
+                    ["1박 예산과 객실 컨디션", "주말 요금과 숨은 비용"],
+                    ["1박 예산·객실 컨디션·추가요금 정리", "주말 요금·후기 분포·교통 포인트 정리"],
+                ),
+            ],
+            seed,
+        ) if not use_product_rescue else _rotate_rescue_pair(
+            [
+                (
+                    ["가격대와 체감 차이", "할인보다 먼저 볼 기준"],
+                    ["가격대·체감 차이·유지비 정리", "할인보다 먼저 볼 가성비 기준 정리"],
+                ),
+                (
+                    ["추천 대상과 추가 비용", "실사용 대비 가격 포인트"],
+                    ["추천 대상·추가 비용·실사용 정리", "실사용 대비 가격 포인트 정리"],
+                ),
+                (
+                    ["체감 성능과 유지비", "가격 차이와 아쉬운 점"],
+                    ["체감 성능·유지비·아쉬운 점 정리", "가격 차이·추천 대상·체감 정리"],
+                ),
+            ],
+            seed,
+        )
+
+    if rescue_kind == "setting":
+        setting_profile = _resolve_setting_rescue_profile(keyword_key)
+        if use_product_rescue and setting_profile == "mouse":
+            return _rotate_rescue_pair(
+                [
+                    (
+                        ["블루투스 연결과 DPI 세팅", "맥북·윈도우별 버튼 설정"],
+                        ["블루투스 연결·DPI 세팅 정리", "맥북·윈도우별 버튼 설정 정리"],
+                    ),
+                    (
+                        ["연결 끊김 줄이는 순서", "처음 세팅할 때 DPI 확인"],
+                        ["연결 끊김 줄이는 세팅 순서", "처음 세팅할 때 DPI·휠 설정 정리"],
+                    ),
+                    (
+                        ["유니파잉·블루투스 전환", "버튼 매핑과 감도 기준"],
+                        ["유니파잉·블루투스 전환 정리", "버튼 매핑·감도 기준 정리"],
+                    ),
+                ],
+                seed,
+            )
+        if use_product_rescue and setting_profile == "keyboard":
+            return _rotate_rescue_pair(
+                [
+                    (
+                        ["블루투스 연결과 멀티페어링", "맥북·윈도우별 키맵 설정"],
+                        ["블루투스 연결·멀티페어링 정리", "맥북·윈도우별 키맵·한영 전환 정리"],
+                    ),
+                    (
+                        ["입력 지연 줄이는 순서", "FN Lock·단축키 설정"],
+                        ["입력 지연 줄이는 세팅 순서", "FN Lock·단축키·배열 설정 정리"],
+                    ),
+                    (
+                        ["유선·블루투스 전환", "배열과 키감에 맞는 설정 기준"],
+                        ["유선·블루투스 전환 정리", "배열·키감·키맵 설정 기준 정리"],
+                    ),
+                ],
+                seed,
+            )
+        return _rotate_rescue_pair(
+            [
+                (
+                    ["초기 설정 순서부터 정리", "실수 줄이는 확인 항목"],
+                    ["초기 설정 순서와 확인 항목 정리", "실수 줄이는 설정 기준 정리"],
+                ),
+                (
+                    ["처음 세팅할 때 볼 항목", "내게 맞는 설정 기준"],
+                    ["처음 세팅할 때 볼 항목 정리", "내게 맞는 설정 기준 정리"],
+                ),
+                (
+                    ["기본값과 사용자 설정 차이", "문제 줄이는 적용 순서"],
+                    ["기본값과 사용자 설정 차이 정리", "문제 줄이는 적용 순서 정리"],
                 ),
             ],
             seed,
@@ -667,12 +855,77 @@ def _resolve_practical_rescue_suffixes(
                     ["원인·해결·예방 정리", "증상별 점검 순서"],
                 ),
                 (
-                    ["문제 생겼을 때 먼저 볼 것", "재발 막는 체크포인트"],
-                    ["문제 생겼을 때 먼저 볼 것 정리", "재발 막는 점검 포인트"],
+                    ["증상 먼저 구분하기", "재발 줄이는 점검 포인트"],
+                    ["증상 구분부터 해결 순서 정리", "재발 줄이는 점검 포인트 정리"],
                 ),
                 (
                     ["증상별 원인 확인", "해결 전에 볼 체크포인트"],
                     ["증상별 원인과 해결 순서", "해결 전에 볼 체크포인트 정리"],
+                ),
+                (
+                    ["자주 막히는 지점부터 보기", "문제 반복 막는 점검 순서"],
+                    ["자주 막히는 지점과 해결 순서 정리", "문제 반복 막는 점검 순서 정리"],
+                ),
+                (
+                    ["헷갈리는 증상부터 정리", "원인 찾기 전에 볼 포인트"],
+                    ["헷갈리는 증상과 원인 찾는 순서", "원인 찾기 전에 볼 포인트 정리"],
+                ),
+            ],
+            seed,
+        )
+
+    if rescue_kind == "single_product":
+        return _rotate_rescue_pair(
+            [
+                (
+                    ["실사용 장단점과 추천 대상", "가격대와 클릭감 차이"],
+                    ["실사용 장단점과 추천 대상 정리", "가격대·클릭감·추천 대상 정리"],
+                ),
+                (
+                    ["업무용·게임용 체감 차이", "무게와 버튼감 기준"],
+                    ["업무용·게임용 체감 차이 정리", "무게·버튼감·추천 대상 정리"],
+                ),
+                (
+                    ["배터리와 연결 안정성", "손 크기별 추천 대상"],
+                    ["배터리·연결 안정성·추천 대상 정리", "손 크기별 체감과 선택 기준 정리"],
+                ),
+            ],
+            seed,
+        )
+
+    if rescue_kind == "single_stay":
+        return _rotate_rescue_pair(
+            [
+                (
+                    ["위치·교통·추가요금", "객실·조식·취소 조건"],
+                    ["위치·교통·추가요금 기준 정리", "객실·조식·취소 조건 정리"],
+                ),
+                (
+                    ["역 거리와 체크인 동선", "주말 요금과 숨은 비용"],
+                    ["역 거리·체크인 동선·후기 분포 정리", "주말 요금·숨은 비용·취소 조건 정리"],
+                ),
+                (
+                    ["1박 예산과 포함 옵션", "후기보다 먼저 볼 기준"],
+                    ["1박 예산·포함 옵션·추가요금 정리", "후기보다 먼저 볼 위치·교통 기준 정리"],
+                ),
+            ],
+            seed,
+        )
+
+    if rescue_kind == "single_policy":
+        return _rotate_rescue_pair(
+            [
+                (
+                    ["조건과 제한부터 확인", "비용과 적용 대상 정리"],
+                    ["조건·제한·적용 대상 정리", "비용·준비물·진행 순서 정리"],
+                ),
+                (
+                    ["바뀐 점과 주의점", "신청 전에 볼 기준"],
+                    ["바뀐 점·주의점·신청 기준 정리", "적용 대상·비용·제한 정리"],
+                ),
+                (
+                    ["준비물과 진행 순서", "놓치기 쉬운 제한 조건"],
+                    ["준비물·진행 순서·제한 조건 정리", "적용 대상·주의점·비용 정리"],
                 ),
             ],
             seed,
@@ -695,6 +948,54 @@ def _resolve_practical_rescue_suffixes(
         ],
         seed,
     )
+
+
+def _resolve_practical_rescue_variant(keyword_key: str, *, rescue_kind: str) -> str:
+    if not keyword_key:
+        return ""
+    if rescue_kind == "preorder":
+        if any(pattern in keyword_key for pattern in ("전체크포인트", "체크포인트")):
+            return "checkpoint"
+        if any(pattern in keyword_key for pattern in ("예약방법", "신청방법", "방법")):
+            return "how_to"
+        return ""
+    if rescue_kind in {"value", "setting"}:
+        if any(pattern in keyword_key for pattern in ("기준", "조건")):
+            return "criteria"
+        if any(pattern in keyword_key for pattern in ("포인트", "체크포인트")):
+            return "points"
+    return ""
+
+
+def _resolve_generic_single_rescue_kind(
+    item: dict[str, Any],
+    *,
+    keyword: str,
+    category: str,
+) -> str:
+    if normalize_key(item.get("target_mode")) != "single":
+        return ""
+    source_kind = normalize_key(item.get("source_kind"))
+    source_selection_mode = normalize_key(item.get("source_selection_mode") or item.get("selection_mode"))
+    if source_kind != "selectedkeyword" and source_selection_mode != "seedanchor":
+        return ""
+
+    keyword_key = normalize_key(keyword)
+    if category == "product" or _looks_product_like_keyword(keyword):
+        return "single_product"
+    if category == "travel" or any(pattern in keyword_key for pattern in ("호텔", "숙소")):
+        return "single_stay"
+    if category in {"finance", "real_estate"}:
+        return "single_policy"
+    return ""
+
+
+def _resolve_setting_rescue_profile(keyword_key: str) -> str:
+    if any(pattern in keyword_key for pattern in _KEYBOARD_SETTING_KEY_PATTERNS):
+        return "keyboard"
+    if any(pattern in keyword_key for pattern in _MOUSE_SETTING_KEY_PATTERNS):
+        return "mouse"
+    return "generic"
 
 
 def _rotate_rescue_pair(

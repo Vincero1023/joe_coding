@@ -119,6 +119,38 @@ def test_seed_batch_job_runs_and_writes_xlsx(tmp_path: Path) -> None:
         service.shutdown()
 
 
+def test_completed_seed_batch_snapshot_preserves_seed_values(tmp_path: Path) -> None:
+    state_path = tmp_path / "scheduler_state.json"
+    output_dir = tmp_path / "exports"
+    service = reset_job_scheduler_service_for_tests(
+        state_path=state_path,
+        output_dir=output_dir,
+        runner=_fake_pipeline_runner,
+        poll_interval_seconds=0.1,
+    )
+
+    try:
+        snapshot = service.enqueue_seed_batch_job(
+            name="검증 시드 배치",
+            seeds=["로지텍 마우스", "오사카 가성비 호텔", "닌텐도 스위치2 사전예약"],
+            base_input={"title_options": {"mode": "template"}},
+        )
+
+        job_id = snapshot["jobs"][0]["job_id"]
+        _wait_for_job(service, job_id)
+        latest_snapshot = service.get_snapshot()
+        job = next(item for item in latest_snapshot["jobs"] if item["job_id"] == job_id)
+
+        assert [item["value"] for item in job["items"]] == [
+            "로지텍 마우스",
+            "오사카 가성비 호텔",
+            "닌텐도 스위치2 사전예약",
+        ]
+        assert all(item["status"] == _JOB_STATUS_COMPLETED for item in job["items"])
+    finally:
+        service.shutdown()
+
+
 def test_daily_category_routine_enqueues_due_job(tmp_path: Path) -> None:
     state_path = tmp_path / "scheduler_state.json"
     output_dir = tmp_path / "exports"

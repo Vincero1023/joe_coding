@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import math
 from typing import Any
 
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
@@ -65,6 +66,61 @@ _RELATED_CONCRETE_SUFFIXES = (
     "선택 포인트",
     "주의점",
 )
+_SELECTED_LONGTAIL_WEAK_LIMIT = 1
+_SELECTED_LONGTAIL_STRONG_LIMIT = 2
+_SELECTED_LONGTAIL_VERIFIED_SCORE_THRESHOLD = 60.0
+_SELECTED_LONGTAIL_FAMILY_PATTERNS = (
+    ("issue", ("자주 생기는 문제", "문제", "오류", "끊김", "불편", "고장", "이슈", "주의점")),
+    ("setup", ("설정 팁", "설정", "세팅", "연결", "페어링", "사용법", "방법")),
+    ("review", ("실사용 차이", "실사용", "후기", "리뷰", "체감")),
+    ("comparison", ("장단점", "차이", "비교")),
+    ("selection", ("추천 대상", "고르는", "선택", "체크포인트", "확인 사항")),
+)
+_SELECTED_LONGTAIL_FAMILY_PRIORITY = {
+    "issue": 5,
+    "setup": 4,
+    "review": 3,
+    "comparison": 2,
+    "selection": 1,
+    "general": 0,
+}
+_SELECTED_LONGTAIL_FAMILY_KEYWORDS = tuple(
+    (family, tuple(normalize_key(pattern) for pattern in patterns if normalize_key(pattern)))
+    for family, patterns in _SELECTED_LONGTAIL_FAMILY_PATTERNS
+)
+_ALREADY_CONCRETE_SELECTED_KEYWORD_PATTERNS = (
+    "실사용 차이",
+    "장단점",
+    "설정 팁",
+    "설정 방법",
+    "연결 방법",
+    "연결 문제",
+    "자주 생기는 문제",
+    "문제",
+    "오류",
+    "안됨",
+    "끊김",
+)
+_ALREADY_CONCRETE_SELECTED_KEYWORD_KEYS = tuple(
+    normalize_key(pattern)
+    for pattern in _ALREADY_CONCRETE_SELECTED_KEYWORD_PATTERNS
+    if normalize_key(pattern)
+)
+_TITLE_TARGET_GENERIC_TOKENS = {
+    "마우스",
+    "키보드",
+    "모니터",
+    "호텔",
+    "보험",
+    "카드",
+    "대출",
+    "이어폰",
+    "헤드셋",
+    "노트북",
+}
+_TITLE_TARGET_GENERIC_TOKEN_KEYS = {
+    normalize_key(token) for token in _TITLE_TARGET_GENERIC_TOKENS if normalize_key(token)
+}
 
 
 def resolve_title_keyword_modes(input_data: Any) -> list[str]:
@@ -121,6 +177,7 @@ def build_title_targets(input_data: Any) -> tuple[list[dict[str, Any]], dict[str
         for item in selected_items
         if normalize_text(item.get("keyword"))
     ]
+    selected_items = _dedupe_selected_items_for_title(selected_items)
     if not selected_items:
         return [], _build_target_summary([], requested_modes=requested_modes)
 
@@ -151,6 +208,8 @@ def build_title_targets(input_data: Any) -> tuple[list[dict[str, Any]], dict[str
                     cluster_id=normalize_text(cluster.get("cluster_id")) if cluster else "",
                     source_kind="selected_keyword",
                     source_note="선별 통과 키워드를 그대로 제목 생성 대상으로 사용합니다.",
+                    source_selection_mode=normalize_text(item.get("selection_mode")),
+                    source_selection_reason=normalize_text(item.get("selection_reason")),
                 )
             )
 
@@ -167,7 +226,21 @@ def build_title_targets(input_data: Any) -> tuple[list[dict[str, Any]], dict[str
             if not keyword or not keyword_key or keyword_key in seen_keywords:
                 continue
             seen_keywords.add(keyword_key)
-            targets.append(_build_suggestion_target(suggestion, target_mode="longtail_selected", source_kind="selected_longtail"))
+            targets.append(
+                _build_suggestion_target(
+                    suggestion,
+                    target_mode="longtail_selected",
+                    source_kind="selected_longtail",
+                    representative_item=next(
+                        (
+                            item
+                            for item in selected_items
+                            if normalize_key(item.get("keyword")) == normalize_key(suggestion.get("representative_keyword"))
+                        ),
+                        None,
+                    ),
+                )
+            )
 
     if "longtail_exploratory" in requested_modes:
         exploratory_targets = _build_related_mode_targets(
@@ -229,6 +302,7 @@ def _resolve_selected_longtail_suggestions(
         for item in selected_items
         if normalize_key(item.get("keyword"))
     }
+    cluster_by_keyword = _build_cluster_lookup(keyword_clusters)
 
     grouped_suggestions: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for suggestion in suggestions:
@@ -243,18 +317,143 @@ def _resolve_selected_longtail_suggestions(
             grouped_suggestions[representative_key].append(candidate_suggestion)
 
     output: list[dict[str, Any]] = []
+    representative_item_by_key = {
+        normalize_key(item.get("keyword")): item
+        for item in selected_items
+        if normalize_key(item.get("keyword"))
+    }
     for representative_key, rows in grouped_suggestions.items():
+        representative_keyword = next(
+            (
+                normalize_text(item.get("representative_keyword"))
+                for item in rows
+                if normalize_text(item.get("representative_keyword"))
+            ),
+            "",
+        )
+        selection_limit = _resolve_selected_longtail_limit(
+            representative_keyword,
+            cluster_by_keyword.get(representative_key) or {},
+            rows,
+            representative_item_by_key.get(representative_key) or {},
+        )
         sorted_rows = sorted(
             rows,
             key=lambda item: (
                 _STATUS_PRIORITY.get(str(item.get("verification_status") or "").strip().lower(), -1),
                 float(item.get("verified_score") or item.get("projected_score") or 0.0),
+                _SELECTED_LONGTAIL_FAMILY_PRIORITY.get(_classify_selected_longtail_family(item), 0),
                 float(len(tokenize_text(item.get("longtail_keyword") or ""))),
             ),
             reverse=True,
         )
-        output.extend(sorted_rows[:2])
+        output.extend(_pick_selected_longtail_rows(sorted_rows, limit=selection_limit))
     return output
+
+
+def _resolve_selected_longtail_limit(
+    representative_keyword: str,
+    cluster: dict[str, Any],
+    rows: list[dict[str, Any]],
+    representative_item: dict[str, Any],
+) -> int:
+    if _selected_keyword_is_already_concrete(representative_keyword):
+        return 0
+    representative_key = normalize_key(representative_keyword)
+    cluster_keywords = {
+        normalize_key(keyword)
+        for keyword in cluster.get("all_keywords", [])
+        if normalize_key(keyword)
+    }
+    support_keyword_count = len(
+        {
+            keyword_key
+            for keyword_key in cluster_keywords
+            if keyword_key and keyword_key != representative_key
+        }
+    )
+    if support_keyword_count > 0:
+        limit = _SELECTED_LONGTAIL_STRONG_LIMIT
+    elif _looks_like_specific_selected_keyword(representative_keyword):
+        limit = _SELECTED_LONGTAIL_STRONG_LIMIT
+    elif any(_has_distinct_selected_longtail_source(item, representative_key=representative_key) for item in rows):
+        limit = _SELECTED_LONGTAIL_STRONG_LIMIT
+    elif any(_is_high_confidence_selected_longtail(item) for item in rows):
+        limit = _SELECTED_LONGTAIL_STRONG_LIMIT
+    else:
+        limit = _SELECTED_LONGTAIL_WEAK_LIMIT
+
+    if normalize_text(representative_item.get("selection_mode")) == "seed_anchor":
+        return min(limit, _SELECTED_LONGTAIL_WEAK_LIMIT)
+    return limit
+
+
+def _selected_keyword_is_already_concrete(keyword: str) -> bool:
+    keyword_key = normalize_key(keyword)
+    if not keyword_key:
+        return False
+    return any(pattern in keyword_key for pattern in _ALREADY_CONCRETE_SELECTED_KEYWORD_KEYS)
+
+
+def _pick_selected_longtail_rows(
+    sorted_rows: list[dict[str, Any]],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    if limit <= 0 or not sorted_rows:
+        return []
+
+    picked_rows: list[dict[str, Any]] = []
+    seen_families: set[str] = set()
+    for row in sorted_rows:
+        family = _classify_selected_longtail_family(row)
+        if family in seen_families:
+            continue
+        picked_rows.append(row)
+        seen_families.add(family)
+        if len(picked_rows) >= limit:
+            return picked_rows
+
+    for row in sorted_rows:
+        if row in picked_rows:
+            continue
+        picked_rows.append(row)
+        if len(picked_rows) >= limit:
+            break
+    return picked_rows
+
+
+def _classify_selected_longtail_family(item: dict[str, Any]) -> str:
+    keyword_key = normalize_key(item.get("longtail_keyword"))
+    if not keyword_key:
+        return "general"
+    for family, pattern_keys in _SELECTED_LONGTAIL_FAMILY_KEYWORDS:
+        if any(pattern_key and pattern_key in keyword_key for pattern_key in pattern_keys):
+            return family
+    return "general"
+
+
+def _has_distinct_selected_longtail_source(item: dict[str, Any], *, representative_key: str) -> bool:
+    source_keyword_key = normalize_key(item.get("source_keyword"))
+    return bool(source_keyword_key and source_keyword_key != representative_key)
+
+
+def _is_high_confidence_selected_longtail(item: dict[str, Any]) -> bool:
+    verification_status = str(item.get("verification_status") or "").strip().lower()
+    if verification_status not in {"pass", "review"}:
+        return False
+    score = float(item.get("verified_score") or item.get("projected_score") or 0.0)
+    return score >= _SELECTED_LONGTAIL_VERIFIED_SCORE_THRESHOLD
+
+
+def _looks_like_specific_selected_keyword(keyword: str) -> bool:
+    tokens = tokenize_text(keyword)
+    for token in tokens:
+        if any(character.isdigit() for character in token):
+            return True
+        if any(character.isascii() and character.isalnum() for character in token):
+            return True
+    return False
 
 
 def _build_related_mode_targets(
@@ -330,6 +529,7 @@ def _build_related_mode_targets(
                         if target_mode == "longtail_exploratory"
                         else "저검색량까지 넓혀 잡는 실험형 제목 대상입니다."
                     ),
+                    representative_item=selected_item,
                 )
             )
             if sum(1 for item in generated_targets if item.get("base_keyword") == representative_keyword and item.get("target_mode") == target_mode) >= per_keyword_limit:
@@ -382,6 +582,7 @@ def _build_suggestion_target(
     target_mode: str,
     source_kind: str,
     source_note: str = "",
+    representative_item: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     keyword = normalize_text(suggestion.get("longtail_keyword"))
     representative_keyword = normalize_text(suggestion.get("representative_keyword"))
@@ -403,6 +604,8 @@ def _build_suggestion_target(
         source_kind=source_kind,
         source_note=source_note or normalize_text(suggestion.get("verification_reason")) or "",
         source_suggestion_id=normalize_text(suggestion.get("suggestion_id")),
+        source_selection_mode=normalize_text((representative_item or {}).get("selection_mode")),
+        source_selection_reason=normalize_text((representative_item or {}).get("selection_reason")),
     )
 
 
@@ -417,6 +620,8 @@ def _build_title_target(
     source_kind: str,
     source_note: str,
     source_suggestion_id: str = "",
+    source_selection_mode: str = "",
+    source_selection_reason: str = "",
 ) -> dict[str, Any]:
     normalized_keyword = normalize_text(keyword)
     normalized_base_keyword = normalize_text(base_keyword) or normalized_keyword
@@ -444,6 +649,8 @@ def _build_title_target(
         "source_note": normalize_text(source_note),
         "cluster_id": cluster_id,
         "source_suggestion_id": source_suggestion_id,
+        "source_selection_mode": normalize_text(source_selection_mode),
+        "source_selection_reason": normalize_text(source_selection_reason),
     }
 
 
@@ -563,6 +770,8 @@ def _coerce_explicit_title_targets(value: Any) -> list[dict[str, Any]]:
             source_kind=normalize_text(raw_item.get("source_kind")) or "explicit_target",
             source_note=normalize_text(raw_item.get("source_note")),
             source_suggestion_id=normalize_text(raw_item.get("source_suggestion_id")),
+            source_selection_mode=normalize_text(raw_item.get("source_selection_mode") or raw_item.get("selection_mode")),
+            source_selection_reason=normalize_text(raw_item.get("source_selection_reason") or raw_item.get("selection_reason")),
         )
         target_identity = normalize_text(target.get("target_id"))
         if not target_identity or target_identity in seen_target_ids:
@@ -570,6 +779,97 @@ def _coerce_explicit_title_targets(value: Any) -> list[dict[str, Any]]:
         seen_target_ids.add(target_identity)
         targets.append(target)
     return targets
+
+
+def _dedupe_selected_items_for_title(selected_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if len(selected_items) <= 1:
+        return selected_items
+
+    leading_token_keys = _resolve_leading_selected_item_tokens(selected_items)
+    grouped_items: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    group_order: list[str] = []
+    for item in selected_items:
+        signature = _resolve_selected_item_signature(item, leading_token_keys=leading_token_keys)
+        if signature not in grouped_items:
+            group_order.append(signature)
+        grouped_items[signature].append(item)
+
+    deduped_items: list[dict[str, Any]] = []
+    for signature in group_order:
+        deduped_items.append(_pick_preferred_selected_item(grouped_items[signature], leading_token_keys=leading_token_keys))
+    return deduped_items
+
+
+def _resolve_leading_selected_item_tokens(selected_items: list[dict[str, Any]]) -> set[str]:
+    token_counts: dict[str, int] = defaultdict(int)
+    for item in selected_items:
+        keyword = normalize_text(item.get("keyword"))
+        tokens = tokenize_text(keyword)
+        if not tokens:
+            continue
+        token_key = normalize_key(tokens[0])
+        if token_key and token_key not in _STOP_TOKEN_KEYS:
+            token_counts[token_key] += 1
+
+    threshold = max(3, int(math.ceil(len(selected_items) * 0.45)))
+    return {
+        token_key
+        for token_key, count in token_counts.items()
+        if count >= threshold
+    }
+
+
+def _resolve_selected_item_signature(
+    item: dict[str, Any],
+    *,
+    leading_token_keys: set[str],
+) -> str:
+    keyword = normalize_text(item.get("keyword"))
+    filtered_token_keys = [
+        normalize_key(token)
+        for token in tokenize_text(keyword)
+        if normalize_key(token)
+        and normalize_key(token) not in _STOP_TOKEN_KEYS
+        and normalize_key(token) not in leading_token_keys
+        and normalize_key(token) not in _TITLE_TARGET_GENERIC_TOKEN_KEYS
+    ]
+    if filtered_token_keys:
+        return "|".join(sorted(set(filtered_token_keys)))
+
+    fallback_token_keys = [
+        normalize_key(token)
+        for token in tokenize_text(keyword)
+        if normalize_key(token)
+        and normalize_key(token) not in _STOP_TOKEN_KEYS
+        and normalize_key(token) not in leading_token_keys
+    ]
+    if fallback_token_keys:
+        return f"kw:{'|'.join(sorted(set(fallback_token_keys)))}"
+    return f"raw:{normalize_key(keyword)}"
+
+
+def _pick_preferred_selected_item(
+    items: list[dict[str, Any]],
+    *,
+    leading_token_keys: set[str],
+) -> dict[str, Any]:
+    return max(
+        items,
+        key=lambda item: (
+            _coerce_float(item.get("score")),
+            -_count_selected_item_generic_tokens(item),
+            len(_resolve_selected_item_signature(item, leading_token_keys=leading_token_keys)),
+            -len(normalize_text(item.get("keyword"))),
+        ),
+    )
+
+
+def _count_selected_item_generic_tokens(item: dict[str, Any]) -> int:
+    return sum(
+        1
+        for token in tokenize_text(item.get("keyword") or "")
+        if normalize_key(token) in _TITLE_TARGET_GENERIC_TOKEN_KEYS
+    )
 
 
 def _build_cluster_lookup(keyword_clusters: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:

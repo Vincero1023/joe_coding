@@ -45,6 +45,10 @@ class PipelineService:
             runner=lambda: selector_module.run(
                 {
                     "analyzed_keywords": _get_list(analyzed_result, "analyzed_keywords"),
+                    "collected_keywords": _get_list(collected_result, "collected_keywords"),
+                    "mode": input_data.get("mode", collector_input.get("mode", "")),
+                    "category": input_data.get("category", collector_input.get("category", "")),
+                    "seed_input": input_data.get("seed_input", collector_input.get("seed_input", "")),
                     "select_options": input_data.get("select_options", {}),
                 }
             ),

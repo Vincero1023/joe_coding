@@ -97,6 +97,37 @@ def test_collector_seed_mode_returns_keyword_source_results() -> None:
     assert [item["source"] for item in seeded["debug"]["query_logs"]] == ["naver_autocomplete", "naver_related"]
 
 
+def test_collector_seed_mode_keeps_direct_seed_when_sources_are_empty() -> None:
+    service = CollectorService(
+        autocomplete_fetcher=lambda query: [],
+        related_fetcher=lambda query: [],
+    )
+
+    result = service.run(
+        {
+            "mode": "seed",
+            "category": BUSINESS_CATEGORY,
+            "seed_input": "무선 마우스 설정 팁",
+            "options": {
+                "collect_related": True,
+                "collect_autocomplete": True,
+                "collect_bulk": False,
+            },
+            "debug": True,
+        }
+    )
+
+    assert result["collected_keywords"] == [
+        {
+            "keyword": "무선 마우스 설정 팁",
+            "category": None,
+            "source": "seed_input_fallback",
+            "raw": "무선 마우스 설정 팁",
+        }
+    ]
+    assert any(warning["code"] == "seed_input_fallback_used" for warning in result["debug"]["warnings"])
+
+
 def test_collector_returns_empty_when_category_is_not_found() -> None:
     result = run(
         {

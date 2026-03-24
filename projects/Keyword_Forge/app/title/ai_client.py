@@ -251,6 +251,9 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Prefer concrete nouns such as 실사용, 장단점, 차이, 성능, 가격대, 세팅, 연결, 사용감, 추천 대상, or 주의점 over vague labels.\n"
     "Avoid low-information skeletons such as '최신 정보', '업데이트 확인', '왜 인기?', '이것만 알면', '구매 가이드', '사용 후기', '신상', or a bare '비교' unless the keyword itself truly requires that wording.\n"
     "Avoid generic template phrases such as '완벽 정리', '한 번에 정리', '갑자기 바뀌었다', '이유가 이상하다', '놓치면 손해' unless they are truly necessary.\n"
+    "For preorder or reservation keywords, prefer 일정, 오픈 시간, 링크, 인증, 결제, 혜택, 수령, or 제한 같은 구체 명사를 쓰고 teaser questions로 흐리지 마라.\n"
+    "For value or 가성비 keywords, prefer 위치, 교통, 추가요금, 조식, 객실, 취소 조건, 예산, or 후기 분포 같은 구체 축을 써라.\n"
+    "For broad single product keywords, prefer 실사용, 장단점, 가격대, 추천 대상, 클릭감, 배터리, 그립, or 연결 안정성 같은 평가 축을 써라.\n"
     "Search-visible effective blog patterns are concrete: model + symptom or benefit + timeframe or environment, model + connection or setup + device context, or model + problem + fix or result.\n"
     "Do not wrap already-concrete keywords such as 실사용 차이, 장단점, 설정 팁, 연결 방법, 연결 문제, or 자주 생기는 문제 with stale wrappers like 총정리, 완벽 가이드, 최신 정보, 최신 비교 분석, 이것만 알면, or 꼭 알아두세요.\n"
     "Avoid clickbait, exaggerated fear, and empty filler.\n"
@@ -769,15 +772,40 @@ def _build_practical_title_shape_hint(keyword: str) -> str:
     keyword_key = normalize_key(keyword)
     if not keyword_key:
         return ""
+    if any(pattern in keyword_key for pattern in ("사전예약", "예약방법", "신청방법", "오픈일정")):
+        return (
+            "preorder/application: use open time, link, card benefit, stock window, authentication, "
+            "pickup, or payment context instead of generic hype."
+        )
+    if "가성비" in keyword_key:
+        return (
+            "value decision: use budget, location, transport, included options, hidden fee, "
+            "room condition, or cancellation context instead of vague recommendation language."
+        )
+    if any(pattern in keyword_key for pattern in ("기준", "조건", "포인트", "체크포인트")):
+        return (
+            "criteria/checkpoint: spell out concrete evaluation axes, limits, fees, timing, "
+            "eligibility, or trade-offs instead of meta wrappers."
+        )
     if any(pattern in keyword_key for pattern in ("자주생기는문제", "연결문제", "문제", "오류", "안됨", "끊김", "더블클릭")):
         return (
             "problem/solution: use one symptom plus one cause, fix, or result. "
             "Avoid wrappers like 총정리, 완벽 가이드, or 최신 정보."
         )
     if any(pattern in keyword_key for pattern in ("설정팁", "설정방법", "연결방법")):
+        if any(pattern in keyword_key for pattern in ("키보드", "키패드", "한영", "배열", "키맵", "fn")):
+            return (
+                "setup/help: add device or OS context and the benefit or problem solved. "
+                "Prefer cues like 블루투스, 멀티페어링, 키맵, 한영 전환, FN Lock, 배열, or 단축키."
+            )
+        if any(pattern in keyword_key for pattern in ("마우스", "트랙볼", "버티컬", "유니파잉", "dpi", "클릭")):
+            return (
+                "setup/help: add device or OS context and the benefit or problem solved. "
+                "Prefer cues like 맥북, 윈도우, 블루투스, 유니파잉, DPI, 버튼 설정, or 감도."
+            )
         return (
             "setup/help: add device or OS context and the benefit or problem solved. "
-            "Prefer cues like 맥북, 윈도우, 블루투스, 유니파잉, DPI, or 버튼 설정."
+            "Prefer cues like OS, pairing, device mode, shortcut, mapping, or benefit solved."
         )
     if "실사용차이" in keyword_key:
         return (
@@ -863,11 +891,19 @@ def _build_source_hint(item: dict[str, Any]) -> str:
     if source_kind:
         parts.append(source_kind)
 
+    source_selection_mode = normalize_text(item.get("source_selection_mode") or item.get("selection_mode"))
+    if source_selection_mode:
+        parts.append(f"selection {source_selection_mode}")
+
     source_keywords = item.get("source_keywords")
     if isinstance(source_keywords, list):
         normalized_source_keywords = [normalize_text(keyword) for keyword in source_keywords if normalize_text(keyword)]
         if normalized_source_keywords:
             parts.append(f"source keywords {', '.join(normalized_source_keywords[:3])}")
+
+    source_selection_reason = normalize_text(item.get("source_selection_reason") or item.get("selection_reason"))
+    if source_selection_reason:
+        parts.append(f"selection note {source_selection_reason}")
 
     verification_status = normalize_text(item.get("verification_status"))
     if verification_status:
@@ -881,7 +917,7 @@ def _build_source_hint(item: dict[str, Any]) -> str:
     if source_note:
         parts.append(f"note {source_note}")
 
-    return " / ".join(parts[:4])
+    return " / ".join(parts[:6])
 
 
 def _build_issue_context_summary(item: dict[str, Any]) -> str:

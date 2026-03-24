@@ -43,10 +43,14 @@ class TitleQualityReport(TypedDict, total=False):
     label: str
     passes_threshold: bool
     retry_recommended: bool
+    recommended_pair_ready: bool
+    usable_pair_ready: bool
     issue_count: int
     issues: list[str]
     summary: str
     channel_scores: dict[str, int]
+    channel_good_counts: dict[str, int]
+    channel_usable_counts: dict[str, int]
     title_checks: dict[str, list[TitleCheckItem]]
 
 

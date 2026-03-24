@@ -110,6 +110,26 @@ def test_title_quality_flags_low_signal_generic_skeletons() -> None:
     assert report["status"] == "retry"
 
 
+def test_title_quality_rejects_vague_rank_and_best_question_frames() -> None:
+    latest_rank = assess_single_title(
+        "로지텍 마우스",
+        "로지텍 마우스 최신 순위는?",
+        "naver_home",
+        {},
+    )
+    best_question = assess_single_title(
+        "로지텍 마우스",
+        "로지텍 마우스 뭐가 제일 좋을까",
+        "naver_home",
+        {},
+    )
+
+    assert latest_rank["checks"]["hard_reject_skeleton"] is True
+    assert latest_rank["status"] == "retry"
+    assert best_question["checks"]["hard_reject_skeleton"] is True
+    assert best_question["status"] == "retry"
+
+
 def test_title_quality_hard_rejects_generic_overlay_on_practical_keyword() -> None:
     report = assess_single_title(
         "로지텍 마우스 설정 팁",
@@ -133,6 +153,140 @@ def test_title_quality_allows_concrete_context_on_practical_keyword() -> None:
     )
 
     assert report["checks"]["generic_overlay_on_practical_keyword"] is False
+
+
+def test_title_quality_rejects_vague_teaser_and_reveal_frames() -> None:
+    teaser = assess_single_title(
+        "오사카 가성비 호텔",
+        "오사카 가성비 호텔 숨은 보석 찾기",
+        "blog",
+        {},
+    )
+    reveal = assess_single_title(
+        "무선 마우스 설정 팁 전 체크포인트",
+        "무선 마우스 설정 팁 전 체크포인트 공개",
+        "blog",
+        {},
+    )
+    must_know = assess_single_title(
+        "무선 마우스 설정 팁",
+        "무선 마우스 설정 팁 꼭 알아둘 5가지",
+        "blog",
+        {},
+    )
+
+    assert teaser["checks"]["hard_reject_skeleton"] is True
+    assert teaser["status"] == "retry"
+    assert reveal["checks"]["hard_reject_skeleton"] is True
+    assert reveal["status"] == "retry"
+    assert must_know["checks"]["hard_reject_skeleton"] is True
+    assert must_know["status"] == "retry"
+
+
+def test_title_quality_retries_seed_anchor_single_without_concrete_intent_axis() -> None:
+    enriched_items, _summary = enrich_title_results(
+        [
+            {
+                "keyword": "닌텐도 스위치2 사전예약",
+                "target_mode": "single",
+                "source_selection_mode": "seed_anchor",
+                "titles": {
+                    "naver_home": [
+                        "닌텐도 스위치2 사전예약, 이번주 시작?",
+                        "닌텐도 스위치2 사전예약, 경쟁 치열할까",
+                    ],
+                    "blog": [
+                        "닌텐도 스위치2 사전예약, 놓치면 후회할 핵심 정보",
+                        "닌텐도 스위치2 사전예약, 구매 전 필독 체크리스트",
+                    ],
+                },
+            }
+        ]
+    )
+
+    report = enriched_items[0]["quality_report"]
+    assert report["retry_recommended"] is True
+    assert any("단일 키워드 제목이 의도 대비 너무 추상적이거나 낚시형입니다." in issue for issue in report["issues"])
+
+
+def test_title_quality_retries_broad_product_single_with_hype_teaser_titles() -> None:
+    enriched_items, _summary = enrich_title_results(
+        [
+            {
+                "keyword": "로지텍 마우스",
+                "target_mode": "single",
+                "source_kind": "selected_keyword",
+                "titles": {
+                    "naver_home": [
+                        "로지텍 마우스 신상, 이젠 이걸로 바꿔보세요",
+                        "로지텍 마우스, 당신의 선택은?",
+                    ],
+                    "blog": [
+                        "로지텍 마우스 최신 모델 비교 분석",
+                        "로지텍 마우스, 왜 인기일까? 최신 트렌드 분석",
+                    ],
+                },
+            }
+        ]
+    )
+
+    report = enriched_items[0]["quality_report"]
+    assert report["retry_recommended"] is True
+    assert any("단일 키워드 제목이 의도 대비 너무 추상적이거나 낚시형입니다." in issue for issue in report["issues"])
+
+
+def test_title_quality_retries_seed_anchor_value_single_without_concrete_stay_axes() -> None:
+    enriched_items, _summary = enrich_title_results(
+        [
+            {
+                "keyword": "오사카 가성비 호텔",
+                "target_mode": "single",
+                "source_selection_mode": "seed_anchor",
+                "titles": {
+                    "naver_home": [
+                        "오사카 가성비 호텔, 이번주 특가 예약 팁",
+                        "오사카 가성비 호텔, 숨겨진 혜택은?",
+                    ],
+                    "blog": [
+                        "오사카 가성비 호텔, 2박 3일 예산별 추천",
+                        "오사카 가성비 호텔, 예약부터 체크인까지 가이드",
+                    ],
+                },
+            }
+        ]
+    )
+
+    report = enriched_items[0]["quality_report"]
+    assert report["retry_recommended"] is True
+    assert report["recommended_pair_ready"] is False
+
+
+def test_enrich_title_results_sorts_best_titles_first_for_output() -> None:
+    enriched_items, _summary = enrich_title_results(
+        [
+            {
+                "keyword": "로지텍 마우스",
+                "target_mode": "single",
+                "source_kind": "selected_keyword",
+                "titles": {
+                    "naver_home": [
+                        "로지텍 마우스, 이번주 인기 순위는?",
+                        "로지텍 마우스, 배터리와 연결 안정성",
+                    ],
+                    "blog": [
+                        "로지텍 마우스 사용 후기",
+                        "로지텍 마우스 배터리·연결 안정성·추천 대상 정리",
+                    ],
+                },
+            }
+        ]
+    )
+
+    item = enriched_items[0]
+    assert item["titles"]["naver_home"][0] == "로지텍 마우스, 배터리와 연결 안정성"
+    assert item["titles"]["blog"][0] == "로지텍 마우스 배터리·연결 안정성·추천 대상 정리"
+    assert item["quality_report"]["title_checks"]["naver_home"][0]["status"] == "good"
+    assert item["quality_report"]["title_checks"]["blog"][0]["status"] == "good"
 
 
 def test_title_quality_keeps_specific_editorial_product_frame() -> None:
@@ -176,6 +330,14 @@ def test_template_titles_follow_keyword_intent_patterns() -> None:
     assert not any("후기 후기" in title for title in review_titles)
     assert any(("준비" in title or "체크리스트" in title or "절차" in title) for title in action_titles)
     assert any(("이력" in title or "정보" in title) for title in profile_titles)
+
+
+def test_template_titles_expand_intent_detection_for_value_and_setting_keywords() -> None:
+    value_titles = build_blog_titles("오사카 가성비 호텔", "general")
+    setting_titles = build_blog_titles("무선 마우스 설정 팁", "general")
+
+    assert any(("기준" in title or "선택" in title or "차이" in title) for title in value_titles)
+    assert any(("준비" in title or "절차" in title or "설정" in title or "포인트" in title) for title in setting_titles)
 
 
 def test_template_titles_avoid_repeating_noisy_checklist_and_guide_frames() -> None:
@@ -259,7 +421,10 @@ def test_title_generator_supports_ai_mode() -> None:
 
     assert result["generation_meta"]["used_mode"] == "ai"
     assert result["generation_meta"]["provider"] == "openai"
-    assert result["generated_titles"][0]["titles"]["blog"][0] == "보험 추천 완벽 가이드"
+    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 0
+    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 0
+    assert "완벽 가이드" not in result["generated_titles"][0]["titles"]["blog"][0]
+    assert "보험 추천 비교 포인트 정리" == result["generated_titles"][0]["titles"]["blog"][0]
     assert result["generation_meta"]["quality_summary"]["total_count"] == 1
 
 
@@ -505,6 +670,30 @@ def test_ai_prompt_builder_includes_practical_title_shape_hint() -> None:
     assert "device or OS context" in prompt
 
 
+def test_ai_prompt_builder_expands_preorder_and_value_hints() -> None:
+    prompt = _build_user_prompt_from_items(
+        [
+            {
+                "keyword": "닌텐도 스위치2 사전예약",
+                "target_mode": "single",
+                "source_selection_mode": "seed_anchor",
+                "source_selection_reason": "seed_intent_preserved",
+            },
+            {
+                "keyword": "오사카 가성비 호텔",
+                "target_mode": "single",
+                "source_selection_mode": "seed_anchor",
+            },
+        ]
+    )
+
+    assert "practical title shape: preorder/application" in prompt
+    assert "practical title shape: value decision" in prompt
+    assert "source hints: selected_keyword / selection seed_anchor" not in prompt
+    assert "selection seed_anchor" in prompt
+    assert "selection note seed_intent_preserved" in prompt
+
+
 def test_ai_prompt_builder_warns_against_keyword_shortening() -> None:
     prompt = _build_user_prompt_from_items(
         [
@@ -699,7 +888,7 @@ def test_title_generator_reports_preset_metadata() -> None:
     assert result["generation_meta"]["temperature"] == 0.7
 
 
-def test_title_generator_uses_custom_quality_retry_threshold_for_ai_titles() -> None:
+def test_title_generator_keeps_custom_quality_retry_threshold_without_extra_retry_when_pair_ready() -> None:
     with patch(
         "app.title.title_generator.request_ai_titles",
         side_effect=[
@@ -753,12 +942,12 @@ def test_title_generator_uses_custom_quality_retry_threshold_for_ai_titles() -> 
             }
         )
 
-    assert mocked_request.call_count == 2
+    assert mocked_request.call_count == 1
     assert result["generation_meta"]["quality_retry_threshold"] == 95
     assert result["generation_meta"]["auto_retry"]["retry_threshold"] == 95
-    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 1
-    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
-    assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 95
+    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 0
+    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 0
+    assert result["generated_titles"][0]["quality_report"]["recommended_pair_ready"] is True
 
 
 def test_title_generator_auto_retries_low_quality_ai_titles() -> None:
@@ -807,6 +996,50 @@ def test_title_generator_auto_retries_low_quality_ai_titles() -> None:
     assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
     assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is False
     assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 80
+
+
+def test_title_generator_skips_auto_retry_when_recommended_pair_is_already_ready() -> None:
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        return_value=[
+            {
+                "keyword": "로지텍 마우스",
+                "titles": {
+                    "naver_home": [
+                        "로지텍 마우스, 이번주 인기 순위는?",
+                        "로지텍 마우스, 배터리와 연결 안정성",
+                    ],
+                    "blog": [
+                        "로지텍 마우스 사용 후기",
+                        "로지텍 마우스 배터리·연결 안정성·추천 대상 정리",
+                    ],
+                },
+            }
+        ],
+    ) as mocked_request:
+        result = run(
+            {
+                "selected_keywords": [
+                    {
+                        "keyword": "로지텍 마우스",
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "mode": "ai",
+                    "provider": "openai",
+                    "api_key": "test-key",
+                    "model": "gpt-4o-mini",
+                },
+            }
+        )
+
+    report = result["generated_titles"][0]["quality_report"]
+    assert mocked_request.call_count == 1
+    assert report["recommended_pair_ready"] is True
+    assert report["status"] == "review"
+    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 0
+    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 0
 
 
 def test_title_generator_practical_rescue_keeps_full_keyword_after_failed_retries() -> None:
@@ -898,6 +1131,135 @@ def test_practical_rescue_stays_generic_for_non_product_setting_keyword() -> Non
     assert all("블루투스" not in title for title in all_titles)
     assert all("DPI" not in title for title in all_titles)
     assert all("버튼" not in title for title in all_titles)
+
+
+def test_practical_rescue_uses_keyboard_specific_setting_frames_without_dpi() -> None:
+    item = _build_practical_rescue_item({"keyword": "아콘 키보드 설정 팁"})
+
+    assert item is not None
+    all_titles = item["titles"]["naver_home"] + item["titles"]["blog"]
+    assert all("DPI" not in title for title in all_titles)
+    assert any(
+        any(term in title for term in ("멀티페어링", "키맵", "한영", "FN Lock", "배열"))
+        for title in all_titles
+    )
+
+
+def test_practical_rescue_detects_preorder_keywords_without_generic_wrappers() -> None:
+    item = _build_practical_rescue_item({"keyword": "로지텍 지슈스 사전예약"})
+
+    assert item is not None
+    all_titles = item["titles"]["naver_home"] + item["titles"]["blog"]
+    assert all("로지텍 지슈스 사전예약" in title for title in all_titles)
+    assert all(
+        banned not in title
+        for title in all_titles
+        for banned in ("총정리", "최신 정보", "구매 가이드", "놓치면 후회", "지금 신청?")
+    )
+    assert any("일정" in title or "신청" in title or "혜택" in title for title in all_titles)
+
+
+def test_practical_rescue_problem_keywords_rotate_across_more_than_one_frame() -> None:
+    first = _build_practical_rescue_item({"keyword": "로지텍 슈퍼스트라이크 자주 생기는 문제"})
+    second = _build_practical_rescue_item({"keyword": "로지텍 지슈라 스트라이크 자주 생기는 문제"})
+
+    assert first is not None
+    assert second is not None
+    assert first["titles"]["naver_home"] != second["titles"]["naver_home"]
+    assert first["titles"]["blog"] != second["titles"]["blog"]
+
+
+def test_practical_rescue_adds_concrete_value_frames_for_seed_anchor_keyword() -> None:
+    item = _build_practical_rescue_item(
+        {
+            "keyword": "오사카 가성비 호텔",
+            "target_mode": "single",
+            "source_selection_mode": "seed_anchor",
+        }
+    )
+
+    assert item is not None
+    all_titles = item["titles"]["naver_home"] + item["titles"]["blog"]
+    assert all("오사카 가성비 호텔" in title for title in all_titles)
+    assert any(
+        any(term in title for term in ("위치", "교통", "추가요금", "예산", "조식", "취소"))
+        for title in all_titles
+    )
+    assert all(
+        banned not in title
+        for title in all_titles
+        for banned in ("숨은 보석", "찾아봐요", "최신 정보")
+    )
+
+
+def test_practical_rescue_specializes_preorder_single_and_checkpoint_variants() -> None:
+    single = _build_practical_rescue_item(
+        {
+            "keyword": "닌텐도 스위치2 사전예약",
+            "target_mode": "single",
+            "source_selection_mode": "seed_anchor",
+        }
+    )
+    checkpoint = _build_practical_rescue_item(
+        {
+            "keyword": "닌텐도 스위치2 사전예약 전 체크포인트",
+            "target_mode": "longtail_selected",
+            "source_selection_mode": "seed_anchor",
+        }
+    )
+
+    assert single is not None
+    assert checkpoint is not None
+    single_titles = single["titles"]["naver_home"] + single["titles"]["blog"]
+    checkpoint_titles = checkpoint["titles"]["naver_home"] + checkpoint["titles"]["blog"]
+    assert single["titles"]["naver_home"] != checkpoint["titles"]["naver_home"]
+    assert any(
+        any(term in title for term in ("신청 링크", "카드 혜택", "오픈 일정", "결제 수단", "수령 일정"))
+        for title in single_titles
+    )
+    assert any(
+        any(term in title for term in ("본인 인증", "제한 수량", "결제 조건", "접속 시간", "수령 일정"))
+        for title in checkpoint_titles
+    )
+
+
+def test_practical_rescue_builds_concrete_generic_product_single_titles() -> None:
+    item = _build_practical_rescue_item(
+        {
+            "keyword": "로지텍 마우스",
+            "target_mode": "single",
+            "source_kind": "selected_keyword",
+        }
+    )
+
+    assert item is not None
+    all_titles = item["titles"]["naver_home"] + item["titles"]["blog"]
+    assert any(
+        any(term in title for term in ("실사용", "장단점", "가격대", "추천 대상", "클릭감", "배터리"))
+        for title in all_titles
+    )
+    assert all(
+        banned not in title
+        for title in all_titles
+        for banned in ("당신의 선택", "왜 인기", "신상", "트렌드 분석")
+    )
+
+
+def test_practical_rescue_builds_concrete_generic_stay_single_titles() -> None:
+    item = _build_practical_rescue_item(
+        {
+            "keyword": "오사카 호텔",
+            "target_mode": "single",
+            "source_kind": "selected_keyword",
+        }
+    )
+
+    assert item is not None
+    all_titles = item["titles"]["naver_home"] + item["titles"]["blog"]
+    assert any(
+        any(term in title for term in ("위치", "교통", "추가요금", "객실", "조식", "취소"))
+        for title in all_titles
+    )
 
 
 def test_title_generator_escalates_model_after_two_failed_quality_attempts() -> None:
@@ -1343,6 +1705,304 @@ def test_build_title_targets_rewrites_low_signal_longtail_keywords() -> None:
     assert any(keyword in keywords for keyword in ("로지텍 마우스 실사용 차이", "로지텍 마우스 장단점"))
     assert "로지텍 마우스 연결 방법" in keywords
     assert summary["mode_counts"]["longtail_selected"] == 2
+
+
+def test_build_title_targets_limits_weak_singleton_v1_targets() -> None:
+    items, summary = build_title_targets(
+        {
+            "selected_keywords": [
+                {
+                    "keyword": "블루투스 키보드",
+                    "score": 62.0,
+                    "metrics": {"volume": 720.0, "cpc": 115.0},
+                }
+            ],
+            "keyword_clusters": [
+                {
+                    "cluster_id": "cluster-01",
+                    "representative_keyword": "블루투스 키보드",
+                    "topic_terms": ["블루투스", "키보드"],
+                    "all_keywords": ["블루투스 키보드"],
+                }
+            ],
+            "longtail_suggestions": [
+                {
+                    "suggestion_id": "longtail-01",
+                    "representative_keyword": "블루투스 키보드",
+                    "source_keyword": "블루투스 키보드",
+                    "longtail_keyword": "블루투스 키보드 실사용 차이",
+                    "verification_status": "pending",
+                    "projected_score": 66.0,
+                },
+                {
+                    "suggestion_id": "longtail-02",
+                    "representative_keyword": "블루투스 키보드",
+                    "source_keyword": "블루투스 키보드",
+                    "longtail_keyword": "블루투스 키보드 설정 팁",
+                    "verification_status": "pending",
+                    "projected_score": 65.0,
+                },
+                {
+                    "suggestion_id": "longtail-03",
+                    "representative_keyword": "블루투스 키보드",
+                    "source_keyword": "블루투스 키보드",
+                    "longtail_keyword": "블루투스 키보드 장단점",
+                    "verification_status": "pending",
+                    "projected_score": 64.0,
+                },
+            ],
+        }
+    )
+
+    v1_items = [item for item in items if item["target_mode"] == "longtail_selected"]
+
+    assert summary["mode_counts"]["longtail_selected"] == 1
+    assert len(v1_items) == 1
+    assert v1_items[0]["base_keyword"] == "블루투스 키보드"
+
+
+def test_build_title_targets_spreads_v1_across_distinct_families_for_specific_keywords() -> None:
+    items, summary = build_title_targets(
+        {
+            "selected_keywords": [
+                {
+                    "keyword": "큐센 q104",
+                    "score": 58.0,
+                    "metrics": {"volume": 240.0, "cpc": 90.0},
+                }
+            ],
+            "keyword_clusters": [
+                {
+                    "cluster_id": "cluster-01",
+                    "representative_keyword": "큐센 q104",
+                    "topic_terms": ["큐센", "q104"],
+                    "all_keywords": ["큐센 q104"],
+                }
+            ],
+            "longtail_suggestions": [
+                {
+                    "suggestion_id": "longtail-01",
+                    "representative_keyword": "큐센 q104",
+                    "source_keyword": "큐센 q104",
+                    "longtail_keyword": "큐센 q104 설정 팁",
+                    "verification_status": "pending",
+                    "projected_score": 71.0,
+                },
+                {
+                    "suggestion_id": "longtail-02",
+                    "representative_keyword": "큐센 q104",
+                    "source_keyword": "큐센 q104",
+                    "longtail_keyword": "큐센 q104 연결 방법",
+                    "verification_status": "pending",
+                    "projected_score": 70.0,
+                },
+                {
+                    "suggestion_id": "longtail-03",
+                    "representative_keyword": "큐센 q104",
+                    "source_keyword": "큐센 q104",
+                    "longtail_keyword": "큐센 q104 자주 생기는 문제",
+                    "verification_status": "pending",
+                    "projected_score": 69.0,
+                },
+            ],
+        }
+    )
+
+    v1_keywords = {
+        item["keyword"]
+        for item in items
+        if item["target_mode"] == "longtail_selected"
+    }
+
+    assert summary["mode_counts"]["longtail_selected"] == 2
+    assert "큐센 q104 자주 생기는 문제" in v1_keywords
+    assert len(
+        {
+            keyword
+            for keyword in v1_keywords
+            if ("설정" in keyword or "연결" in keyword)
+        }
+    ) == 1
+
+
+def test_build_title_targets_dedupes_near_duplicate_single_keywords() -> None:
+    items, summary = build_title_targets(
+        {
+            "selected_keywords": [
+                {"keyword": "로지텍 지슈스", "score": 48.0},
+                {"keyword": "지슈스 마우스", "score": 34.0},
+                {"keyword": "로지텍 지슈스 마우스", "score": 22.0},
+                {"keyword": "로지텍 지슈스 사전예약", "score": 34.0},
+                {"keyword": "로지텍 g304", "score": 39.0},
+            ],
+            "title_options": {
+                "keyword_modes": ["single"],
+            },
+        }
+    )
+
+    single_keywords = {item["keyword"] for item in items if item["target_mode"] == "single"}
+
+    assert summary["mode_counts"]["single"] == 3
+    assert single_keywords == {
+        "로지텍 지슈스",
+        "로지텍 지슈스 사전예약",
+        "로지텍 g304",
+    }
+
+
+def test_build_title_targets_uses_deduped_selected_base_for_v1_suggestions() -> None:
+    items, summary = build_title_targets(
+        {
+            "selected_keywords": [
+                {"keyword": "로지텍 지슈스", "score": 48.0},
+                {"keyword": "지슈스 마우스", "score": 34.0},
+                {"keyword": "로지텍 지슈스 마우스", "score": 22.0},
+                {"keyword": "로지텍 g304", "score": 39.0},
+            ],
+            "longtail_suggestions": [
+                {
+                    "suggestion_id": "longtail-01",
+                    "representative_keyword": "로지텍 지슈스",
+                    "source_keyword": "로지텍 지슈스",
+                    "longtail_keyword": "로지텍 지슈스 설정 팁",
+                    "verification_status": "pass",
+                    "verified_score": 71.0,
+                },
+                {
+                    "suggestion_id": "longtail-02",
+                    "representative_keyword": "지슈스 마우스",
+                    "source_keyword": "지슈스 마우스",
+                    "longtail_keyword": "지슈스 마우스 설정 팁",
+                    "verification_status": "pass",
+                    "verified_score": 69.0,
+                },
+                {
+                    "suggestion_id": "longtail-03",
+                    "representative_keyword": "로지텍 지슈스 마우스",
+                    "source_keyword": "로지텍 지슈스 마우스",
+                    "longtail_keyword": "로지텍 지슈스 마우스 설정 팁",
+                    "verification_status": "pass",
+                    "verified_score": 68.0,
+                },
+                {
+                    "suggestion_id": "longtail-04",
+                    "representative_keyword": "로지텍 g304",
+                    "source_keyword": "로지텍 g304",
+                    "longtail_keyword": "로지텍 g304 실사용 차이",
+                    "verification_status": "pass",
+                    "verified_score": 72.0,
+                },
+            ],
+            "title_options": {
+                "keyword_modes": ["longtail_selected"],
+            },
+        }
+    )
+
+    v1_keywords = {item["keyword"] for item in items if item["target_mode"] == "longtail_selected"}
+
+    assert summary["mode_counts"]["longtail_selected"] == 2
+    assert v1_keywords == {
+        "로지텍 지슈스 설정 팁",
+        "로지텍 g304 실사용 차이",
+    }
+
+
+def test_build_title_targets_caps_seed_anchor_selected_v1_to_one() -> None:
+    items, summary = build_title_targets(
+        {
+            "selected_keywords": [
+                {
+                    "keyword": "닌텐도 스위치2 사전예약",
+                    "score": 32.0,
+                    "selection_mode": "seed_anchor",
+                    "selection_reason": "seed_intent_preserved",
+                }
+            ],
+            "longtail_suggestions": [
+                {
+                    "suggestion_id": "longtail-01",
+                    "representative_keyword": "닌텐도 스위치2 사전예약",
+                    "source_keyword": "닌텐도 스위치2 사전예약",
+                    "longtail_keyword": "닌텐도 스위치2 사전예약 전 체크포인트",
+                    "verification_status": "pass",
+                    "verified_score": 72.0,
+                },
+                {
+                    "suggestion_id": "longtail-02",
+                    "representative_keyword": "닌텐도 스위치2 사전예약",
+                    "source_keyword": "닌텐도 스위치2 사전예약",
+                    "longtail_keyword": "닌텐도 스위치2 사전예약 방법",
+                    "verification_status": "pass",
+                    "verified_score": 69.0,
+                },
+            ],
+            "title_options": {
+                "keyword_modes": ["longtail_selected"],
+            },
+        }
+    )
+
+    assert summary["mode_counts"]["longtail_selected"] == 1
+    assert [item["keyword"] for item in items] == ["닌텐도 스위치2 사전예약 전 체크포인트"]
+    assert items[0]["source_selection_mode"] == "seed_anchor"
+    assert items[0]["source_selection_reason"] == "seed_intent_preserved"
+
+
+def test_build_title_targets_skips_v1_for_already_concrete_selected_keyword() -> None:
+    items, summary = build_title_targets(
+        {
+            "selected_keywords": [
+                {
+                    "keyword": "무선 마우스 설정 팁",
+                    "score": 18.0,
+                    "selection_mode": "fallback",
+                    "selection_reason": "top_scored_candidate",
+                }
+            ],
+            "longtail_suggestions": [
+                {
+                    "suggestion_id": "longtail-01",
+                    "representative_keyword": "무선 마우스 설정 팁",
+                    "source_keyword": "무선 마우스 설정 팁",
+                    "longtail_keyword": "무선 마우스 설정 팁 전 체크포인트",
+                    "verification_status": "pending",
+                    "projected_score": 52.0,
+                }
+            ],
+            "title_options": {
+                "keyword_modes": ["single", "longtail_selected"],
+            },
+        }
+    )
+
+    assert summary["mode_counts"]["single"] == 1
+    assert summary["mode_counts"]["longtail_selected"] == 0
+    assert [item["keyword"] for item in items] == ["무선 마우스 설정 팁"]
+
+
+def test_build_title_targets_preserves_selection_metadata_on_single_targets() -> None:
+    items, summary = build_title_targets(
+        {
+            "selected_keywords": [
+                {
+                    "keyword": "오사카 가성비 호텔",
+                    "score": 28.0,
+                    "selection_mode": "seed_anchor",
+                    "selection_reason": "seed_intent_preserved",
+                }
+            ],
+            "title_options": {
+                "keyword_modes": ["single"],
+            },
+        }
+    )
+
+    assert summary["mode_counts"]["single"] == 1
+    assert items[0]["keyword"] == "오사카 가성비 호텔"
+    assert items[0]["source_selection_mode"] == "seed_anchor"
+    assert items[0]["source_selection_reason"] == "seed_intent_preserved"
 
 
 def test_title_generator_supports_explicit_title_targets() -> None:

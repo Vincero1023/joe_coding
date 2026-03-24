@@ -533,6 +533,76 @@ def test_selector_tops_up_small_default_selection_with_editorial_support_candida
     assert sum(1 for item in selected_keywords if item["selection_mode"] == "editorial_support") == 3
 
 
+def test_selector_injects_seed_anchor_for_specific_intent_seed_when_selection_drifts() -> None:
+    result = run(
+        {
+            "seed_input": "닌텐도 스위치2 사전예약",
+            "analyzed_keywords": [
+                {
+                    "keyword": "닌텐도 스위치2 마리오카트",
+                    "profitability_grade": "D",
+                    "attackability_grade": "3",
+                    "combo_grade": "D3",
+                    "golden_bucket": "hold",
+                    "score": 39.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.98,
+                    "metrics": {"volume": 17940.0, "cpc": 556.0},
+                },
+                {
+                    "keyword": "닌텐도 스위치2 동물의숲",
+                    "profitability_grade": "D",
+                    "attackability_grade": "4",
+                    "combo_grade": "D4",
+                    "golden_bucket": "hold",
+                    "score": 29.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.98,
+                    "metrics": {"volume": 6120.0, "cpc": 180.0},
+                },
+            ],
+        }
+    )
+
+    assert result["selected_keywords"][0]["keyword"] == "닌텐도 스위치2 사전예약"
+    assert result["selected_keywords"][0]["selection_mode"] == "seed_anchor"
+    assert result["selected_keywords"][0]["selection_reason"] == "seed_intent_preserved"
+
+
+def test_selector_does_not_inject_seed_anchor_for_broad_two_token_seed() -> None:
+    result = run(
+        {
+            "seed_input": "로지텍 키보드",
+            "analyzed_keywords": [
+                {
+                    "keyword": "독거미 키보드",
+                    "profitability_grade": "C",
+                    "attackability_grade": "1",
+                    "combo_grade": "C1",
+                    "golden_bucket": "promising",
+                    "score": 43.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.98,
+                    "metrics": {"volume": 87400.0, "cpc": 483.0},
+                },
+                {
+                    "keyword": "큐센 q104",
+                    "profitability_grade": "D",
+                    "attackability_grade": "1",
+                    "combo_grade": "D1",
+                    "golden_bucket": "experimental",
+                    "score": 34.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.98,
+                    "metrics": {"volume": 3630.0, "cpc": 756.0},
+                },
+            ],
+        }
+    )
+
+    assert all(item["keyword"] != "로지텍 키보드" for item in result["selected_keywords"])
+
+
 def test_selector_keeps_guide_and_checklist_suffixes_optional() -> None:
     analyzed_keywords = [
         {

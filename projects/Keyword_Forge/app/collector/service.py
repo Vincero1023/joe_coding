@@ -429,6 +429,21 @@ class CollectorService:
                 message="시드 기준 자동완성/연관검색 결과가 없습니다.",
                 detail={"seed_input": normalized_seed},
             )
+        if not collected_keywords:
+            _record_warning(
+                debug,
+                code="seed_input_fallback_used",
+                message="시드 원문을 직접 수집 후보로 유지합니다.",
+                detail={"seed_input": normalized_seed},
+            )
+            collected_keywords.append(
+                {
+                    "keyword": normalized_seed,
+                    "category": None,
+                    "source": "seed_input_fallback",
+                    "raw": normalized_seed,
+                }
+            )
 
         return collected_keywords
 

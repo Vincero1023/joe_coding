@@ -5,12 +5,14 @@ import re
 from typing import Any
 
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
+from app.title.category_detector import detect_category
 from app.title.rules import NAVER_HOME_MAX_LENGTH
 
 
 TITLE_QUALITY_PASS_SCORE = 84
 TITLE_QUALITY_REVIEW_SCORE = 75
 _NOISY_PUNCTUATION_RE = re.compile(r"[!?]{2,}|\.{3,}")
+_MODEL_NUMBER_TOKEN_RE = re.compile(r"(?i)^[a-z]{1,6}\d{2,4}[a-z0-9-]*$")
 _CLICKSBAIT_TERMS = (
     "무조건",
     "충격",
@@ -35,6 +37,7 @@ _LOW_SIGNAL_SKELETON_KEYS = (
     "최신정보",
     "업데이트확인",
     "최신업데이트확인",
+    "최신순위",
     "신상",
     "비교",
     "리뷰",
@@ -78,6 +81,7 @@ _HARD_REJECT_TEMPLATE_SKELETON_KEYS = (
     "고를때체크",
     "비교",
     "최신정보",
+    "최신순위",
     "최신동향",
     "최신모델비교",
     "최신성능비교",
@@ -86,6 +90,9 @@ _HARD_REJECT_TEMPLATE_SKELETON_KEYS = (
     "완벽분석",
     "총정리",
     "뭐가다를까",
+    "뭐가제일좋을까",
+    "무엇을봐야할까",
+    "무엇을확인",
     "왜인기일까",
     "이것만알면끝",
 )
@@ -93,6 +100,7 @@ _HARD_REJECT_TEMPLATE_SUBSTRINGS = (
     "추천기준",
     "고를때체크",
     "최신정보",
+    "최신순위",
     "최신동향",
     "최신업데이트",
     "업데이트확인",
@@ -103,6 +111,9 @@ _HARD_REJECT_TEMPLATE_SUBSTRINGS = (
     "완벽분석",
     "총정리",
     "뭐가다를까",
+    "뭐가제일좋을까",
+    "무엇을봐야할까",
+    "무엇을확인",
     "왜인기일까",
     "이것만알면끝",
 )
@@ -132,6 +143,9 @@ _HARD_REJECT_TEMPLATE_TOKENS = {
     "끝",
     "필수",
     "선택",
+    "순위",
+    "제일",
+    "좋을까",
     "모델",
     "성능",
     "체크포인트",
@@ -167,6 +181,7 @@ _GENERIC_OVERLAY_PATTERNS = (
     "가이드",
     "이것만 알면",
     "꼭 알아두세요",
+    "최적화 방법",
     "사용 후기",
     "추천 기준",
 )
@@ -187,6 +202,8 @@ _GENERIC_OVERLAY_TOKENS = {
         "알면",
         "꼭",
         "알아두세요",
+        "최적화",
+        "방법",
         "사용",
         "후기",
         "추천",
@@ -194,7 +211,125 @@ _GENERIC_OVERLAY_TOKENS = {
     )
     if normalize_key(token)
 }
+_VAGUE_EDITORIAL_SKELETON_PATTERNS = (
+    "숨은보석",
+    "찾아봐요",
+)
+_VAGUE_EDITORIAL_SKELETON_REGEXES = (
+    re.compile(r"꼭알아둘\d+가지"),
+)
+_SINGLE_VAGUE_TEASER_PATTERNS = (
+    "놓치면후회",
+    "인기급상승",
+    "트렌드분석",
+    "숨겨진꿀팁",
+    "숨겨진혜택",
+    "당신의선택은",
+    "어떤점이인기일까",
+    "주목해야할까",
+    "이걸몰랐다고",
+    "정말살만할까",
+    "이번주시작",
+    "경쟁예상",
+    "특가예약팁",
+    "출시임박",
+    "예약전꼭확인",
+    "바꿔보세요",
+    "알고사자",
+)
+_GENERIC_SINGLE_LOW_INFO_TOKENS = {
+    normalize_key(token)
+    for token in (
+        "오늘",
+        "이번주",
+        "요즘",
+        "인기",
+        "순위",
+        "신상",
+        "출시",
+        "임박",
+        "변화",
+        "주목",
+        "경쟁",
+        "예상",
+        "특가",
+        "혜택",
+        "이유",
+        "선택",
+        "궁금",
+        "핫한",
+        "뜨는",
+    )
+    if normalize_key(token)
+}
+_PRODUCT_SINGLE_CONCRETE_TOKENS = {
+    normalize_key(token)
+    for token in (
+        "실사용",
+        "장단점",
+        "가격대",
+        "추천",
+        "대상",
+        "클릭감",
+        "배터리",
+        "그립",
+        "연결",
+        "세팅",
+        "키감",
+        "배열",
+        "키맵",
+        "멀티페어링",
+        "fn",
+        "한영",
+    )
+    if normalize_key(token)
+}
+_PREORDER_SINGLE_CONCRETE_TOKENS = {
+    normalize_key(token)
+    for token in ("일정", "오픈", "링크", "혜택", "인증", "결제", "수령", "조건", "제한")
+    if normalize_key(token)
+}
+_VALUE_SINGLE_CONCRETE_TOKENS = {
+    normalize_key(token)
+    for token in ("위치", "교통", "추가요금", "조식", "객실", "취소", "예산", "거리", "포함", "후기")
+    if normalize_key(token)
+}
+_POLICY_SINGLE_CONCRETE_TOKENS = {
+    normalize_key(token)
+    for token in ("조건", "대상", "제한", "비용", "준비물", "서류", "신청", "기간", "금리", "우대")
+    if normalize_key(token)
+}
+_PRODUCTISH_KEY_PATTERNS = (
+    "마우스",
+    "키보드",
+    "노트북",
+    "맥북",
+    "아이패드",
+    "아이폰",
+    "갤럭시",
+    "이어폰",
+    "헤드셋",
+    "모니터",
+    "스피커",
+    "웹캠",
+    "프린터",
+    "공유기",
+    "태블릿",
+    "닌텐도",
+    "스위치",
+    "콘솔",
+    "카메라",
+)
+_QUESTION_ENDING_PATTERNS = (
+    "좋을까",
+    "살만할까",
+    "치열할까",
+    "시작",
+    "일까",
+    "할까",
+)
 _BATCH_SKELETON_REPEAT_THRESHOLD = 2
+_TITLE_STATUS_SORT_RANK = {"good": 0, "review": 1, "retry": 2}
 _BATCH_NOISY_FAMILY_PATTERNS = (
     ("difference_question", "차이 질문", ("뭐가다를까", "무엇이다를까", "차이가뭘까", "차이점")),
     ("check", "체크", ("체크리스트", "체크포인트", "체크", "확인")),
@@ -210,6 +345,7 @@ def enrich_title_results(items: list[dict[str, Any]]) -> tuple[list[dict[str, An
 
     enriched_items: list[dict[str, Any]] = []
     for item, report in zip(items, reports):
+        reordered_titles, reordered_title_checks = _reorder_titles_for_output(item, report)
         enriched_items.append(
             {
                 **{
@@ -218,11 +354,11 @@ def enrich_title_results(items: list[dict[str, Any]]) -> tuple[list[dict[str, An
                     if key not in {"titles", "quality_report"}
                 },
                 "keyword": normalize_text(item.get("keyword")),
-                "titles": {
-                    "naver_home": list(item.get("titles", {}).get("naver_home", [])),
-                    "blog": list(item.get("titles", {}).get("blog", [])),
+                "titles": reordered_titles,
+                "quality_report": {
+                    **report,
+                    "title_checks": reordered_title_checks,
                 },
-                "quality_report": report,
             }
         )
 
@@ -238,11 +374,11 @@ def assess_title_bundle(item: dict[str, Any]) -> dict[str, Any]:
 
     channel_reports: dict[str, list[dict[str, Any]]] = {
         "naver_home": [
-            assess_single_title(keyword, title, "naver_home", duplicate_counts)
+            assess_single_title(keyword, title, "naver_home", duplicate_counts, item_context=item)
             for title in naver_home_titles
         ],
         "blog": [
-            assess_single_title(keyword, title, "blog", duplicate_counts)
+            assess_single_title(keyword, title, "blog", duplicate_counts, item_context=item)
             for title in blog_titles
         ],
     }
@@ -254,6 +390,7 @@ def assess_single_title(
     title: str,
     channel: str,
     duplicate_counts: dict[str, int],
+    item_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_title = normalize_text(title)
     canonical_title = normalize_key(normalized_title)
@@ -311,9 +448,22 @@ def assess_single_title(
         score -= 10
 
     generic_overlay_on_practical = _has_generic_overlay_on_practical_keyword(keyword, normalized_title)
-    hard_reject_skeleton = _is_hard_reject_title_skeleton(keyword, normalized_title) or generic_overlay_on_practical
+    generic_single_overlay = _has_generic_single_overlay(
+        keyword,
+        normalized_title,
+        item_context=item_context or {},
+    )
+    hard_reject_skeleton = (
+        _is_hard_reject_title_skeleton(keyword, normalized_title)
+        or generic_overlay_on_practical
+        or generic_single_overlay
+    )
     if generic_overlay_on_practical:
         issues.append("구체 글감 위에 다시 템플릿형 포장을 덧씌웠습니다.")
+        score -= 18
+        critical = True
+    elif generic_single_overlay:
+        issues.append("단일 키워드 제목이 의도 대비 너무 추상적이거나 낚시형입니다.")
         score -= 18
         critical = True
     elif hard_reject_skeleton:
@@ -346,6 +496,7 @@ def assess_single_title(
             "duplicate_risk": duplicate_risk,
             "hard_reject_skeleton": hard_reject_skeleton,
             "generic_overlay_on_practical_keyword": generic_overlay_on_practical,
+            "generic_single_overlay": generic_single_overlay,
         },
     }
 
@@ -403,6 +554,17 @@ def _build_bundle_report(
 
     unique_issues = _unique_preserve_order(bundle_issues)
     bundle_score = round(sum(channel_scores.values()) / len(channel_scores)) if channel_scores else 0
+    channel_good_counts = {
+        channel_name: sum(1 for report in title_reports if report.get("status") == "good")
+        for channel_name, title_reports in channel_reports.items()
+    }
+    channel_usable_counts = {
+        channel_name: sum(1 for report in title_reports if report.get("status") != "retry")
+        for channel_name, title_reports in channel_reports.items()
+    }
+    required_channels = ("naver_home", "blog")
+    recommended_pair_ready = all(channel_good_counts.get(channel_name, 0) > 0 for channel_name in required_channels)
+    usable_pair_ready = all(channel_usable_counts.get(channel_name, 0) > 0 for channel_name in required_channels)
 
     if not keyword or not all_titles:
         return {
@@ -416,6 +578,10 @@ def _build_bundle_report(
             "summary": "제목 결과가 비어 있어 다시 생성이 필요합니다.",
             "channel_scores": channel_scores,
             "title_checks": channel_reports,
+            "channel_good_counts": channel_good_counts,
+            "channel_usable_counts": channel_usable_counts,
+            "recommended_pair_ready": False,
+            "usable_pair_ready": False,
         }
 
     passes_threshold = (
@@ -423,7 +589,12 @@ def _build_bundle_report(
         and all(score >= TITLE_QUALITY_REVIEW_SCORE for score in channel_scores.values())
         and not critical_issue
     )
-    status = _resolve_bundle_status(bundle_score, critical_issue, passes_threshold)
+    status = _resolve_bundle_status(
+        bundle_score,
+        critical_issue,
+        passes_threshold,
+        recommended_pair_ready=recommended_pair_ready,
+    )
     summary = (
         "키워드 노출과 제목 변주 폭이 안정적입니다."
         if not unique_issues
@@ -441,6 +612,10 @@ def _build_bundle_report(
         "summary": summary,
         "channel_scores": channel_scores,
         "title_checks": channel_reports,
+        "channel_good_counts": channel_good_counts,
+        "channel_usable_counts": channel_usable_counts,
+        "recommended_pair_ready": recommended_pair_ready,
+        "usable_pair_ready": usable_pair_ready,
     }
 
 
@@ -579,10 +754,16 @@ def _is_hard_reject_title_skeleton(keyword: str, title: str) -> bool:
         return True
     if any(pattern in skeleton_key for pattern in _HARD_REJECT_TEMPLATE_SUBSTRINGS):
         return True
+    if any(pattern in skeleton_key for pattern in _VAGUE_EDITORIAL_SKELETON_PATTERNS):
+        return True
+    if any(regex.search(skeleton_key) for regex in _VAGUE_EDITORIAL_SKELETON_REGEXES):
+        return True
 
     skeleton_tokens = _normalize_tokens(skeleton_label)
     if not skeleton_tokens:
         return False
+    if len(skeleton_tokens) <= 3 and skeleton_tokens[-1] == "공개":
+        return True
     return len(skeleton_tokens) <= 5 and all(
         token in _HARD_REJECT_TEMPLATE_TOKENS for token in skeleton_tokens
     )
@@ -606,6 +787,170 @@ def _has_generic_overlay_on_practical_keyword(keyword: str, title: str) -> bool:
         if token not in _GENERIC_OVERLAY_TOKENS
     ]
     return len(informative_tokens) <= 1
+
+
+def _has_generic_single_overlay(
+    keyword: str,
+    title: str,
+    *,
+    item_context: dict[str, Any],
+) -> bool:
+    target_mode = normalize_key(item_context.get("target_mode"))
+    if target_mode != "single":
+        return False
+
+    skeleton_label = _build_title_skeleton_label(keyword, title)
+    skeleton_key = normalize_key(skeleton_label)
+    if not skeleton_key:
+        return False
+    if any(pattern in skeleton_key for pattern in _SINGLE_VAGUE_TEASER_PATTERNS):
+        return True
+
+    skeleton_tokens = _normalize_tokens(skeleton_label)
+    if not skeleton_tokens:
+        return False
+
+    single_domain = _infer_single_keyword_domain(keyword, item_context)
+    concrete_tokens = _resolve_single_domain_concrete_tokens(single_domain)
+    has_concrete_axis = bool(concrete_tokens) and any(token in concrete_tokens for token in skeleton_tokens)
+
+    if _is_low_info_question_skeleton(skeleton_key, skeleton_tokens, has_concrete_axis=has_concrete_axis):
+        return True
+
+    keyword_key = normalize_key(keyword)
+    source_selection_mode = normalize_key(item_context.get("source_selection_mode") or item_context.get("selection_mode"))
+    if source_selection_mode == "seedanchor":
+        if "사전예약" in keyword or "사전예약" in keyword_key:
+            return not has_concrete_axis
+        if "가성비" in keyword or "가성비" in keyword_key:
+            return not has_concrete_axis
+
+    source_kind = normalize_key(item_context.get("source_kind"))
+    if source_kind == "selectedkeyword" and single_domain in {"product", "stay", "policy"}:
+        if has_concrete_axis:
+            return False
+        return _is_generic_low_info_single_skeleton(skeleton_key, skeleton_tokens)
+    return False
+
+
+def _is_low_info_question_skeleton(
+    skeleton_key: str,
+    skeleton_tokens: list[str],
+    *,
+    has_concrete_axis: bool,
+) -> bool:
+    if has_concrete_axis:
+        return False
+    if any(pattern in skeleton_key for pattern in _QUESTION_ENDING_PATTERNS):
+        return len(skeleton_tokens) <= 6
+    return False
+
+
+def _is_generic_low_info_single_skeleton(skeleton_key: str, skeleton_tokens: list[str]) -> bool:
+    if any(pattern in skeleton_key for pattern in _SINGLE_VAGUE_TEASER_PATTERNS):
+        return True
+    if any(token in _GENERIC_SINGLE_LOW_INFO_TOKENS for token in skeleton_tokens):
+        return len(skeleton_tokens) <= 6
+    return False
+
+
+def _infer_single_keyword_domain(keyword: str, item_context: dict[str, Any]) -> str:
+    keyword_key = normalize_key(keyword)
+    if not keyword_key:
+        return "general"
+    if "사전예약" in keyword or "사전예약" in keyword_key:
+        return "preorder"
+    if "가성비" in keyword or "가성비" in keyword_key:
+        return "stay"
+    detected_category = detect_category(keyword)
+    if detected_category == "travel":
+        return "stay"
+    if detected_category in {"finance", "real_estate"}:
+        return "policy"
+    if _looks_product_like_context(keyword, item_context):
+        return "product"
+    return "general"
+
+
+def _resolve_single_domain_concrete_tokens(domain: str) -> set[str]:
+    if domain == "product":
+        return _PRODUCT_SINGLE_CONCRETE_TOKENS
+    if domain == "preorder":
+        return _PREORDER_SINGLE_CONCRETE_TOKENS
+    if domain == "stay":
+        return _VALUE_SINGLE_CONCRETE_TOKENS
+    if domain == "policy":
+        return _POLICY_SINGLE_CONCRETE_TOKENS
+    return set()
+
+
+def _looks_product_like_context(keyword: str, item_context: dict[str, Any]) -> bool:
+    keyword_key = normalize_key(keyword)
+    if any(pattern in keyword_key for pattern in _PRODUCTISH_KEY_PATTERNS):
+        return True
+
+    context_tokens: list[str] = [keyword]
+    for field_name in ("base_keyword", "source_note"):
+        value = item_context.get(field_name)
+        if isinstance(value, str) and normalize_text(value):
+            context_tokens.append(normalize_text(value))
+    for field_name in ("support_keywords", "source_keywords"):
+        value = item_context.get(field_name)
+        if isinstance(value, list):
+            context_tokens.extend(normalize_text(token) for token in value if normalize_text(token))
+
+    for value in context_tokens:
+        value_key = normalize_key(value)
+        if any(pattern in value_key for pattern in _PRODUCTISH_KEY_PATTERNS):
+            return True
+        if any(_MODEL_NUMBER_TOKEN_RE.match(token) for token in tokenize_text(value)):
+            return True
+    return detect_category(keyword) == "product"
+
+
+def _reorder_titles_for_output(
+    item: dict[str, Any],
+    report: dict[str, Any],
+) -> tuple[dict[str, list[str]], dict[str, list[dict[str, Any]]]]:
+    raw_titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
+    raw_title_checks = report.get("title_checks") if isinstance(report.get("title_checks"), dict) else {}
+    reordered_titles: dict[str, list[str]] = {"naver_home": [], "blog": []}
+    reordered_checks: dict[str, list[dict[str, Any]]] = {"naver_home": [], "blog": []}
+
+    for channel_name in ("naver_home", "blog"):
+        channel_titles = list(raw_titles.get(channel_name, [])) if isinstance(raw_titles.get(channel_name), list) else []
+        channel_checks = list(raw_title_checks.get(channel_name, [])) if isinstance(raw_title_checks.get(channel_name), list) else []
+        sorted_titles, sorted_checks = _sort_channel_titles_by_quality(channel_titles, channel_checks)
+        reordered_titles[channel_name] = sorted_titles
+        reordered_checks[channel_name] = sorted_checks
+
+    return reordered_titles, reordered_checks
+
+
+def _sort_channel_titles_by_quality(
+    titles: list[str],
+    title_reports: list[dict[str, Any]],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    entries = [
+        (
+            index,
+            normalize_text(title),
+            title_reports[index] if index < len(title_reports) and isinstance(title_reports[index], dict) else {},
+        )
+        for index, title in enumerate(titles)
+        if normalize_text(title)
+    ]
+    if not entries:
+        return [], []
+
+    entries.sort(
+        key=lambda entry: (
+            _TITLE_STATUS_SORT_RANK.get(str(entry[2].get("status") or "retry"), 3),
+            -int(entry[2].get("score") or 0),
+            entry[0],
+        )
+    )
+    return [title for _, title, _ in entries], [report for _, _, report in entries]
 
 
 def _apply_batch_similarity_feedback(
@@ -774,7 +1119,12 @@ def _apply_bundle_batch_feedback(
         and not exact_repeat_risk
         and bundle_score >= TITLE_QUALITY_PASS_SCORE
     )
-    status = _resolve_bundle_status(bundle_score, critical_issue, passes_threshold)
+    status = _resolve_bundle_status(
+        bundle_score,
+        critical_issue,
+        passes_threshold,
+        recommended_pair_ready=bool(report.get("recommended_pair_ready")),
+    )
     summary = (
         "키워드 노출과 제목 변주 폭이 안정적입니다."
         if not issue_list
@@ -899,9 +1249,17 @@ def _resolve_title_status(score: int, critical: bool) -> str:
     return "good"
 
 
-def _resolve_bundle_status(bundle_score: int, critical_issue: bool, passes_threshold: bool) -> str:
+def _resolve_bundle_status(
+    bundle_score: int,
+    critical_issue: bool,
+    passes_threshold: bool,
+    *,
+    recommended_pair_ready: bool = False,
+) -> str:
     if passes_threshold:
         return "good"
+    if recommended_pair_ready and bundle_score >= TITLE_QUALITY_REVIEW_SCORE:
+        return "review"
     if bundle_score >= TITLE_QUALITY_REVIEW_SCORE and not critical_issue:
         return "review"
     return "retry"

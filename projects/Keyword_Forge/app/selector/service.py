@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 from app.analyzer.config import DEFAULT_CONFIG
@@ -29,6 +30,42 @@ _TEMPLATE_HEAVY_KEYWORD_PATTERNS = (
 _TEMPLATE_HEAVY_KEYWORD_KEYS = tuple(
     normalize_key(pattern) for pattern in _TEMPLATE_HEAVY_KEYWORD_PATTERNS if normalize_key(pattern)
 )
+_SEED_ANCHOR_SIGNAL_TERMS = (
+    "사전예약",
+    "예약",
+    "가입",
+    "신청",
+    "설정",
+    "팁",
+    "방법",
+    "사용법",
+    "조건",
+    "기준",
+    "일정",
+    "혜택",
+    "가성비",
+    "가격",
+    "비교",
+    "장단점",
+    "실사용",
+    "차이",
+    "문제",
+    "해결",
+    "원인",
+    "위치",
+    "동선",
+    "코스",
+    "주차",
+    "후기",
+    "리뷰",
+    "대상",
+    "제한",
+    "주의점",
+)
+_SEED_ANCHOR_SIGNAL_KEYS = tuple(
+    normalize_key(term) for term in _SEED_ANCHOR_SIGNAL_TERMS if normalize_key(term)
+)
+_MODEL_LIKE_TOKEN_RE = re.compile(r"(?i)(?:[a-z]+\d+|\d+[a-z]+)")
 
 
 def is_golden_keyword(item: dict[str, Any]) -> bool:
@@ -81,6 +118,7 @@ class SelectorService:
             selected = _top_up_default_selection(selected, items, target_count=target_count)
         if not selected:
             selected = _select_fallback_candidates(items)
+        selected = _inject_seed_anchor_candidate(selected, input_data, items)
 
         if isinstance(input_data, list):
             return selected
@@ -457,3 +495,235 @@ def _merge_unique_candidates(*groups: list[dict[str, Any]], limit: int) -> list[
             if len(merged) >= limit:
                 return merged
     return merged
+
+
+def _inject_seed_anchor_candidate(
+    selected: list[dict[str, Any]],
+    input_data: Any,
+    analyzed_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not isinstance(input_data, dict):
+        return selected
+
+    seed_input = normalize_text(input_data.get("seed_input"))
+    if not seed_input or not _should_consider_seed_anchor(seed_input):
+        return selected
+    if _selected_keywords_cover_seed(selected, seed_input):
+        return selected
+
+    seed_candidate = _build_seed_anchor_candidate(seed_input, analyzed_items)
+    if seed_candidate is None:
+        return selected
+
+    selected_copy = [dict(item) for item in selected if isinstance(item, dict)]
+    if not selected_copy:
+        return [seed_candidate]
+
+    replaceable_indexes = [
+        index
+        for index, item in enumerate(selected_copy)
+        if str(item.get("selection_mode") or "").strip().lower() in {"fallback", "editorial_support"}
+        and not _keyword_covers_seed(item.get("keyword"), seed_input)
+    ]
+    if replaceable_indexes:
+        replace_index = min(replaceable_indexes, key=lambda index: _seed_replacement_sort_key(selected_copy[index]))
+        selected_copy[replace_index] = seed_candidate
+    else:
+        selected_copy.insert(0, seed_candidate)
+
+    unique_selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in selected_copy:
+        keyword_key = normalize_key(normalize_text(item.get("keyword")))
+        if not keyword_key or keyword_key in seen:
+            continue
+        seen.add(keyword_key)
+        unique_selected.append(item)
+    return unique_selected
+
+
+def _build_seed_anchor_candidate(seed_input: str, analyzed_items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    reference = _pick_seed_anchor_reference_item(seed_input, analyzed_items)
+    reference_score = _coerce_float(reference.get("score")) if reference else 0.0
+    reference_confidence = _coerce_float(
+        reference.get("confidence", reference.get("metrics", {}).get("confidence")) if reference else 0.0
+    )
+    score_floor = 36.0 if len(tokenize_text(seed_input)) >= 4 else 34.0
+
+    candidate = {
+        "keyword": seed_input,
+        "selection_mode": "seed_anchor",
+        "selection_reason": "seed_intent_preserved",
+        "analysis_mode": str(reference.get("analysis_mode") or "seed_anchor") if reference else "seed_anchor",
+        "confidence": round(min(0.89, max(0.55, reference_confidence or 0.55)), 2),
+        "score": round(max(score_floor, reference_score - 2.0), 1) if reference else score_floor,
+    }
+    if reference:
+        origin = normalize_text(reference.get("origin"))
+        item_type = normalize_text(reference.get("type"))
+        if origin:
+            candidate["origin"] = origin
+        if item_type:
+            candidate["type"] = item_type
+        candidate["reference_keyword"] = normalize_text(reference.get("keyword")) or seed_input
+    return candidate
+
+
+def _pick_seed_anchor_reference_item(seed_input: str, analyzed_items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    anchor_keys = _extract_seed_anchor_token_keys(seed_input)
+    signal_keys = _extract_seed_signal_token_keys(seed_input)
+    if not anchor_keys:
+        return None
+
+    ranked = sorted(
+        (
+            item
+            for item in analyzed_items
+            if isinstance(item, dict) and normalize_text(item.get("keyword"))
+        ),
+        key=lambda item: _seed_reference_sort_key(item, seed_input, anchor_keys, signal_keys),
+        reverse=True,
+    )
+    if not ranked:
+        return None
+
+    top_item = ranked[0]
+    top_overlap = _seed_keyword_overlap_ratio(top_item.get("keyword"), anchor_keys)
+    return top_item if top_overlap > 0.0 else None
+
+
+def _seed_reference_sort_key(
+    item: dict[str, Any],
+    seed_input: str,
+    anchor_keys: set[str],
+    signal_keys: set[str],
+) -> tuple[float, float, float, float, float, float]:
+    keyword = normalize_text(item.get("keyword"))
+    keyword_key = normalize_key(keyword)
+    seed_key = normalize_key(seed_input)
+    exact_match_rank = 1.0 if keyword_key == seed_key else 0.0
+    containment_rank = 1.0 if seed_key and keyword_key and (seed_key in keyword_key or keyword_key in seed_key) else 0.0
+    signal_coverage = _seed_signal_coverage_ratio(keyword, signal_keys)
+    overlap_ratio = _seed_keyword_overlap_ratio(keyword, anchor_keys)
+    score = _coerce_float(item.get("score"))
+    confidence = _coerce_float(item.get("confidence", item.get("metrics", {}).get("confidence")))
+    return (
+        exact_match_rank,
+        containment_rank,
+        signal_coverage,
+        overlap_ratio,
+        score,
+        confidence,
+    )
+
+
+def _should_consider_seed_anchor(seed_input: str) -> bool:
+    tokens = [normalize_text(token) for token in tokenize_text(seed_input) if normalize_text(token)]
+    if len(tokens) >= 4:
+        return True
+    if _extract_seed_signal_token_keys(seed_input):
+        return True
+    return _looks_like_specific_seed(seed_input)
+
+
+def _selected_keywords_cover_seed(selected: list[dict[str, Any]], seed_input: str) -> bool:
+    return any(_keyword_covers_seed(item.get("keyword"), seed_input) for item in selected if isinstance(item, dict))
+
+
+def _keyword_covers_seed(keyword: Any, seed_input: str) -> bool:
+    keyword_text = normalize_text(keyword)
+    if not keyword_text:
+        return False
+    keyword_key = normalize_key(keyword_text)
+    seed_key = normalize_key(seed_input)
+    if keyword_key == seed_key:
+        return True
+    if seed_key and seed_key in keyword_key:
+        return True
+
+    anchor_keys = _extract_seed_anchor_token_keys(seed_input)
+    signal_keys = _extract_seed_signal_token_keys(seed_input)
+    if not anchor_keys:
+        return False
+
+    keyword_token_keys = {
+        normalize_key(token)
+        for token in tokenize_text(keyword_text)
+        if normalize_key(token)
+    }
+    if signal_keys and not signal_keys.issubset(keyword_token_keys):
+        return False
+    overlap_ratio = len(anchor_keys & keyword_token_keys) / max(1, len(anchor_keys))
+    return overlap_ratio >= 0.75
+
+
+def _extract_seed_anchor_token_keys(seed_input: str) -> set[str]:
+    token_keys = {
+        normalize_key(token)
+        for token in tokenize_text(seed_input)
+        if normalize_key(token)
+    }
+    if not token_keys:
+        return set()
+    if _extract_seed_signal_token_keys(seed_input) or _looks_like_specific_seed(seed_input):
+        return token_keys
+    if len(token_keys) >= 4:
+        return token_keys
+    return set()
+
+
+def _extract_seed_signal_token_keys(seed_input: str) -> set[str]:
+    signal_keys: set[str] = set()
+    for token in tokenize_text(seed_input):
+        token_key = normalize_key(token)
+        if not token_key:
+            continue
+        if any(signal_key in token_key or token_key in signal_key for signal_key in _SEED_ANCHOR_SIGNAL_KEYS):
+            signal_keys.add(token_key)
+    return signal_keys
+
+
+def _looks_like_specific_seed(seed_input: str) -> bool:
+    tokens = [normalize_text(token) for token in tokenize_text(seed_input) if normalize_text(token)]
+    if len(tokens) < 2:
+        return False
+    return any(_MODEL_LIKE_TOKEN_RE.search(token) for token in tokens)
+
+
+def _seed_keyword_overlap_ratio(keyword: Any, anchor_keys: set[str]) -> float:
+    keyword_token_keys = {
+        normalize_key(token)
+        for token in tokenize_text(keyword)
+        if normalize_key(token)
+    }
+    if not anchor_keys or not keyword_token_keys:
+        return 0.0
+    return len(anchor_keys & keyword_token_keys) / max(1, len(anchor_keys))
+
+
+def _seed_signal_coverage_ratio(keyword: Any, signal_keys: set[str]) -> float:
+    if not signal_keys:
+        return 0.0
+    keyword_token_keys = {
+        normalize_key(token)
+        for token in tokenize_text(keyword)
+        if normalize_key(token)
+    }
+    if not keyword_token_keys:
+        return 0.0
+    return len(signal_keys & keyword_token_keys) / max(1, len(signal_keys))
+
+
+def _seed_replacement_sort_key(item: dict[str, Any]) -> tuple[float, float, float]:
+    return (
+        _coerce_float(item.get("score")),
+        _coerce_float(item.get("confidence", item.get("metrics", {}).get("confidence"))),
+        float(len(tokenize_text(normalize_text(item.get("keyword"))))),
+    )
+
+
+def _coerce_float(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0

@@ -10641,6 +10641,77 @@ function renderTitleBulletList(titles, checks) {
     }).join("");
 }
 
+function getTitleLineStatusRank(status) {
+    if (status === "good") return 0;
+    if (status === "review") return 1;
+    return 2;
+}
+
+function buildRecommendedTitleEntries(titles, checks) {
+    const safeTitles = Array.isArray(titles) ? titles : [];
+    const safeChecks = Array.isArray(checks) ? checks : [];
+    return safeTitles
+        .map((title, index) => ({
+            index,
+            title: String(title || "").trim(),
+            report: safeChecks[index] || {},
+        }))
+        .filter((entry) => entry.title)
+        .sort((left, right) => {
+            const statusGap = getTitleLineStatusRank(left.report?.status || "retry") - getTitleLineStatusRank(right.report?.status || "retry");
+            if (statusGap !== 0) {
+                return statusGap;
+            }
+            const scoreGap = Number(right.report?.score || 0) - Number(left.report?.score || 0);
+            if (scoreGap !== 0) {
+                return scoreGap;
+            }
+            return left.index - right.index;
+        });
+}
+
+function renderRecommendedTitleBlock(titles, checks) {
+    const entries = buildRecommendedTitleEntries(titles, checks);
+    if (!entries.length) {
+        return "<p class=\"title-channel-empty\">결과 없음</p>";
+    }
+
+    const [recommended, ...alternatives] = entries;
+    const status = recommended.report?.status || "review";
+    const score = Number(recommended.report?.score || 0);
+    const note = Array.isArray(recommended.report?.issues) && recommended.report.issues.length
+        ? recommended.report.issues[0]
+        : `품질 ${score}점`;
+
+    return `
+        <div class="title-channel-recommended ${escapeHtml(status)}">
+            <div class="title-channel-recommended-head">
+                <span class="title-quality-pill ${escapeHtml(status)}">추천 1안</span>
+                <span class="title-channel-score">품질 ${escapeHtml(String(score))}점</span>
+            </div>
+            <p class="title-channel-pick">${escapeHtml(recommended.title)}</p>
+            ${note ? `<small>${escapeHtml(note)}</small>` : ""}
+        </div>
+        ${alternatives.length ? `
+            <details class="title-channel-alternatives">
+                <summary>대체안 ${escapeHtml(String(alternatives.length))}개</summary>
+                <ul>${alternatives.map((entry) => {
+                    const alternativeStatus = entry.report?.status || "review";
+                    const alternativeNote = Array.isArray(entry.report?.issues) && entry.report.issues.length
+                        ? entry.report.issues[0]
+                        : (entry.report?.score ? `품질 ${entry.report.score}점` : "");
+                    return `
+                        <li class="title-line ${escapeHtml(alternativeStatus)}">
+                            <span>${escapeHtml(entry.title)}</span>
+                            ${alternativeNote ? `<small>${escapeHtml(alternativeNote)}</small>` : ""}
+                        </li>
+                    `;
+                }).join("")}</ul>
+            </details>
+        ` : ""}
+    `;
+}
+
 function renderTitleList(items) {
     return `<div class="title-list">${(items || []).map((item) => {
         const naverHomeCount = Array.isArray(item.titles?.naver_home) ? item.titles.naver_home.length : 0;
@@ -11918,6 +11989,11 @@ function renderTitleList(items) {
         const summary = qualityReport.summary || "제목 문장을 확인하는 중입니다.";
         const channelScores = qualityReport.channel_scores || {};
         const titleChecks = qualityReport.title_checks || {};
+        const recommendedPairReady = Boolean(qualityReport.recommended_pair_ready);
+        const usablePairReady = Boolean(qualityReport.usable_pair_ready);
+        const pairReadyLabel = recommendedPairReady
+            ? "추천 홈판형 1개 / 블로그형 1개 확보"
+            : (usablePairReady ? "대체안 포함 1+1 확보" : "");
         const targetIdentity = getTitleTargetIdentity(item);
         return `
             <div class="title-item">
@@ -11943,17 +12019,20 @@ function renderTitleList(items) {
                 ${renderTitleTargetMeta(item)}
                 <div class="title-quality-summary ${escapeHtml(qualityStatus)}">
                     <strong>${escapeHtml(summary)}</strong>
-                    <span>네이버홈 ${escapeHtml(String(channelScores.naver_home || 0))}점 / 블로그 ${escapeHtml(String(channelScores.blog || 0))}점</span>
+                    <span>
+                        네이버홈 ${escapeHtml(String(channelScores.naver_home || 0))}점 / 블로그 ${escapeHtml(String(channelScores.blog || 0))}점
+                        ${pairReadyLabel ? ` / ${escapeHtml(pairReadyLabel)}` : ""}
+                    </span>
                 </div>
                 ${renderTitleQualityIssues(qualityReport)}
                 <div class="title-columns">
                     <div class="title-column">
                         <h4>네이버홈형</h4>
-                        <ul>${renderTitleBulletList(item.titles?.naver_home || [], titleChecks.naver_home || [])}</ul>
+                        ${renderRecommendedTitleBlock(item.titles?.naver_home || [], titleChecks.naver_home || [])}
                     </div>
                     <div class="title-column">
                         <h4>블로그형</h4>
-                        <ul>${renderTitleBulletList(item.titles?.blog || [], titleChecks.blog || [])}</ul>
+                        ${renderRecommendedTitleBlock(item.titles?.blog || [], titleChecks.blog || [])}
                     </div>
                 </div>
             </div>

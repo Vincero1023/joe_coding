@@ -1569,6 +1569,7 @@ def _render_home() -> str:
                             <div class="field-block">
                                 <span class="field-label">개수 설정</span>
                                 <div class="option-row">
+                                    <button type="button" class="ghost-chip" data-expand-limit="100">100개</button>
                                     <button type="button" class="ghost-chip" data-expand-limit="1000">1,000개</button>
                                     <button type="button" class="ghost-chip" data-expand-limit="10000">10,000개</button>
                                     <button type="button" class="ghost-chip" data-expand-limit="infinite">무제한</button>
@@ -2159,7 +2160,7 @@ def _render_home() -> str:
                                     <p class="panel-kicker">예약</p>
                                     <h2>예약 작업</h2>
                                     <p class="settings-copy">
-                                        현재 화면의 수집, 확장, 분석, 제목 설정을 묶어서 시드 배치 예약이나 일일 카테고리 루틴으로 등록합니다.
+                                        예약 작업은 등록 버튼을 누른 시점의 현재 화면 설정을 스냅샷으로 저장해, 시드 배치나 일일 카테고리 루틴에 그대로 사용합니다.
                                     </p>
                                 </div>
                                 <div class="settings-hero-actions">
@@ -2213,7 +2214,7 @@ def _render_home() -> str:
                                         </label>
                                     </div>
                                     <div id="queueSeedBatchHint" class="settings-hint">
-                                        현재 수집, 확장, 분석, 제목 옵션을 그대로 묶어서 시드별 전체 파이프라인을 순차 실행합니다. API 키나 트렌드 쿠키가 있으면 상태 파일에도 함께 저장됩니다.
+                                        시드 배치는 등록 시점의 현재 화면 설정을 그대로 묶어 시드별 전체 파이프라인을 순차 실행합니다. 등록 후 화면 설정을 바꿔도 이미 등록한 작업에는 반영되지 않으며, API 키나 트렌드 쿠키가 있으면 상태 파일에도 함께 저장됩니다.
                                     </div>
                                     <div class="queue-form-actions">
                                         <span id="queueSeedBatchCountLabel" class="queue-inline-meta">시드 0건</span>
@@ -2277,7 +2278,7 @@ def _render_home() -> str:
                                         </div>
                                     </div>
                                     <div id="queueRoutineHint" class="settings-hint">
-                                        선택한 요일과 시각마다 카테고리 작업을 자동 생성합니다. 앱이 실행 중이어야 내부 예약이 동작하며, 현재 인증 설정도 상태 파일에 저장될 수 있습니다.
+                                        루틴도 등록 시점의 현재 화면 설정을 기준으로 이후 카테고리 작업을 자동 생성합니다. 앱이 실행 중이어야 내부 예약이 동작하며, 현재 인증 설정도 상태 파일에 저장될 수 있습니다.
                                     </div>
                                     <div class="queue-form-actions">
                                         <span id="queueRoutineCountLabel" class="queue-inline-meta">카테고리 0건</span>
