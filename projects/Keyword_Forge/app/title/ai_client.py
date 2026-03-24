@@ -235,6 +235,7 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Preserve each keyword exactly.\n"
     "Every title must contain all meaningful keyword tokens from the input keyword.\n"
     "Keep those keyword tokens in the same order, even when you insert short modifiers between them.\n"
+    "Do not shorten or compress the keyword phrase. If the keyword starts with descriptive words, keep them all.\n"
     "Do not drop or paraphrase modifier tokens such as 체크리스트, 비교, 후기, 가격, 일정, 신청방법, 원인, 부작용, 추천, or 가이드.\n"
     "For every keyword, generate exactly 2 naver_home titles and 2 blog titles.\n"
     f"Each naver_home title must be {NAVER_HOME_MAX_LENGTH} characters or fewer.\n"
@@ -247,7 +248,11 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Across the whole batch, avoid repeating the same headline skeleton.\n"
     "Favor timely issue-aware framing over evergreen encyclopedia phrasing when the keyword allows it.\n"
     "Reflect the search intent in the wording: price, review, comparison, reservation, profile, location, how-to, or guide.\n"
+    "Prefer concrete nouns such as 실사용, 장단점, 차이, 성능, 가격대, 세팅, 연결, 사용감, 추천 대상, or 주의점 over vague labels.\n"
+    "Avoid low-information skeletons such as '최신 정보', '업데이트 확인', '왜 인기?', '이것만 알면', '구매 가이드', '사용 후기', '신상', or a bare '비교' unless the keyword itself truly requires that wording.\n"
     "Avoid generic template phrases such as '완벽 정리', '한 번에 정리', '갑자기 바뀌었다', '이유가 이상하다', '놓치면 손해' unless they are truly necessary.\n"
+    "Search-visible effective blog patterns are concrete: model + symptom or benefit + timeframe or environment, model + connection or setup + device context, or model + problem + fix or result.\n"
+    "Do not wrap already-concrete keywords such as 실사용 차이, 장단점, 설정 팁, 연결 방법, 연결 문제, or 자주 생기는 문제 with stale wrappers like 총정리, 완벽 가이드, 최신 정보, 최신 비교 분석, 이것만 알면, or 꼭 알아두세요.\n"
     "Avoid clickbait, exaggerated fear, and empty filler.\n"
     "Do not include markdown, commentary, or code fences."
 )
@@ -566,8 +571,11 @@ def _build_user_prompt(keywords: list[str]) -> str:
         "- Preserve each keyword exactly.\n"
         "- Every title must contain all meaningful keyword tokens from the input keyword.\n"
         "- Keep keyword tokens in the same order. You may insert short modifiers between tokens, but do not drop or paraphrase any keyword token.\n"
+        "- Do not shorten the keyword phrase. If the keyword starts with descriptive words, keep them all.\n"
         "- Write all titles in Korean.\n"
         "- naver_home and blog must each contain exactly 2 items.\n"
+        "- When the keyword already contains a concrete practical angle such as 실사용 차이, 장단점, 설정 팁, 연결 방법, 연결 문제, or 자주 생기는 문제, keep that angle and deepen it with timeframe, environment, symptom, cause, fix, user type, or device context instead of adding generic wrappers.\n"
+        "- Search-visible blog titles usually work when they read like model + symptom or benefit + timeframe or environment, model + setup + device context, or model + problem + fix or result.\n"
         "- Avoid duplicate titles within the same keyword.\n"
         "- Avoid using the same sentence frame repeatedly across keywords.\n"
         "- Make the 2 naver_home titles differ in angle such as comparison, checklist, question, update, or decision point.\n"
@@ -601,6 +609,7 @@ def _build_user_prompt_from_items(input_items: list[Any]) -> str:
         "- Preserve each keyword exactly.\n"
         "- Every title must contain all meaningful keyword tokens from the input keyword.\n"
         "- Keep keyword tokens in the same order. You may insert short modifiers between tokens, but do not drop or paraphrase any keyword token.\n"
+        "- Do not shorten the keyword phrase. If the keyword starts with descriptive words, keep them all.\n"
         "- Pay extra attention to the last keyword token when it carries intent, such as 체크리스트, 후기, 비교, 가격, 일정, 신청방법, 원인, 부작용, 추천, or 가이드.\n"
         "- Write all titles in Korean.\n"
         "- Treat every input item independently on a 1:1 basis.\n"
@@ -664,6 +673,7 @@ def _normalize_prompt_items(input_items: list[Any]) -> list[dict[str, str]]:
                 "pair_hint": _PROMPT_CATEGORY_HOME_ANGLE_HINTS[category_key],
                 "freshness_cues": _PROMPT_CATEGORY_FRESHNESS_CUES[category_key],
                 "data_hooks": _PROMPT_CATEGORY_DATA_HOOKS[category_key],
+                "practical_title_shape": _build_practical_title_shape_hint(keyword),
                 "target_context": target_context,
                 "signal_summary": signal_summary,
                 "source_hint": source_hint,
@@ -689,6 +699,8 @@ def _format_prompt_item(index: int, item: dict[str, str]) -> str:
         f"- freshness cues: {item['freshness_cues']}",
         f"- data hooks: {item['data_hooks']}",
     ]
+    if item.get("practical_title_shape"):
+        lines.append(f"- practical title shape: {item['practical_title_shape']}")
     if item.get("target_context"):
         lines.append(f"- target context: {item['target_context']}")
     if item.get("signal_summary"):
@@ -751,6 +763,33 @@ def _build_keyword_coverage_rule(keyword: str) -> str:
         f"Every title must include all tokens in order: {' -> '.join(tokens)}. "
         "You may add short modifiers between tokens, but do not drop, replace, or paraphrase any token."
     )
+
+
+def _build_practical_title_shape_hint(keyword: str) -> str:
+    keyword_key = normalize_key(keyword)
+    if not keyword_key:
+        return ""
+    if any(pattern in keyword_key for pattern in ("자주생기는문제", "연결문제", "문제", "오류", "안됨", "끊김", "더블클릭")):
+        return (
+            "problem/solution: use one symptom plus one cause, fix, or result. "
+            "Avoid wrappers like 총정리, 완벽 가이드, or 최신 정보."
+        )
+    if any(pattern in keyword_key for pattern in ("설정팁", "설정방법", "연결방법")):
+        return (
+            "setup/help: add device or OS context and the benefit or problem solved. "
+            "Prefer cues like 맥북, 윈도우, 블루투스, 유니파잉, DPI, or 버튼 설정."
+        )
+    if "실사용차이" in keyword_key:
+        return (
+            "real-use difference: use timeframe, user type, grip, weight, click feel, battery, "
+            "or workflow context instead of generic review language."
+        )
+    if "장단점" in keyword_key:
+        return (
+            "pros/cons decision: show a concrete trade-off such as grip, weight, noise, battery, "
+            "price, portability, or button feel."
+        )
+    return ""
 
 
 def _map_explicit_prompt_category(value: Any) -> str:

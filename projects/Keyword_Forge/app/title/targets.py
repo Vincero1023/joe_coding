@@ -4,7 +4,11 @@ from collections import defaultdict
 from typing import Any
 
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
-from app.selector.longtail import build_longtail_map, resolve_longtail_options
+from app.selector.longtail import (
+    build_longtail_map,
+    resolve_longtail_options,
+    rewrite_low_signal_longtail_suggestion,
+)
 
 TITLE_KEYWORD_MODE_LABELS: dict[str, str] = {
     "single": "단일 키워드",
@@ -41,6 +45,26 @@ _STATUS_PRIORITY = {
     "fail": 1,
     "error": 0,
 }
+_LOW_SIGNAL_LONGTAIL_PATTERNS = (
+    "추천 기준",
+    "고를 때 체크",
+    "비교 포인트",
+    "최신 정보",
+)
+_LOW_SIGNAL_LONGTAIL_KEYS = tuple(
+    normalize_key(pattern) for pattern in _LOW_SIGNAL_LONGTAIL_PATTERNS if normalize_key(pattern)
+)
+_RELATED_CONCRETE_SUFFIXES = (
+    "실사용 차이",
+    "장단점",
+    "설정 팁",
+    "자주 생기는 문제",
+    "연결 문제",
+    "설정 방법",
+    "연결 방법",
+    "선택 포인트",
+    "주의점",
+)
 
 
 def resolve_title_keyword_modes(input_data: Any) -> list[str]:
@@ -215,7 +239,8 @@ def _resolve_selected_longtail_suggestions(
         verification_status = str(suggestion.get("verification_status") or "").strip().lower()
         if verification_status in {"fail", "error"}:
             continue
-        grouped_suggestions[representative_key].append(suggestion)
+        for candidate_suggestion in rewrite_low_signal_longtail_suggestion(suggestion, limit=1):
+            grouped_suggestions[representative_key].append(candidate_suggestion)
 
     output: list[dict[str, Any]] = []
     for representative_key, rows in grouped_suggestions.items():
@@ -284,14 +309,20 @@ def _build_related_mode_targets(
                 representative_keyword=representative_keyword,
             ):
                 continue
-            keyword = normalize_text(suggestion.get("longtail_keyword"))
+            keyword = _sanitize_related_mode_keyword(
+                normalize_text(suggestion.get("longtail_keyword")),
+                representative_keyword=representative_keyword,
+            )
             keyword_key = normalize_key(keyword)
             if not keyword or not keyword_key or keyword_key in seen_keywords:
                 continue
             seen_keywords.add(keyword_key)
             generated_targets.append(
                 _build_suggestion_target(
-                    suggestion,
+                    {
+                        **suggestion,
+                        "longtail_keyword": keyword,
+                    },
                     target_mode=target_mode,
                     source_kind="rejected_related_keyword" if target_mode == "longtail_exploratory" else "experimental_related_keyword",
                     source_note=(
@@ -414,6 +445,65 @@ def _build_title_target(
         "cluster_id": cluster_id,
         "source_suggestion_id": source_suggestion_id,
     }
+
+
+def _is_low_signal_longtail_keyword(keyword: Any) -> bool:
+    keyword_key = normalize_key(normalize_text(keyword))
+    if not keyword_key:
+        return False
+    return any(pattern in keyword_key for pattern in _LOW_SIGNAL_LONGTAIL_KEYS)
+
+
+def _sanitize_related_mode_keyword(keyword: str, *, representative_keyword: str) -> str:
+    normalized_keyword = _collapse_duplicate_keyword_tokens(normalize_text(keyword))
+    normalized_representative = normalize_text(representative_keyword)
+    if not normalized_keyword or not normalized_representative:
+        return normalized_keyword
+
+    for suffix in _RELATED_CONCRETE_SUFFIXES:
+        if not normalized_keyword.endswith(suffix):
+            continue
+        if not normalized_keyword.startswith(normalized_representative):
+            break
+
+        middle = normalize_text(
+            normalized_keyword[len(normalized_representative) : len(normalized_keyword) - len(suffix)]
+        )
+        if middle and _looks_like_related_mode_noise(middle, representative_keyword=normalized_representative):
+            return f"{normalized_representative} {suffix}"
+        break
+
+    return normalized_keyword
+
+
+def _looks_like_related_mode_noise(middle: str, *, representative_keyword: str) -> bool:
+    middle_tokens = [token for token in tokenize_text(middle) if normalize_key(token)]
+    if not middle_tokens or len(middle_tokens) > 2:
+        return False
+
+    representative_key = normalize_key(representative_keyword)
+    for token in middle_tokens:
+        token_key = normalize_key(token)
+        if not token_key:
+            continue
+        if any(character.isascii() and character.isalnum() for character in token):
+            return True
+        if representative_key and (token_key in representative_key or representative_key.endswith(token_key)):
+            return True
+    return False
+
+
+def _collapse_duplicate_keyword_tokens(keyword: str) -> str:
+    tokens = tokenize_text(keyword)
+    compact_tokens: list[str] = []
+    previous_key = ""
+    for token in tokens:
+        token_key = normalize_key(token)
+        if token_key and token_key == previous_key:
+            continue
+        compact_tokens.append(normalize_text(token))
+        previous_key = token_key
+    return normalize_text(" ".join(compact_tokens))
 
 
 def _build_target_summary(targets: list[dict[str, Any]], *, requested_modes: list[str]) -> dict[str, Any]:
@@ -556,6 +646,9 @@ def _should_skip_related_mode_suggestion(
     *,
     representative_keyword: str,
 ) -> bool:
+    if _is_low_signal_longtail_keyword(suggestion.get("longtail_keyword")):
+        return True
+
     source_keyword = normalize_text(suggestion.get("source_keyword"))
     if source_keyword and normalize_key(source_keyword) == normalize_key(representative_keyword):
         return True

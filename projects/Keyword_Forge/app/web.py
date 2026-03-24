@@ -27,7 +27,7 @@ from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_paylo
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260324-workflow-history-v58"
+_ASSET_VERSION = "20260324-title-meta-v65"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -314,6 +314,28 @@ def _render_static_shell(*, title: str, description: str, body: str) -> str:
     <link rel="stylesheet" href="/assets/app.css?v={_ASSET_VERSION}" />
 </head>
 <body>
+    <div class="app-topbar">
+        <div class="app-topbar-inner">
+            <a class="app-topbar-brand" href="#section-progress" aria-label="Keyword Forge 상단으로 이동">
+                <span class="app-topbar-brand-mark">KF</span>
+                <span class="app-topbar-brand-copy">
+                    <strong>Keyword Forge</strong>
+                    <span>Local-first keyword workflow</span>
+                </span>
+            </a>
+            <nav class="app-topbar-links" aria-label="주요 탐색">
+                <a class="app-topbar-link" href="#section-controls">실행 조건</a>
+                <a class="app-topbar-link" href="#section-launcher">빠른 시작</a>
+                <a class="app-topbar-link" href="#section-results">결과 작업대</a>
+                <a class="app-topbar-link" href="/guides">가이드</a>
+            </nav>
+            <div class="app-topbar-actions">
+                <button type="button" class="ghost-chip topbar-chip" data-utility-open="history" aria-pressed="false">실행 기록</button>
+                <button type="button" class="ghost-chip topbar-chip" data-utility-open="vault" aria-pressed="false">보관함</button>
+                <button type="button" class="ghost-chip topbar-chip" data-utility-open="queue" aria-pressed="false">예약</button>
+            </div>
+        </div>
+    </div>
     <div class="bg-orb bg-orb-a"></div>
     <div class="bg-orb bg-orb-b"></div>
     <div class="bg-grid"></div>
@@ -1175,6 +1197,7 @@ def _render_home() -> str:
     </script>
     <link rel="stylesheet" href="/assets/app.css?v={_ASSET_VERSION}" />
     <script src="/assets/app.js?v={_ASSET_VERSION}" defer></script>
+    <script src="/assets/app_workflow_utils.js?v={_ASSET_VERSION}" defer></script>
     <script src="/assets/app_overrides.js?v={_ASSET_VERSION}" defer></script>
 </head>
 <body>
@@ -1202,6 +1225,7 @@ def _render_home() -> str:
                     <button type="button" class="ghost-chip" data-utility-open="history" aria-pressed="false">실행 기록</button>
                     <button type="button" class="ghost-chip" data-utility-open="vault" aria-pressed="false">키워드 보관함</button>
                     <button type="button" class="ghost-chip" data-utility-open="queue" aria-pressed="false">예약 / 대기열</button>
+                    <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">진단 / 로그</button>
                     <a class="secondary-link" href="/guides">사용 가이드</a>
                     <a class="secondary-link" href="/recommended-usage">추천 사용법</a>
                     <a class="secondary-link" href="/api-docs" target="_blank" rel="noopener noreferrer">API 문서</a>
@@ -1209,42 +1233,46 @@ def _render_home() -> str:
             </div>
         </header>
 
+        <nav class="workspace-nav" aria-label="워크스페이스 탐색">
+            <a class="workspace-nav-link" href="#section-controls">
+                <span class="workspace-nav-index">01</span>
+                <span>실행 조건</span>
+            </a>
+            <a class="workspace-nav-link" href="#section-launcher">
+                <span class="workspace-nav-index">02</span>
+                <span>빠른 시작</span>
+            </a>
+            <div id="resultStageDock" class="result-stage-dock workspace-nav-stage-dock"></div>
+        </nav>
+
         <main class="layout-grid">
-            <section class="panel summary-panel">
-                <div class="panel-head">
-                    <div>
-                        <p class="panel-kicker">진행 현황</p>
-                        <h2>진행 현황</h2>
+            <div class="workspace-sidebar">
+                <section class="panel summary-panel" id="section-progress">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">진행 현황</p>
+                            <h2>진행 현황</h2>
+                        </div>
+                        <span class="status-pill" id="pipelineStatus">대기 중</span>
                     </div>
-                    <span class="status-pill" id="pipelineStatus">대기 중</span>
-                </div>
 
-                <div class="progress-card">
-                    <div class="progress-track">
-                        <div id="progressBar" class="progress-bar"></div>
+                    <div class="progress-card">
+                        <div class="progress-track">
+                            <div id="progressBar" class="progress-bar"></div>
+                        </div>
+                        <div class="progress-meta">
+                            <strong id="progressText">0 / 5 단계 완료</strong>
+                            <span id="progressDetail">아직 실행하지 않았습니다.</span>
+                        </div>
                     </div>
-                    <div class="progress-meta">
-                        <strong id="progressText">0 / 5 단계 완료</strong>
-                        <span id="progressDetail">아직 실행하지 않았습니다.</span>
-                    </div>
-                </div>
 
-                <div class="status-list" id="statusList"></div>
+                    <div class="status-list" id="statusList"></div>
 
-            </section>
-
-            <section class="panel insights-panel" id="resultsRailPanel" hidden>
-                <div class="panel-head">
-                    <div>
-                        <p class="panel-kicker">인사이트</p>
-                        <h2>실시간 인사이트</h2>
-                    </div>
-                </div>
-                <div id="resultsRail" class="results-rail"></div>
-            </section>
+                </section>
+            </div>
 
             <div class="control-column">
-            <section class="panel control-panel">
+            <section class="panel control-panel" id="section-controls">
                 <div class="panel-head">
                     <div>
                         <p class="panel-kicker">실행 조건</p>
@@ -1453,7 +1481,7 @@ def _render_home() -> str:
             </section>
             </div>
 
-            <section class="panel launcher-panel">
+            <section class="panel launcher-panel" id="section-launcher">
                 <div class="panel-head">
                     <div>
                         <p class="panel-kicker">빠른 시작</p>
@@ -1797,7 +1825,7 @@ def _render_home() -> str:
 
             </section>
 
-            <section class="panel results-panel">
+            <section class="panel results-panel" id="section-results">
                 <div class="panel-head">
                     <div>
                         <p class="panel-kicker">작업대</p>

@@ -12,4 +12,10 @@ venv/
 *.db
 *.sqlite3
 .env
+.local/
+Status/
+output/
+.tmp*/
+.tmp_*
+*.credentials.json
 

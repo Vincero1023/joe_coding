@@ -100,7 +100,8 @@
   - `.local/credentials/naver_search.credentials.json`
   - `.local/credentials/searchad.credentials.json`
 - 루트 `naver_search.credentials.json`, `searchad.credentials.json`도 레거시 fallback으로 계속 읽지만, 새 환경에서는 `.local/credentials/`만 쓰는 쪽을 권장합니다.
-- `.local/`, `Status/`, `.tmp_*`, `*.credentials.json`은 git 추적 대상에서 제외하도록 정리했습니다.
+- `.local/`, `Status/`, `output/`, `.tmp*/`, `.tmp_*`, `*.credentials.json`은 git 추적 대상에서 제외하도록 정리했습니다.
+- `.dockerignore`도 같은 기준으로 맞춰 로컬 시크릿과 산출물이 Docker build context로 전송되지 않게 했습니다.
 
 ## 다음 작업
 

@@ -33,6 +33,475 @@
 ---
 
 ## Date
+- 2026-03-24 17:55 (KST)
+
+## What changed (변경점)
+- `app/title/title_generator.py`에 practical rescue 경로를 추가해 `설정 팁/실사용 차이/장단점/자주 생기는 문제/사전예약 방법` 키워드가 AI 재시도 뒤에도 저품질이면 deterministic 구조화 제목으로 한 번 더 구제하게 바꿨다.
+- rescue suffix 선택도 보정해 `general` 카테고리라고 해서 무조건 제품형(`블루투스/DPI/버튼`) 문구를 쓰지 않고, 키워드 자체가 제품형으로 보일 때만 그 분기를 타게 했다.
+- `app/title/ai_client.py`의 기본/item 프롬프트 둘 다에 `Do not shorten the keyword phrase` 규칙을 넣어 `손목 편한 마우스 설정 팁 -> 편한 마우스 설정 팁` 같은 축약을 더 강하게 막았다.
+- `tests/test_title.py`에 `실패한 AI 재시도 뒤 rescue 제목 채택`, `keyword shortening 경고` 회귀를 추가했다.
+
+## Why (원인/배경)
+- 최신 `V1 + V2` status에서 `22세트 전부 retry`, `자동 재작성 22회 채택 0`, `모델 승격 채택 0`, `평균 74점`으로 떨어졌고, 실제 제목도 `최신 정보/총정리/완벽 가이드/뭐가 다를까`와 키워드 축약이 다시 보였다.
+- 프롬프트만 세게 하는 방식으로는 해결이 안 됐고, 같은 실패 골격이 반복되면 후단에서 구조적으로 다른 제목을 만들어 주는 구제 단계가 필요했다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/title_generator.py app/title/ai_client.py tests/test_title.py`
+- [x] `pytest -q tests/test_title.py -k "practical_rescue or warns_against_keyword_shortening or auto_retries_low_quality_ai_titles or escalates_model_after_two_failed_quality_attempts"`
+- [x] `pytest -q tests/test_title.py -k "practical_rescue or warns_against_keyword_shortening"`
+- [x] `pytest -q`
+- [ ] 실제 새 status에서 rescue 채택 수와 `retry` 감소 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: V1+V2만 켜도 제목이 전부 `retry`로 남고, AI 재시도와 모델 승격이 실질적으로 품질을 올리지 못했다.
+- 원인: practical keyword 위에 generic wrapper가 반복될 때 프롬프트만으로는 골격을 바꾸지 못했고, descriptive keyword 앞 토큰이 종종 잘렸으며 `general` 분기가 제품형 rescue 문구를 과하게 사용할 여지도 있었다.
+- 해결: practical keyword는 후단 rescue 제목 세트를 deterministic하게 만들고, full keyword 보존 규칙을 prompt helper 전부에 넣었으며, 제품형 rescue는 키워드 자체가 제품처럼 보일 때만 쓰도록 좁혔다.
+
+## Next (다음 작업)
+- 새 status에서 `auto_retry accepted_count`가 실제 rescue 채택까지 반영되는지 확인하기
+- practical rescue 제목이 실제 status에서도 broad/product/non-product 케이스별로 너무 비슷해지지 않는지 점검하기
+
+---
+
+## Date
+- 2026-03-24 17:15 (KST)
+
+## What changed (변경점)
+- `app/title/quality.py`에서 `실사용 차이/장단점/설정 팁/자주 생기는 문제/연결 문제` 같은 구체 글감 키워드 위에 `총정리/완벽 가이드/최신 정보`를 덧씌우는 제목을 하드 리젝트하게 바꿨다.
+- `app/title/targets.py`에 related mode 키워드 정리 헬퍼를 넣어 `스트라이크 스트라이크`, `m720` 혼입 같은 모델명 잡음을 줄이고 대표 키워드 + concrete suffix 중심으로 정리했다.
+- `app/title/ai_client.py`, `app/title/title_generator.py` 프롬프트에 웹 검색에서 확인한 실전형 제목 패턴(증상/환경/기간/해결 결과 중심)을 반영했고, `tests/test_title.py` 회귀 테스트 4건을 추가했다.
+
+## Why (원인/배경)
+- 최신 status에서 `32세트`까지 수량은 회복됐지만, 실제 제목은 `최신 비교 분석`, `총정리 가이드`, `완벽 가이드`, `최신 정보`가 다시 덧붙으며 평균 점수가 `70점`까지 내려갔다.
+- 검색에 실제로 잘 걸리는 제목은 `모델 + 증상/효과 + 기간/환경`, `모델 + 연결/설정 + 기기 맥락`, `모델 + 문제 + 해결 결과`처럼 훨씬 구체적이었고, 지금 생성기는 그 방향을 후단에서 다시 흐리고 있었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/quality.py app/title/targets.py app/title/ai_client.py app/title/title_generator.py`
+- [x] `pytest -q tests/test_title.py`
+- [x] `pytest -q tests/test_selector.py`
+- [x] `pytest -q`
+- [ ] 실제 `로지텍 마우스` 재실행 후 새 status 비교
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 좋은 글감 키워드를 만들어도 제목 생성 단계가 다시 `총정리/완벽 가이드/최신 정보` 같은 템플릿 골격을 덧씌우고, V2/V3는 모델명 잡음이 섞였다.
+- 원인: 품질 필터는 concrete keyword 위의 generic overlay를 별도로 잡지 않았고, related mode target은 대표 키워드와 support 토큰 혼입을 충분히 정리하지 않았다.
+- 해결: concrete keyword + generic overlay 조합은 하드 리젝트로 격상하고, related mode는 대표 키워드 기준으로 노이즈를 접어 넣었으며, 프롬프트도 실전형 제목 구조를 직접 힌트로 주게 바꿨다.
+
+## Next (다음 작업)
+- 새 status에서 `총정리/완벽 가이드/최신 정보/꼭 알아두세요` 빈도와 `재생성 권장` 수가 얼마나 줄었는지 확인하기
+- 필요하면 `문제` 계열을 `원인/해결/증상/설정 오류/연결 끊김` 하위 프레임으로 더 잘게 분기하기
+
+---
+
+## Date
+- 2026-03-24 16:38 (KST)
+
+## What changed (변경점)
+- `app/selector/longtail.py`의 general longtail 기본 출력을 `추천 기준/비교 포인트/고를 때 체크` 대신 `실사용 차이/장단점/자주 생기는 문제/설정 팁` 축으로 바꿨다.
+- `app/title/targets.py`에서 저정보 longtail suggestion을 그냥 버리지 않고, 구체적인 글감 키워드로 치환한 뒤 `longtail_selected` 타깃으로 다시 살리도록 바꿨다.
+- `tests/test_selector.py`, `tests/test_title.py` 기대값을 새 longtail 방향에 맞게 갱신했고 전체 테스트를 다시 통과시켰다.
+
+## Why (원인/배경)
+- 실제 status에서 하드 필터 이후 `30세트 -> 10세트`로 줄어든 원인은 생성 실패가 아니라, V1 longtail target이 템플릿형이라 제목 단계에서 거의 사라졌기 때문이었다.
+- 사용자는 매번 구매형 글만이 아니라 문제, 현상, 사용 경험까지 다루길 원했고, 현재 longtail 생성은 그 방향을 충분히 반영하지 못했다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/selector/longtail.py app/title/targets.py`
+- [x] `pytest -q tests/test_selector.py tests/test_title.py`
+- [x] `pytest -q`
+- [ ] 실제 `로지텍 마우스` 재실행 후 status 비교
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 템플릿형 longtail을 강하게 막자 제목 세트 수가 너무 많이 줄었다.
+- 원인: longtail 생성기가 여전히 `추천 기준/비교 포인트/고를 때 체크` 중심이었고, title target 단계는 이를 버리기만 했다.
+- 해결: longtail 기본 출력을 문제/현상형 글감으로 바꾸고, 이미 들어온 저정보 longtail도 `실사용 차이/장단점`류로 치환해 다시 타깃으로 사용하게 했다.
+
+## Next (다음 작업)
+- 실제 `로지텍 마우스`를 다시 돌려 V1 수가 회복되는지, 제목 결과가 구매형 한쪽으로 치우치지 않는지 확인하기
+- 필요하면 카테고리별 suffix를 더 세분화해 디바이스/금융/정책 키워드별 글감 톤을 더 맞추기
+
+---
+
+## Date
+- 2026-03-24 16:09 (KST)
+
+## What changed (변경점)
+- `app/title/quality.py`에 `제목 골격이 템플릿형 표현에 머물러 있습니다.` 하드 리젝트를 추가해 `추천 기준`, `고를 때 체크`, `최신 정보`, `구매 가이드`, `총정리`류 제목은 최종 통과하지 못하게 바꿨다.
+- `app/selector/service.py`에서 `추천 기준`, `고를 때 체크`, `비교 포인트`, `최신 정보` 프레임을 가진 키워드는 기본 자동 선별에서 우선 제외하고, fallback 정렬에서도 뒤로 밀리게 했다.
+- `app/title/targets.py`에서 자동 생성된 longtail title target 중 `추천 기준`, `고를 때 체크`, `비교 포인트`, `최신 정보` 계열은 건너뛰도록 바꿨고, 회귀 테스트 3건을 추가했다.
+
+## Why (원인/배경)
+- 최신 status를 보면 자동 재작성은 실제로 작동했지만, 최종 결과에는 여전히 `추천 기준`, `고를 때 체크`, `최신 정보`, `구매 가이드` 같은 골격이 많이 남아 있었다.
+- 원인은 제목 생성기만의 문제가 아니라, title target으로 들어가는 longtail 키워드 자체가 이미 템플릿형 표현으로 기울어 있다는 점이었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/quality.py app/selector/service.py app/title/targets.py`
+- [x] `pytest -q tests/test_title.py`
+- [x] `pytest -q tests/test_selector.py`
+- [x] `pytest -q`
+- [ ] 실제 `로지텍 마우스` 재실행 후 status 비교
+
+## Issues & Fix (문제-원인-해결)
+- 문제: status 기준으로 제목이 실제로는 비슷한 템플릿에서 크게 벗어나지 않았고, target keyword도 `추천 기준`/`고를 때 체크` 쪽으로 쏠렸다.
+- 원인: 저정보 골격을 감점만 하고 있었고, 자동 title target 단계도 템플릿형 longtail을 그대로 채택했다.
+- 해결: 최종 제목엔 하드 리젝트를 추가하고, selector/title target 단계에서도 템플릿형 키워드를 덜 뽑도록 걸렀다.
+
+## Next (다음 작업)
+- 실제 `로지텍 마우스`를 다시 돌려 status에서 `추천 기준`, `고를 때 체크`, `최신 정보`, `구매 가이드` 비중이 얼마나 줄었는지 확인하기
+- 모델 승격 채택이 여전히 `0`이면 escalation prompt 또는 target model을 한 단계 더 강하게 조정하기
+
+---
+
+## Date
+- 2026-03-24 15:30 (KST)
+
+## What changed (변경점)
+- `app/title/quality.py`에 `제목 골격이 너무 일반적입니다.` 규칙을 추가해 `최신 정보`, `업데이트 확인`, `구매 가이드`, `사용 후기`, `신상`, bare `비교` 같은 저정보 골격을 직접 감점하도록 바꿨다.
+- `app/title/ai_client.py`, `app/title/presets.py`, `app/title/title_generator.py`에서 fast/재작성 프롬프트를 강화해 `추천 기준`, `체크리스트`, `가이드` 같은 추상 골격 대신 `실사용 차이`, `장단점`, `성능`, `세팅`, `가격대`, `추천 대상`처럼 더 구체적인 표현을 요구하도록 바꿨다.
+- `tests/test_title.py`에 generic skeleton 감지 회귀 테스트 2건을 추가했고 전체 테스트를 다시 통과시켰다.
+
+## Why (원인/배경)
+- 최신 status를 보면 자동 재작성 메타는 보였지만, 실제 제목은 여전히 `최신 정보`, `구매 가이드`, `추천 기준`, `고를 때 체크`, `체크리스트` 같은 정보 밀도 낮은 골격이 많이 남아 있었다.
+- 즉 문제는 단순 반복만이 아니라, 모델이 빠르게 안전한 골격으로 도망가면서 구체성이 부족한 제목을 계속 내는 점이었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/quality.py app/title/ai_client.py app/title/presets.py app/title/title_generator.py`
+- [x] `pytest -q tests/test_title.py`
+- [x] `pytest -q`
+- [ ] 실제 `로지텍 마우스` 재실행 후 status 비교
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 제목이 반복될 뿐 아니라 `최신 정보`, `구매 가이드`, `사용 후기`처럼 너무 일반적인 골격으로 많이 출력됐다.
+- 원인: fast preset/재작성 프롬프트가 “반복은 피하라” 수준이라, 모델이 여전히 저정보 안전 문구로 수렴했다.
+- 해결: 저정보 골격은 품질 점수에서 직접 감점하고, fast/재작성 프롬프트는 구체 표현을 강제하도록 강화했다.
+
+## Next (다음 작업)
+- `로지텍 마우스`를 다시 돌려 `추천 기준`, `고를 때`, `체크리스트`, `구매 가이드`, `최신 정보` 빈도가 얼마나 줄었는지 확인하기
+- 필요하면 product 계열 키워드에 한해 `실사용/성능/무게/그립감/버튼/배터리/세팅` 같은 표현을 더 강하게 밀도록 추가 튜닝하기
+
+---
+
+## Date
+- 2026-03-24 15:13 (KST)
+
+## What changed (변경점)
+- `app/web_assets/app.js`에 제목 생성 메타 요약 함수를 추가해 `auto_retry`, `model_escalation`, `final_model` 정보를 결과 요약 문자열에 함께 노출하도록 바꿨다.
+- `app/web_assets/app_overrides.js`의 `제목 결과` / `제목 워크플로` 카드에 `자동 재작성`, `모델 승격` 통계를 직접 표시하고, 별도 메타 요약 줄도 넣었다.
+- `app/web_assets/app_workflow_utils.js`의 실행 기록도 모델만 보이던 요약 대신 자동 재작성/승격 메타까지 함께 남기도록 바꿨고, `app/web.py` asset version을 갱신했다.
+
+## Why (원인/배경)
+- 최신 status html을 보면 선별 증가는 확인됐지만, 현재 run에서 자동 재작성과 모델 승격이 실제로 몇 번 일어났는지는 화면에서 바로 읽기 어려웠다.
+- `generation_meta`에는 값이 들어오는데, 프런트 요약 문자열과 실행 기록 카드가 대부분 모델 정보만 보여줘서 사용자가 자동 재작성 작동 여부를 판단하기 힘들었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `node --check app/web_assets/app.js`
+- [x] `node --check app/web_assets/app_workflow_utils.js`
+- [x] `node --check app/web_assets/app_overrides.js`
+- [x] `python -m py_compile app/web.py`
+- [x] `pytest -q tests/test_web_routes.py`
+- [ ] 브라우저에서 status/export 화면 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: status html에서 자동 재작성과 모델 승격이 실제로 작동했는지 바로 확인하기 어려웠다.
+- 원인: 화면 요약이 `generation_meta`의 상세 메타를 버리고 preset/provider/model 위주로만 노출하고 있었다.
+- 해결: 결과 카드, 제목 워크플로 카드, 실행 기록 요약에 `자동 재작성 시도/채택`, `모델 승격`, `최종 모델` 흐름이 남도록 프런트 요약을 확장했다.
+
+## Next (다음 작업)
+- 브라우저에서 새 status를 다시 저장해 `자동 재작성 0회`인지, `N회 시도 / M건 채택`인지 실제로 보이는지 확인하기
+- 필요하면 결과 리스트 상단에도 `generation_meta` 전용 진단 패널을 추가해 디버그 모드 없이도 더 자세히 읽게 만들기
+
+---
+
+## Date
+- 2026-03-24 14:50 (KST)
+
+## What changed (변경점)
+- `app/title/quality.py`에 배치 단위 제목 유사성 가드를 추가해, 키워드를 제거한 뒤에도 같은 제목 골격이 반복되면 품질 점수와 상태에 반영되도록 바꿨다.
+- `app/title/title_generator.py`의 재시도 판단을 조정해, 여전히 `retry` 판정인 후보는 중간 자동 재시도에서 채택하지 않고 모델 승격 단계로 넘기도록 정리했다.
+- `tests/test_title.py`에 배치 반복 제목 골격 회귀 테스트를 추가했고, 제목 테스트/전체 테스트를 다시 통과시켰다.
+
+## Why (원인/배경)
+- 실제 status html을 보면 `뭐가 다를까`, `추천 기준`, `체크리스트`, `비교 포인트` 같은 제목 골격이 배치 전체에서 반복되는 문제가 있었는데, 기존 품질 평가는 같은 키워드 안에서만 유사성을 봤다.
+- 그래서 개별 키워드 품질 점수는 높아도 사이트 레벨에서는 템플릿 냄새가 남았고, 자동 재시도도 아직 재생성 권장인 후보를 중간 단계에서 받아들이는 경우가 있었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `pytest -q tests/test_title.py`
+- [x] `pytest -q`
+- [ ] 실데이터 배치 재실행 (`로지텍 마우스` 등)
+- [ ] status html에서 제목 반복도 재확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 키워드만 다르면 통과돼서 배치 전체 제목 골격 반복을 제대로 잡지 못했다.
+- 원인: 품질 검사가 단건/채널 내부 중심이었고, 자동 재시도 채택 기준도 `retry -> retry` 후보를 받아들일 여지가 있었다.
+- 해결: 배치 단위 skeleton 비교 + noisy family 반복 가드를 추가하고, 아직 `retry_recommended`인 재시도 후보는 채택하지 않도록 조정했다.
+
+## Next (다음 작업)
+- 실제 대형 키워드로 제목 생성 결과를 다시 뽑아 `뭐가 다를까`, `추천 기준`, `체크리스트`, `비교 포인트` 반복도가 얼마나 줄었는지 확인하기
+- 필요하면 status html 기준으로 skeleton family 임계치와 패널티 강도를 한 번 더 미세조정하기
+
+---
+
+## Date
+- 2026-03-24 11:46 (KST)
+
+## What changed (변경점)
+- `app/title/templates.py`에서 `비교`, `체크`, `체크리스트`, `가이드` 계열 문구가 과도하게 반복되지 않도록 제목 템플릿 문구를 다듬고, 같은 키워드 안에서 noisy frame이 연속 선택되지 않게 보정했다.
+- `app/title/presets.py`의 기본 AI 프리셋 가이던스도 `checklist/comparison` 골격을 과하게 반복하지 말도록 톤을 조정했다.
+- `app/selector/service.py`에 기본 자동 선별의 최소 확보 수를 추가해 `gold/promising`이 몇 개 안 나올 때도 measured 후보를 `editorial_support`로 적당량 보충하도록 바꿨다.
+
+## Why (원인/배경)
+- 실제 사용 중 제목 결과가 `체크`, `비교`, `체크리스트` 쪽으로 자주 쏠렸고, 대형 키워드에서는 선별이 지나치게 적게 남아 다음 단계 작업성이 떨어졌다.
+- 원인을 보면 제목은 기본 템플릿/프리셋 어휘가 해당 단어군을 강하게 밀고 있었고, 선별은 기본 자동 모드가 `gold/promising`만 통과시키고 수가 적어도 추가 보충을 하지 않았다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `pytest -q tests/test_title.py tests/test_selector.py`
+- [ ] `pytest -q`
+- [ ] 브라우저/실데이터 수동 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 제목이 특정 어휘 골격으로 반복되고, 선별 수가 지나치게 적게 나오는 경우가 있었다.
+- 원인: 제목은 템플릿/프리셋 편향, 선별은 기본 자동 모드의 지나친 컷오프 구조 때문이었다.
+- 해결: 제목은 문구 다양화 + noisy frame 중복 억제를 넣고, 선별은 자동 모드에서 measured 후보를 최소 수량만큼 보충하도록 조정했다.
+
+## Next (다음 작업)
+- 실제 `로지텍 마우스` 같은 대형 키워드에서 선별 수와 제목 어휘 편향이 개선됐는지 확인하기
+- 필요하면 자동 선별 최소 개수와 제목 프레임 다양화 강도를 추가 튜닝하기
+
+---
+
+## Date
+- 2026-03-24 11:33 (KST)
+
+## What changed (변경점)
+- `workspace-nav`에서 `결과 작업대` 링크를 제거해 상단 스티키 바를 `실행 조건 / 빠른 시작 / 결과 단계 5개` 구성으로 더 압축했다.
+- `app/web.py`의 asset version을 다시 올려 브라우저가 이전 상단 네비 캐시를 잡지 않게 했다.
+
+## Why (원인/배경)
+- 결과 단계 5개가 이미 상단 스티키 바 안으로 들어온 뒤에는 `결과 작업대` 링크가 사실상 같은 영역으로 가는 중복 진입점이 됐다.
+- 상단 바는 정보보다 전환 밀도가 중요하므로, 중복 링크를 빼는 편이 더 읽기 쉽고 단계 버튼도 덜 답답하게 보인다.
+
+## How verified (검증 방법/체크리스트)
+- [ ] 브라우저 수동 확인
+- [ ] `python -m py_compile app/web.py`
+- [ ] `pytest -q tests/test_web_routes.py`
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 상단 스티키 바에 `결과 작업대` 링크와 결과 단계 5개가 함께 있어 역할이 겹쳤다.
+- 원인: 결과 단계 전환 UI를 상단으로 옮긴 뒤에도 이전 섹션 이동 링크가 그대로 남아 있었다.
+- 해결: `결과 작업대` 링크를 제거해 상단 바를 결과 단계 전환 중심으로 정리했다.
+
+## Next (다음 작업)
+- 브라우저에서 상단 스티키 바 밀도와 가로 스크롤 체감 확인하기
+- 결과 작업대 내부 렌더링 추가 분리 작업 이어가기
+
+---
+
+## Date
+- 2026-03-24 11:27 (KST)
+
+## What changed (변경점)
+- `workspace-nav`에서 `진행 현황`, `운영 설정`, `진단 / 로그` 항목을 제거하고, 그 자리에 결과 단계 5개를 가로 전환 버튼으로 붙였다.
+- `app/web.py`에서 오른쪽 `결과 단계` 패널을 제거하고 `진단 / 로그` 버튼을 hero 액션 영역으로 옮겨 상단 네비의 역할을 `섹션 이동 + 결과 전환` 중심으로 재정리했다.
+- `app/web_assets/app_overrides.js`와 `app/web_assets/app.css`에서 결과 단계 도크가 패널이 아니라 상단 스티키 네비 안에서 렌더링되도록 수정하고, 좁은 화면에서도 가로 스크롤로 버티게 보정했다.
+
+## Why (원인/배경)
+- 오른쪽 보조 영역 높이가 부족해지면서 `결과 단계` 패널의 마지막 단계가 잘 보이지 않았고, 상단 네비에는 중복된 링크/유틸리티가 남아 공간 효율이 떨어졌다.
+- 사용 흐름상 더 중요한 것은 `현재 섹션 이동`과 `결과 단계 즉시 전환`이라, 이 둘을 같은 스티키 바에서 처리하는 편이 밀도와 접근성이 더 좋다.
+
+## How verified (검증 방법/체크리스트)
+- [ ] 브라우저 수동 확인
+- [ ] `node --check app/web_assets/app_overrides.js`
+- [ ] `python -m py_compile app/web.py`
+- [ ] `pytest -q`
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 오른쪽 `결과 단계` 패널은 세로 공간 부족으로 잘리는 구간이 있었고, 상단 스티키 네비는 중복 버튼 때문에 핵심 전환 UI를 담기엔 비효율적이었다.
+- 원인: 결과 단계는 오른쪽 컬럼에, 유틸리티 버튼은 상단 네비와 hero 액션에 동시에 있어 화면 자원이 분산돼 있었다.
+- 해결: 상단 네비에서 중복 항목을 제거하고 결과 단계 5개를 이 자리에 옮겨, 스티키 바 하나에서 섹션 이동과 결과 전환을 모두 처리하게 만들었다.
+
+## Next (다음 작업)
+- 브라우저에서 결과 단계 5개가 마지막 `제목`까지 잘 보이는지와 active 상태가 자연스러운지 확인하기
+- 결과 작업대 내부 렌더링을 다음 분리 단위로 더 쪼개기
+
+---
+
+## Date
+- 2026-03-24 11:13 (KST)
+
+## What changed (변경점)
+- `app/web.py`에서 `진행 현황`과 `결과 단계`를 `workspace-sidebar`로 묶어 오른쪽 보조 영역이 한 컬럼처럼 동작하도록 바꿨다.
+- `app/web_assets/app.css`에서 데스크톱에서는 `workspace-sidebar` 전체가 sticky 되고, 모바일/좁은 화면에서는 일반 문서 흐름으로 내려오도록 레이아웃 규칙을 조정했다.
+- asset version을 다시 올려 이전 레이아웃 캐시가 남지 않게 했다.
+
+## Why (원인/배경)
+- `결과 단계`를 진행현황 아래에 고정한 뒤, 두 패널이 각자 따로 배치돼 스크롤 중 진행현황이 결과 단계 아래로 숨어 보이는 구간이 생겼다.
+- 사용감 기준으로는 두 패널이 따로 움직이는 것보다 “오른쪽 보조 패널 한 덩어리”처럼 같이 따라오는 편이 훨씬 자연스럽다.
+
+## How verified (검증 방법/체크리스트)
+- [ ] 브라우저 수동 확인
+- [ ] `python -m py_compile app/web.py`
+- [ ] `pytest -q tests/test_web_routes.py`
+- [ ] `git diff --check`
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 진행현황은 sticky 흐름인데 결과 단계는 별도 배치라, 스크롤 위치에 따라 둘의 관계가 어색해지고 진행현황이 가려지는 것처럼 보였다.
+- 원인: 오른쪽 보조 UI가 `summary-panel`과 `insights-panel` 두 개의 독립 블록으로 배치돼 있어 공통 sticky 컨테이너가 없었다.
+- 해결: 두 패널을 하나의 `workspace-sidebar`로 묶고 데스크톱에서만 컬럼 전체를 sticky 처리해 함께 이동하도록 바꿨다.
+
+## Next (다음 작업)
+- 실제 브라우저에서 긴 스크롤 구간과 좁은 화면 전환 시 보조 컬럼 움직임 확인하기
+- 결과 작업대 내부 분리 작업을 이어가면서 오른쪽 보조 패널 정보 밀도도 추가 조정하기
+
+---
+
+## Date
+- 2026-03-24 11:02 (KST)
+
+## What changed (변경점)
+- 결과 전환용 `1~5단계` 탭을 결과 작업대 상단에서 제거하고, 오른쪽 `진행현황` 아래의 고정 패널(`resultStageDockPanel`)로 옮겼다.
+- `app/web_assets/app_overrides.js`에서 단계 도크를 항상 5개 항목으로 렌더링하도록 바꾸고, 아직 준비되지 않은 단계는 비활성 상태로 보여주게 정리했다.
+- `app/web_assets/app_workflow_utils.js`에 단계 도크 클릭 이벤트를 연결해 데스크톱에서는 바로 전환되고, 좁은 화면에서는 결과 섹션으로 자연스럽게 이동하도록 맞췄다.
+
+## Why (원인/배경)
+- 기존 구조는 결과가 쌓일수록 `수집/확장/분석/선별/제목` 탭이 작업대 상단에 늘어나 시각적으로 흔들렸고, 상단으로 다시 올라가야 다음 결과를 볼 수 있어 흐름이 자주 끊겼다.
+- 특히 사용자가 분석 중에 제목 결과를 보거나, 제목 결과에서 다시 선별 보드로 돌아갈 때 전환 컨트롤이 작업면 상단에만 있는 점이 불편했다.
+
+## How verified (검증 방법/체크리스트)
+- [ ] 브라우저 수동 확인
+- [ ] `node --check app/web_assets/app_workflow_utils.js`
+- [ ] `node --check app/web_assets/app_overrides.js`
+- [ ] `python -m py_compile app/web.py`
+- [ ] `pytest -q`
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 결과 전환 탭이 단계별로 점점 늘어나는 구조라 위치가 불안정했고, 작업대 상단 의존도가 높아 전환 동선이 길었다.
+- 원인: 전환 UI가 결과 렌더링 내부에 붙어 있어 결과 개수와 함께 커지고, 진행현황과 분리돼 있어 “지금 어디를 보고 있는지”를 한 곳에서 잡기 어려웠다.
+- 해결: 고정 5단계 도크를 진행현황 아래로 분리하고, 활성/비활성 상태만 갱신하도록 바꿔 전환 위치를 항상 같은 자리로 고정했다.
+
+## Next (다음 작업)
+- 브라우저에서 데스크톱/좁은 화면 기준으로 단계 도크 클릭 후 실제 전환 흐름 확인하기
+- 결과 작업대 내부 렌더링(`selection rail / title result`)을 다음 분리 단위로 더 쪼개기
+
+---
+
+## Date
+- 2026-03-24 10:41 (KST)
+
+## What changed (변경점)
+- `app/web_assets/app_workflow_utils.js`에 섹션 네비 상태 동기화 로직을 추가해 상단 바와 `workspace-nav`가 현재 스크롤 위치에 맞춰 활성 상태를 자동으로 반영하도록 정리했다.
+- `app/web_assets/app.css`에서 상단 링크/워크스페이스 네비의 active 스타일과 `scroll-padding-top`, 모바일 상단 바 가로 스크롤 처리를 보강해 섹션 점프 동작이 더 안정적으로 보이게 맞췄다.
+- `app/web.py`의 asset version을 갱신해 브라우저가 이전 CSS/JS 캐시를 계속 쓰지 않게 했다.
+
+## Why (원인/배경)
+- 샘플 방향으로 앱형 상단 바와 스티키 섹션 네비를 넣은 뒤에도, 실제 사용감은 “현재 어느 섹션에 있는지”가 자동으로 잡히지 않아 시각 구조와 동작 구조 사이에 약한 단절이 있었다.
+- 특히 스크롤 중 활성 상태가 고정되지 않으면 레이아웃은 깔끔해 보여도 탐색 감각은 덜 정리된 것처럼 느껴질 수 있어, 구조 변경보다 상태 동기화를 우선 보완하는 편이 안전했다.
+
+## How verified (검증 방법/체크리스트)
+- [ ] 브라우저 수동 확인
+- [ ] `node --check app/web_assets/app_workflow_utils.js`
+- [ ] `python -m py_compile app/web.py`
+- [ ] `pytest -q tests/test_web_routes.py`
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 상단 바/보조 네비를 추가했지만, 스크롤 위치와 활성 링크가 연결되지 않아 앱형 탐색 구조가 반쯤만 완성된 상태였다.
+- 원인: anchor와 sticky layout은 있었지만 현재 섹션을 추적하고 active 스타일을 반영하는 클라이언트 상태가 없었다.
+- 해결: 섹션 scroll spy 성격의 경량 동기화 로직과 active 스타일을 추가하고, 모바일에서는 상단 바가 잘리지 않도록 가로 스크롤을 허용했다.
+
+## Next (다음 작업)
+- 브라우저에서 섹션 이동, active 상태, utility drawer 버튼 활성화가 함께 자연스럽게 보이는지 확인하기
+- 결과 작업대(`results board / selection rail / title result`)를 다음 분리 단위로 더 쪼개기
+
+---
+
+## Date
+- 2026-03-24 10:23 (KST)
+
+## What changed (변경점)
+- `sample/키워드마스터-2026-03-18T12-19-10.html`, `sample/사이트 사용법.html`, `sample/기능 메뉴얼 (1).html`의 앱형 상단 바, 스티키 탭형 탐색, 카드 밀도 패턴을 참고해 메인 대시보드 레이아웃을 재정리했다.
+- `app/web.py`에 고정 상단 `app-topbar`, 스티키 `workspace-nav`, 주요 섹션 anchor(`section-progress`, `section-controls`, `section-launcher`, `section-results`)를 추가해 화면 구조를 더 앱형 작업면처럼 읽히게 했다.
+- `app/web_assets/app.css`에서 배경/표면 톤을 더 차분한 workspace 계열로 조정하고, 상단 바/보조 네비/섹션 scroll offset/sticky 동작을 추가해 기존 패널 구조를 유지한 채 벤치마크 방향성을 반영했다.
+
+## Why (원인/배경)
+- 현재 화면은 기능은 많지만 첫 인상이 `한 화면에 카드가 많은 페이지`에 가까워, 벤치마킹했던 키워드마스터 계열처럼 “어디서 시작하고 어디로 이동하는지”가 한 번에 읽히는 앱형 크롬이 부족했다.
+- 특히 샘플 사이트의 강점은 개별 카드보다 `상단 앱 바 + 스티키 섹션 네비 + 카드형 작업면` 조합이라, 이 구조를 현재 워크플로에 맞게 이식하는 편이 방향성에 맞았다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/web.py`
+- [x] `pytest -q tests/test_web_routes.py`
+- [x] `git diff --check`
+- [ ] 브라우저 수동 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 화면이 기능 중심으로는 충분했지만, 벤치마크 대비 앱형 탐색 구조와 시선 흐름이 약해 대시보드 방향성이 덜 드러났다.
+- 원인: 상단 고정 앱 바와 스티키 섹션 네비 없이 hero와 패널만 이어져 있어, 사용자가 스크롤 중 현재 위치와 다음 액션을 잡기 어려웠다.
+- 해결: 앱형 상단 바, 섹션 점프 네비, anchor 기반 scroll offset, 더 선명한 workspace 표면 톤을 추가해 기능 흐름을 한 화면에서 더 쉽게 읽히게 만들었다.
+
+## Next (다음 작업)
+- 브라우저에서 상단 바/스티키 네비/모바일 가로 스크롤 동작을 실제로 확인하기
+- 다음 분리 단계에서 `results board / selection rail / title result` 렌더링을 추가 분해하면서 섹션별 레이아웃을 더 미세 조정하기
+
+---
+
+## Date
+- 2026-03-24 10:09 (KST)
+
+## What changed (변경점)
+- `app/web_assets/app_workflow_utils.js`를 새로 추가해 utility drawer, 실행 기록, 키워드 보관함, topic seed, queue, busy-button/중단 제어 로직을 `app_overrides.js`에서 분리했다.
+- `app/web_assets/app_overrides.js`는 롱테일 옵션, 선별/보드 렌더링, 결과 액션 중심으로 줄였고, `app/web.py`에서 새 자산을 `app.js -> app_workflow_utils.js -> app_overrides.js` 순서로 로드하도록 연결했다.
+- asset version을 갱신해 브라우저 캐시에 이전 단일 번들 스크립트가 남지 않게 했다.
+
+## Why (원인/배경)
+- 프런트엔드가 `app.js` 1만 줄대, `app_overrides.js` 4천 줄대까지 커져 보조 기능과 핵심 결과 렌더링이 한 파일에 뒤섞여 있었고, 다음 변경부터 회귀 범위를 읽기 어려운 상태였다.
+- 특히 utility drawer와 실행 기록/보관함/queue는 결과 보드와 결합도가 상대적으로 낮아, 첫 분리 대상으로 떼어내는 편이 가장 안전했다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `node --check app/web_assets/app_workflow_utils.js`
+- [x] `node --check app/web_assets/app_overrides.js`
+- [x] `python -m py_compile app/web.py`
+- [x] `pytest -q tests/test_web_routes.py`
+- [ ] 브라우저 수동 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 실행 기록/보관함/queue/주제 시드 같은 보조 워크플로와 선별/결과 보드 렌더링이 같은 파일에 섞여 있어 수정 범위를 좁히기 어려웠다.
+- 원인: 기능 추가를 빠르게 이어 붙이는 과정에서 `app_overrides.js`가 utility 계층과 결과 계층을 함께 흡수했다.
+- 해결: utility 계층을 별도 자산으로 분리하고, 기존 override 파일은 선택/롱테일/결과 렌더링 중심으로 남겨 로딩 순서와 책임 경계를 나눴다.
+
+## Next (다음 작업)
+- 브라우저에서 utility drawer, queue, 보관함, topic seed, 결과 보드 액션을 한 번씩 수동 확인하기
+- 다음 분리 단계로 `results board / selection rail / title result` 렌더링 묶음을 추가 분해하기
+
+---
+
+## Date
+- 2026-03-24 09:29 (KST)
+
+## What changed (변경점)
+- `.dockerignore`에 `.local/`, `Status/`, `output/`, `.tmp*/`, `.tmp_*`, `*.credentials.json`을 추가해 Docker build context에서 로컬 시크릿/산출물이 빠지도록 정리했다.
+- `README.md` 로컬 시크릿/데이터 안내를 보강해 git ignore뿐 아니라 Docker build context 차단까지 현재 정책을 명시했다.
+
+## Why (원인/배경)
+- `.gitignore`만으로는 로컬 시크릿이 git에는 안 올라가도 `docker build` 시 build context로 전송될 수 있어, 시크릿/로컬 데이터 정리 트랙이 완전히 닫히지 않았다.
+- 특히 루트 레거시 credential JSON과 `.local` 세션/산출물은 이미지에 복사되지 않더라도 빌드 전송 단계에서 불필요한 노출면이 남아 있었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `git diff --check`
+- [x] `Get-Content .dockerignore`
+- [x] `Get-Content README.md`
+- [ ] Docker build 실제 실행
+- [ ] 회귀(기존 기능) 이상 없음
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 로컬 시크릿/산출물이 git ignore에서는 막히지만 Docker build context에서는 계속 포함될 수 있었다.
+- 원인: `.dockerignore`가 `.gitignore`와 달리 `.local`, `Status`, `output`, legacy credential JSON 패턴을 제외하지 않았다.
+- 해결: `.dockerignore`를 로컬 데이터 정책과 맞추고 README에 build context 차단 사실을 함께 명시했다.
+
+## Next (다음 작업)
+- 실제 Docker/Compose 실행이 필요한 환경에서 build context와 런타임 동작을 한 번 더 확인하기
+- 필요하면 `.env`/시크릿 샘플 export 절차를 README에 더 구체화하기
+
+---
+
+## Date
 - 2026-03-24 02:29 (KST)
 
 ## What changed (변경점)

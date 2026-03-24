@@ -53,6 +53,29 @@ def test_is_golden_keyword_rejects_low_value_heuristic_keyword() -> None:
     assert is_golden_keyword(item) is False
 
 
+def test_is_golden_keyword_rejects_template_heavy_keyword_even_with_good_metrics() -> None:
+    item = {
+        "keyword": "로지텍 마우스 추천 기준",
+        "score": 74.0,
+        "analysis_mode": "search_metrics",
+        "confidence": 0.93,
+        "metrics": {
+            "volume": 8200.0,
+            "cpc": 320.0,
+            "competition": 0.38,
+            "bid": 240.0,
+            "profit": 18.0,
+            "opportunity": 2.3,
+            "monetization_score": 58.0,
+            "rarity_score": 36.0,
+            "search_volume_score": 84.0,
+            "total_clicks": 72.0,
+        },
+    }
+
+    assert is_golden_keyword(item) is False
+
+
 def test_selector_returns_only_golden_keywords() -> None:
     result = run(
         [
@@ -443,8 +466,71 @@ def test_selector_uses_editorial_fallback_and_still_builds_general_longtails() -
 
     longtail_keywords = [item["longtail_keyword"] for item in result["longtail_suggestions"]]
     assert longtail_keywords
-    assert any(keyword == "컴퓨터 모니터 추천 기준" for keyword in longtail_keywords)
+    assert any(
+        "컴퓨터 모니터" in keyword
+        and any(term in keyword for term in ("실사용 차이", "장단점", "자주 생기는 문제", "설정 팁"))
+        for keyword in longtail_keywords
+    )
     assert any("벤큐 2546k" in keyword for keyword in longtail_keywords)
+
+
+def test_selector_tops_up_small_default_selection_with_editorial_support_candidates() -> None:
+    result = run(
+        {
+            "analyzed_keywords": [
+                {
+                    "keyword": "로지텍 mx master 3s",
+                    "profitability_grade": "A",
+                    "attackability_grade": "2",
+                    "combo_grade": "A2",
+                    "golden_bucket": "gold",
+                    "score": 77.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.96,
+                    "metrics": {"volume": 5400.0, "cpc": 420.0},
+                },
+                {
+                    "keyword": "로지텍 버티컬 마우스",
+                    "profitability_grade": "D",
+                    "attackability_grade": "1",
+                    "combo_grade": "D1",
+                    "golden_bucket": "experimental",
+                    "score": 36.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.95,
+                    "metrics": {"volume": 2200.0, "cpc": 110.0},
+                },
+                {
+                    "keyword": "로지텍 마우스 설정",
+                    "profitability_grade": "D",
+                    "attackability_grade": "2",
+                    "combo_grade": "D2",
+                    "golden_bucket": "experimental",
+                    "score": 34.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.94,
+                    "metrics": {"volume": 1800.0, "cpc": 80.0},
+                },
+                {
+                    "keyword": "로지텍 g304",
+                    "profitability_grade": "D",
+                    "attackability_grade": "3",
+                    "combo_grade": "D3",
+                    "golden_bucket": "hold",
+                    "score": 33.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.91,
+                    "metrics": {"volume": 4100.0, "cpc": 90.0},
+                },
+            ],
+        }
+    )
+
+    selected_keywords = result["selected_keywords"]
+    assert len(selected_keywords) == 4
+    assert selected_keywords[0]["keyword"] == "로지텍 mx master 3s"
+    assert selected_keywords[0]["selection_mode"] == "golden_combo"
+    assert sum(1 for item in selected_keywords if item["selection_mode"] == "editorial_support") == 3
 
 
 def test_selector_keeps_guide_and_checklist_suffixes_optional() -> None:

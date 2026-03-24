@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from app.analyzer.config import DEFAULT_CONFIG
@@ -17,9 +18,22 @@ from app.selector.longtail import build_longtail_map, resolve_longtail_options
 
 
 _EDITORIAL_FALLBACK_LIMIT = 8
+_MIN_DEFAULT_SELECTION_COUNT = 4
+_DEFAULT_SELECTION_TOP_UP_RATIO = 0.12
+_TEMPLATE_HEAVY_KEYWORD_PATTERNS = (
+    "추천 기준",
+    "고를 때 체크",
+    "비교 포인트",
+    "최신 정보",
+)
+_TEMPLATE_HEAVY_KEYWORD_KEYS = tuple(
+    normalize_key(pattern) for pattern in _TEMPLATE_HEAVY_KEYWORD_PATTERNS if normalize_key(pattern)
+)
 
 
 def is_golden_keyword(item: dict[str, Any]) -> bool:
+    if _is_template_heavy_keyword(item.get("keyword")):
+        return False
     golden_bucket = _resolve_golden_bucket(item)
     return golden_bucket in {"gold", "promising"}
 
@@ -62,6 +76,9 @@ class SelectorService:
             return _build_selected_payload(selected, longtail_options=select_options.get("longtail_options"))
 
         selected = [_decorate_default_selected_item(item) for item in items if is_golden_keyword(item)]
+        target_count = _resolve_default_selection_target_count(items)
+        if len(selected) < target_count:
+            selected = _top_up_default_selection(selected, items, target_count=target_count)
         if not selected:
             selected = _select_fallback_candidates(items)
 
@@ -245,9 +262,55 @@ def _matches_combo_filter(
     return True
 
 
-def _select_fallback_candidates(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _resolve_default_selection_target_count(items: list[dict[str, Any]]) -> int:
+    measured_count = sum(1 for item in items if _is_measured_candidate(item))
+    if measured_count <= 0:
+        return 0
+    scaled_target = int(math.ceil(measured_count * _DEFAULT_SELECTION_TOP_UP_RATIO))
+    return max(_MIN_DEFAULT_SELECTION_COUNT, min(_EDITORIAL_FALLBACK_LIMIT, scaled_target))
+
+
+def _top_up_default_selection(
+    selected: list[dict[str, Any]],
+    items: list[dict[str, Any]],
+    *,
+    target_count: int,
+) -> list[dict[str, Any]]:
+    if len(selected) >= target_count:
+        return selected
+
+    selected_keys = {
+        normalize_key(normalize_text(item.get("keyword")))
+        for item in selected
+        if normalize_key(normalize_text(item.get("keyword")))
+    }
+    supplemental = _select_fallback_candidates(
+        items,
+        limit=max(0, target_count - len(selected)),
+        exclude_keyword_keys=selected_keys,
+    )
+    if not supplemental:
+        return selected
+    return [*selected, *supplemental]
+
+
+def _select_fallback_candidates(
+    items: list[dict[str, Any]],
+    *,
+    limit: int = _EDITORIAL_FALLBACK_LIMIT,
+    exclude_keyword_keys: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    effective_limit = max(0, int(limit))
+    if effective_limit == 0:
+        return []
+    excluded = exclude_keyword_keys or set()
     ranked_items = sorted(
-        (item for item in items if isinstance(item, dict)),
+        (
+            item
+            for item in items
+            if isinstance(item, dict)
+            and normalize_key(normalize_text(item.get("keyword"))) not in excluded
+        ),
         key=_fallback_candidate_sort_key,
         reverse=True,
     )
@@ -275,7 +338,7 @@ def _select_fallback_candidates(items: list[dict[str, Any]]) -> list[dict[str, A
         exploratory,
         exposure_first,
         measured,
-        limit=_EDITORIAL_FALLBACK_LIMIT,
+        limit=effective_limit,
     )
     if editorial_pool:
         return editorial_pool
@@ -285,7 +348,7 @@ def _select_fallback_candidates(items: list[dict[str, Any]]) -> list[dict[str, A
         for item in ranked_items
         if _is_measured_candidate(item)
     ]
-    return secondary[:1]
+    return secondary[:min(1, effective_limit)]
 
 
 def _is_measured_candidate(item: dict[str, Any]) -> bool:
@@ -345,7 +408,15 @@ def _decorate_default_selected_item(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _fallback_candidate_sort_key(item: dict[str, Any]) -> tuple[float, float, float, float, float, float]:
+def _is_template_heavy_keyword(keyword: Any) -> bool:
+    keyword_key = normalize_key(normalize_text(keyword))
+    if not keyword_key:
+        return False
+    return any(pattern in keyword_key for pattern in _TEMPLATE_HEAVY_KEYWORD_KEYS)
+
+
+def _fallback_candidate_sort_key(item: dict[str, Any]) -> tuple[float, float, float, float, float, float, float]:
+    template_rank = 0.0 if _is_template_heavy_keyword(item.get("keyword")) else 1.0
     bucket_rank = {
         "experimental": 2.0,
         "hold": 1.0,
@@ -363,6 +434,7 @@ def _fallback_candidate_sort_key(item: dict[str, Any]) -> tuple[float, float, fl
     score = float(item.get("score", 0.0) or 0.0)
     volume = float(item.get("metrics", {}).get("volume", 0.0) or 0.0)
     return (
+        template_rank,
         bucket_rank,
         attackability_rank,
         specificity,

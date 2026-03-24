@@ -10447,13 +10447,14 @@ function buildTitleGenerationSummaryText(meta, items) {
     }
 
     const modelSummary = buildTitleGenerationModelSummary(meta, " · ");
+    const retrySummary = buildTitleGenerationRetrySummary(meta, " · ");
     if (usedMode === "template_fallback") {
-        return `${modelSummary || "AI 모드"} 실패 후 템플릿 대체 · ${qualitySummary}`;
+        return [modelSummary || "AI 모드", "실패 후 템플릿 대체", retrySummary, qualitySummary].filter(Boolean).join(" · ");
     }
     if (usedMode === "ai_with_template_fallback") {
-        return `${modelSummary || "AI 모드"} 일부 템플릿 대체 · ${qualitySummary}`;
+        return [modelSummary || "AI 모드", "일부 템플릿 대체", retrySummary, qualitySummary].filter(Boolean).join(" · ");
     }
-    return `${modelSummary || "AI 모드"} · ${qualitySummary}`;
+    return [modelSummary || "AI 모드", retrySummary, qualitySummary].filter(Boolean).join(" · ");
 }
 
 function buildEnhancedTitleGenerationSummaryText(meta, items) {
@@ -10472,13 +10473,14 @@ function buildEnhancedTitleGenerationSummaryText(meta, items) {
     }
 
     const modelSummary = buildTitleGenerationModelSummary(meta, " / ");
+    const retrySummary = buildTitleGenerationRetrySummary(meta, " / ");
     if (usedMode === "template_fallback") {
-        return [modelSummary || "AI 모드", "템플릿 대체", modeSummary, qualitySummary].filter(Boolean).join(" / ");
+        return [modelSummary || "AI 모드", "템플릿 대체", modeSummary, retrySummary, qualitySummary].filter(Boolean).join(" / ");
     }
     if (usedMode === "ai_with_template_fallback") {
-        return [modelSummary || "AI 모드", "일부 템플릿 대체", modeSummary, qualitySummary].filter(Boolean).join(" / ");
+        return [modelSummary || "AI 모드", "일부 템플릿 대체", modeSummary, retrySummary, qualitySummary].filter(Boolean).join(" / ");
     }
-    return [modelSummary || "AI 모드", modeSummary, qualitySummary].filter(Boolean).join(" / ");
+    return [modelSummary || "AI 모드", modeSummary, retrySummary, qualitySummary].filter(Boolean).join(" / ");
 }
 
 function buildTitleGenerationModelSummary(meta, separator = " / ") {
@@ -10493,6 +10495,88 @@ function buildTitleGenerationModelSummary(meta, separator = " / ") {
         ? `${requestedModelLabel} -> ${finalModelLabel}`
         : (finalModelLabel || requestedModelLabel);
     return [presetLabel, providerLabel, modelLabel].filter(Boolean).join(separator);
+}
+
+function buildTitleGenerationRetrySummary(meta, separator = " / ") {
+    if (!meta || typeof meta !== "object") {
+        return "";
+    }
+
+    const usedMode = String(meta.used_mode || "").trim();
+    const autoRetryMeta = meta.auto_retry && typeof meta.auto_retry === "object" ? meta.auto_retry : {};
+    const escalationMeta = meta.model_escalation && typeof meta.model_escalation === "object" ? meta.model_escalation : {};
+    const parts = [];
+
+    if (usedMode.includes("ai") && meta.auto_retry_enabled !== false) {
+        const attempted = Number(autoRetryMeta.attempted_count || 0);
+        const accepted = Number(autoRetryMeta.accepted_count || 0);
+        const remaining = Number(autoRetryMeta.remaining_retry_count || 0);
+        let autoRetryLabel = attempted > 0
+            ? `자동 재작성 ${attempted}회 · 채택 ${accepted}`
+            : "자동 재작성 0회";
+        if (remaining > 0) {
+            autoRetryLabel += ` · 미해결 ${remaining}`;
+        }
+        parts.push(autoRetryLabel);
+    }
+
+    if (escalationMeta.enabled) {
+        const attempted = Number(escalationMeta.attempted_count || 0);
+        const accepted = Number(escalationMeta.accepted_count || 0);
+        const remaining = Number(escalationMeta.remaining_retry_count || 0);
+        const sourceModelLabel = String(escalationMeta.source_model || meta.model || "").trim();
+        const targetModelLabel = String(escalationMeta.target_model || meta.final_model || "").trim();
+
+        if (escalationMeta.triggered || attempted > 0) {
+            const modelPair = sourceModelLabel && targetModelLabel && sourceModelLabel !== targetModelLabel
+                ? `${sourceModelLabel} -> ${targetModelLabel}`
+                : (targetModelLabel || sourceModelLabel || "상위 모델");
+            let escalationLabel = `모델 승격 ${modelPair}`;
+            if (attempted > 0 || accepted > 0) {
+                escalationLabel += ` · 채택 ${accepted}`;
+            }
+            if (remaining > 0) {
+                escalationLabel += ` · 미해결 ${remaining}`;
+            }
+            parts.push(escalationLabel);
+        } else {
+            parts.push("모델 승격 없음");
+        }
+    }
+
+    return parts.join(separator);
+}
+
+function buildTitleGenerationHistorySummary(meta, separator = " / ") {
+    const modelSummary = buildTitleGenerationModelSummary(meta, separator);
+    const retrySummary = buildTitleGenerationRetrySummary(meta, separator);
+    return [modelSummary, retrySummary].filter(Boolean).join(separator);
+}
+
+function formatTitleAutoRetryStat(meta) {
+    if (!meta || typeof meta !== "object") {
+        return "0회";
+    }
+    const usedMode = String(meta.used_mode || "").trim();
+    if (!usedMode.includes("ai") || meta.auto_retry_enabled === false) {
+        return "꺼짐";
+    }
+    return `${Number(meta.auto_retry?.attempted_count || 0)}회`;
+}
+
+function formatTitleModelEscalationStat(meta) {
+    if (!meta || typeof meta !== "object") {
+        return "0회";
+    }
+    const escalationMeta = meta.model_escalation && typeof meta.model_escalation === "object" ? meta.model_escalation : {};
+    if (!escalationMeta.enabled) {
+        return "0회";
+    }
+    const attempted = Number(escalationMeta.attempted_count || 0);
+    if (escalationMeta.triggered || attempted > 0) {
+        return `${Math.max(1, attempted)}회`;
+    }
+    return "0회";
 }
 
 function buildGeneratedTitleModeSummary(meta, items) {

@@ -32,9 +32,10 @@ TITLE_PRESETS: tuple[TitlePreset, ...] = (
             "Preset focus:\n"
             "- Use mixed issue sourcing as the default operating mode: combine news or official update signals with selected community reaction cues.\n"
             "- Keep titles grounded in timely evidence, but do not overfit to noisy community chatter.\n"
-            "- For naver_home titles, prefer one stable issue or update angle and one calm comparison, checkpoint, or reversal angle.\n"
+            "- For naver_home titles, prefer one stable issue or update angle and one calm 기준, 포인트, 흐름, or reversal angle.\n"
             "- When community reaction and news signals conflict, favor the safer and more verifiable framing.\n"
             "- Keep wording editorial, specific, and useful rather than provocative.\n"
+            "- Do not overuse checklist, checkpoint, or comparison skeletons across the same batch.\n"
             "- In YMYL areas, keep hedged wording and avoid turning reaction noise into certainty."
         ),
     ),
@@ -98,7 +99,8 @@ TITLE_PRESETS: tuple[TitlePreset, ...] = (
         prompt_guidance=(
             "Preset focus:\n"
             "- Balance strict keyword preservation with natural editorial phrasing.\n"
-            "- Prefer concrete search-intent wording such as comparison, checklist, review, update, and decision point.\n"
+            "- Prefer concrete search-intent wording such as review, update, decision point, 기준, 포인트, 흐름, and use case.\n"
+            "- Avoid leaning on checklist or comparison skeletons unless the keyword clearly demands them.\n"
             "- Keep titles commercially useful without sounding like boilerplate SEO filler."
         ),
     ),
@@ -127,7 +129,10 @@ TITLE_PRESETS: tuple[TitlePreset, ...] = (
             "Preset focus:\n"
             "- Generate clean first-pass titles quickly.\n"
             "- Use direct phrasing and avoid long, winding clauses.\n"
-            "- Keep variation visible, but stay conservative on risky creativity."
+            "- Keep variation visible, but stay conservative on risky creativity.\n"
+            "- Put the keyword at the front whenever natural.\n"
+            "- Avoid vague skeletons such as 최신 정보, 업데이트 확인, 구매 가이드, 사용 후기, 추천 기준, 체크리스트, or bare 비교 when the keyword does not explicitly demand them.\n"
+            "- Prefer concrete user-facing wording such as 실사용 차이, 장단점, 성능, 사용감, 세팅, 가격대, 추천 대상, and 선택 포인트."
         ),
     ),
     TitlePreset(
@@ -141,7 +146,10 @@ TITLE_PRESETS: tuple[TitlePreset, ...] = (
             "Preset focus:\n"
             "- Generate clean first-pass titles quickly.\n"
             "- Use direct phrasing and avoid long, winding clauses.\n"
-            "- Keep variation visible, but stay conservative on risky creativity."
+            "- Keep variation visible, but stay conservative on risky creativity.\n"
+            "- Put the keyword at the front whenever natural.\n"
+            "- Avoid vague skeletons such as 최신 정보, 업데이트 확인, 구매 가이드, 사용 후기, 추천 기준, 체크리스트, or bare 비교 when the keyword does not explicitly demand them.\n"
+            "- Prefer concrete user-facing wording such as 실사용 차이, 장단점, 성능, 사용감, 세팅, 가격대, 추천 대상, and 선택 포인트."
         ),
     ),
     TitlePreset(

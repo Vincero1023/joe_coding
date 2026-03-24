@@ -41,6 +41,63 @@ _ALL_INTENT_TERMS = {
 _STOPWORDS = {"추천", "비교", "정리", "가이드", "방법", "사용법", "뜻", "의미"}
 _PROFITABILITY_ORDER = ["A", "B", "C", "D"]
 _ATTACKABILITY_ORDER = ["1", "2", "3", "4"]
+_LOW_SIGNAL_LONGTAIL_PATTERNS = (
+    "추천 기준",
+    "고를 때 체크",
+    "비교 포인트",
+    "최신 정보",
+)
+_LOW_SIGNAL_LONGTAIL_KEYS = tuple(
+    normalize_key(pattern) for pattern in _LOW_SIGNAL_LONGTAIL_PATTERNS if normalize_key(pattern)
+)
+_DEVICE_TOPIC_TOKENS = {
+    "마우스",
+    "키보드",
+    "모니터",
+    "이어폰",
+    "헤드셋",
+    "노트북",
+    "태블릿",
+    "블루투스",
+    "스피커",
+    "충전기",
+    "충전독",
+    "웨어러블",
+}
+_FINANCE_TOPIC_TOKENS = {
+    "보험",
+    "카드",
+    "대출",
+    "적금",
+    "예금",
+    "청약",
+    "연금",
+    "세금",
+}
+_DEFAULT_CONCRETE_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "general": ("실사용 차이", "장단점", "자주 생기는 문제"),
+    "commercial": ("선택 포인트", "실사용 차이", "장단점"),
+    "review": ("실사용 장단점", "체감 차이", "불편한 점"),
+    "action": ("막히는 이유", "설정 방법", "주의점"),
+    "info": ("자주 생기는 문제", "설정 팁", "주의점"),
+    "location": ("가는 방법", "대기 시간", "주의점"),
+    "policy": ("놓치기 쉬운 조건", "자주 묻는 질문", "바뀐 점"),
+}
+_DEVICE_CONCRETE_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "general": ("실사용 차이", "장단점", "설정 팁"),
+    "commercial": ("선택 포인트", "실사용 차이", "장단점"),
+    "review": ("실사용 장단점", "체감 차이", "불편한 점"),
+    "action": ("연결 문제", "설정 방법", "주의점"),
+    "info": ("자주 생기는 문제", "연결 문제", "설정 팁"),
+}
+_FINANCE_CONCRETE_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "general": ("조건 차이", "주의점", "자주 묻는 질문"),
+    "commercial": ("보장 차이", "조건 차이", "선택 포인트"),
+    "review": ("실제 후기 포인트", "불편한 점", "장단점"),
+    "action": ("막히는 이유", "신청 방법", "주의점"),
+    "info": ("바뀐 점", "주의점", "자주 묻는 질문"),
+    "policy": ("놓치기 쉬운 조건", "바뀐 점", "주의점"),
+}
 
 
 def build_longtail_map(
@@ -346,7 +403,17 @@ def _build_longtail_candidates(
     return normalized_candidates
 
 
-def _build_general_longtail_candidates(base_phrase: str, normalized_modifier: str) -> list[str]:
+def _build_general_longtail_candidates(
+    base_phrase: str,
+    normalized_modifier: str,
+    representative_keyword: str = "",
+) -> list[str]:
+    return _build_concrete_longtail_candidates(
+        base_phrase,
+        normalized_modifier,
+        representative_keyword=representative_keyword or base_phrase,
+        intent_key="general",
+    )
     base_phrase = normalize_text(base_phrase)
     normalized_modifier = normalize_text(normalized_modifier)
     if not base_phrase:
@@ -363,6 +430,86 @@ def _build_general_longtail_candidates(base_phrase: str, normalized_modifier: st
         f"{base_phrase} 비교 포인트",
         f"{base_phrase} 고를 때 체크",
     ]
+
+
+def is_low_signal_longtail_keyword(keyword: Any) -> bool:
+    keyword_key = normalize_key(normalize_text(keyword))
+    if not keyword_key:
+        return False
+    return any(pattern in keyword_key for pattern in _LOW_SIGNAL_LONGTAIL_KEYS)
+
+
+def rewrite_low_signal_longtail_suggestion(
+    suggestion: dict[str, Any],
+    *,
+    limit: int = 2,
+) -> list[dict[str, Any]]:
+    if not isinstance(suggestion, dict):
+        return []
+    if not is_low_signal_longtail_keyword(suggestion.get("longtail_keyword")):
+        return [suggestion]
+
+    representative_keyword = normalize_text(suggestion.get("representative_keyword"))
+    source_keyword = normalize_text(suggestion.get("source_keyword"))
+    base_phrase = normalize_text(suggestion.get("base_phrase")) or representative_keyword or source_keyword
+    modifier_phrase = normalize_text(suggestion.get("modifier_phrase"))
+    intent_key = str(suggestion.get("intent_key") or "").strip().lower() or _resolve_intent_key(source_keyword or representative_keyword)
+    candidates = _build_concrete_longtail_candidates(
+        base_phrase,
+        modifier_phrase,
+        representative_keyword=representative_keyword or base_phrase,
+        intent_key=intent_key,
+    )
+
+    rewritten: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        candidate_key = normalize_key(candidate)
+        if not candidate_key or candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        rewritten.append(
+            {
+                **suggestion,
+                "longtail_keyword": candidate,
+                "combination_terms": [
+                    term
+                    for term in [representative_keyword, source_keyword, modifier_phrase]
+                    if normalize_text(term)
+                ],
+                "verification_reason": "템플릿형 롱테일을 구체적인 글감 키워드로 치환했습니다.",
+            }
+        )
+        if len(rewritten) >= max(1, int(limit)):
+            break
+
+    return rewritten or [suggestion]
+
+
+def _build_concrete_longtail_candidates(
+    base_phrase: str,
+    normalized_modifier: str,
+    *,
+    representative_keyword: str,
+    intent_key: str,
+) -> list[str]:
+    base_phrase = normalize_text(base_phrase) or normalize_text(representative_keyword)
+    normalized_modifier = normalize_text(normalized_modifier)
+    if not base_phrase:
+        return []
+
+    prefix = normalize_text(" ".join(part for part in [base_phrase, normalized_modifier] if normalize_text(part)))
+    suffixes = _resolve_concrete_suffixes(prefix or base_phrase, intent_key=intent_key)
+    return [f"{prefix or base_phrase} {suffix}".strip() for suffix in suffixes]
+
+
+def _resolve_concrete_suffixes(keyword: str, *, intent_key: str) -> tuple[str, ...]:
+    keyword_key = normalize_key(keyword)
+    if any(token in keyword_key for token in _FINANCE_TOPIC_TOKENS):
+        return _FINANCE_CONCRETE_SUFFIXES.get(intent_key) or _FINANCE_CONCRETE_SUFFIXES["general"]
+    if any(token in keyword_key for token in _DEVICE_TOPIC_TOKENS):
+        return _DEVICE_CONCRETE_SUFFIXES.get(intent_key) or _DEVICE_CONCRETE_SUFFIXES["general"]
+    return _DEFAULT_CONCRETE_SUFFIXES.get(intent_key) or _DEFAULT_CONCRETE_SUFFIXES["general"]
 
 
 def _build_optional_suffix_candidates(

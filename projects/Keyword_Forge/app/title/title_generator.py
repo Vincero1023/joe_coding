@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from app.expander.utils.tokenizer import normalize_text
+from app.expander.utils.tokenizer import normalize_key, normalize_text
 from app.title.ai_client import TitleGenerationOptions, TitleProviderError, request_ai_titles
 from app.title.category_detector import detect_category
 from app.title.quality import TITLE_QUALITY_PASS_SCORE, enrich_title_results
@@ -28,6 +28,37 @@ _MODEL_ESCALATION_MAP: dict[str, dict[str, str]] = {
         "claude-haiku-4-5": "claude-sonnet-4-6",
     },
 }
+_PRACTICAL_RESCUE_KIND_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("preorder", ("사전예약방법", "사전예약전체크포인트", "사전예약전체크포인트")),
+    ("setting", ("설정팁", "설정방법", "연결방법")),
+    ("real_use", ("실사용차이",)),
+    ("pros_cons", ("장단점",)),
+    ("problem", ("자주생기는문제", "연결문제", "문제")),
+)
+_PRODUCT_CATEGORY_KEYS = {"product"}
+_PRODUCT_RESCUE_KEY_PATTERNS = (
+    "마우스",
+    "키보드",
+    "노트북",
+    "맥북",
+    "아이패드",
+    "아이폰",
+    "갤럭시",
+    "이어폰",
+    "헤드셋",
+    "모니터",
+    "태블릿",
+    "스피커",
+    "웹캠",
+    "프린터",
+    "카메라",
+    "공유기",
+    "와이파이",
+    "블루투스",
+    "유니파잉",
+    "dpi",
+    "버튼",
+)
 
 
 def generate_titles(
@@ -345,9 +376,15 @@ def _auto_retry_low_quality_results(
         retry_candidates=retried_by_keyword,
     )
     retry_enriched_results, quality_summary = enrich_title_results(retry_results)
+    retry_results, retry_enriched_results, quality_summary, accepted_rescue_keywords = _apply_practical_rescue_candidates(
+        current_results=retry_results,
+        current_enriched_results=retry_enriched_results,
+        original_items_by_keyword=original_items_by_keyword,
+        retry_threshold=retry_threshold,
+    )
     auto_retry_meta = _build_auto_retry_meta(
         attempted_keywords=retry_keywords,
-        accepted_keywords=accepted_retry_keywords,
+        accepted_keywords=accepted_retry_keywords + accepted_rescue_keywords,
         remaining_retry_count=int(quality_summary.get("retry_count", 0)),
         error_messages=retry_error_messages,
         retry_threshold=retry_threshold,
@@ -410,6 +447,8 @@ def _should_accept_retry(current_report: dict[str, Any], retry_report: dict[str,
         return True
     if current_retry and not retry_retry:
         return True
+    if current_retry and retry_retry:
+        return False
     if retry_score >= current_score + 4:
         return True
     return retry_score >= current_score and retry_issue_count < current_issue_count
@@ -419,6 +458,7 @@ def _build_quality_retry_prompt(existing_prompt: str, retry_threshold: int) -> s
     retry_guidance = (
         "Quality retry guidance:\n"
         "- Keep the exact keyword at the front of each title when natural.\n"
+        "- Do not shorten the keyword phrase. If the keyword starts with descriptive words, keep them all.\n"
         "- Keep the home-feed pair issue-aware: usually make one title issue/update + comparison/debate and the other title issue/update + reversal/question.\n"
         "- Make the 2 naver_home titles clearly different from each other.\n"
         "- Make the 2 blog titles clearly different from each other.\n"
@@ -426,6 +466,12 @@ def _build_quality_retry_prompt(existing_prompt: str, retry_threshold: int) -> s
         "- Avoid exaggerated words such as 무조건, 충격, 레전드, 미쳤다, 대박.\n"
         "- Do not invent unsupported dates, numbers, rankings, or official changes just to sound current.\n"
         "- Avoid stale filler such as 완벽 정리, 한 번에 정리, 갑자기 바뀌었다, 이유가 이상하다, 놓치면 손해.\n"
+        "- Across the same retry batch, do not keep reusing skeletons such as 뭐가 다를까, 체크리스트, 고를 때, 추천 기준, or 비교 포인트.\n"
+        "- Do not use low-information endings such as 최신 정보, 업데이트 확인, 왜 인기, 이것만 알면, 구매 가이드, 사용 후기, 신상, or a bare 비교.\n"
+        "- If the keyword already carries concrete intent such as 실사용 차이, 장단점, 설정 팁, 연결 방법, 연결 문제, or 자주 생기는 문제, do not wrap it with 최신 비교 분석, 총정리, 완벽 가이드, 최신 정보, 이것만 알면, or 꼭 알아두세요.\n"
+        "- For real-use keywords, prefer timeframe, user type, grip, weight, click feel, battery, workflow, or device-fit nouns.\n"
+        "- For setup or problem keywords, prefer one symptom plus one cause, fix, result, or environment such as 맥북, 윈도우, 블루투스, 유니파잉, 연결 끊김, 더블클릭, or 인식 안됨.\n"
+        "- Replace abstract meta words with concrete difference, use-case, fit, pain point, setup, price, or performance nouns.\n"
         f"- Aim for a bundle quality score of at least {retry_threshold}."
     )
     base_prompt = str(existing_prompt or "").strip()
@@ -439,10 +485,238 @@ def _build_model_escalation_prompt(existing_prompt: str, retry_threshold: int) -
         "Model escalation guidance:\n"
         "- This is the rescue pass after two failed quality attempts.\n"
         "- Prefer the safest clean structure over forced novelty.\n"
-        "- If the issue angle is weak, choose a cleaner comparison, checklist, update, or decision-point frame.\n"
+        "- If the issue angle is weak, choose a cleaner difference, use-case, fit, setup, or decision frame instead of a generic guide/checklist label.\n"
+        "- If the batch still feels templated, change the whole headline skeleton instead of swapping one noun.\n"
         "- Keep every title clearly distinct without drifting away from the keyword intent."
     )
     return f"{_build_quality_retry_prompt(existing_prompt, retry_threshold)}\n\n{escalation_guidance}"
+
+
+def _apply_practical_rescue_candidates(
+    *,
+    current_results: list[TitleOutputItem],
+    current_enriched_results: list[TitleOutputItem],
+    original_items_by_keyword: dict[str, TitleOutputItem],
+    retry_threshold: int,
+) -> tuple[list[TitleOutputItem], list[TitleOutputItem], dict[str, Any], list[str]]:
+    rescue_keywords = [
+        normalize_text(item.get("keyword"))
+        for item in current_enriched_results
+        if _should_retry_for_quality(item.get("quality_report", {}), retry_threshold)
+    ]
+    rescue_keywords = [keyword for keyword in rescue_keywords if keyword]
+    if not rescue_keywords:
+        quality_summary = _build_quality_summary_from_items(current_enriched_results)
+        return current_results, current_enriched_results, quality_summary, []
+
+    rescue_candidates: dict[str, TitleOutputItem] = {}
+    for keyword in rescue_keywords:
+        source_item = original_items_by_keyword.get(keyword, {"keyword": keyword})
+        rescue_item = _build_practical_rescue_item(source_item)
+        if rescue_item:
+            rescue_candidates[keyword] = rescue_item
+
+    if not rescue_candidates:
+        quality_summary = _build_quality_summary_from_items(current_enriched_results)
+        return current_results, current_enriched_results, quality_summary, []
+
+    rescued_results, accepted_rescue_keywords = _merge_retry_candidates(
+        current_results=current_results,
+        current_enriched_results=current_enriched_results,
+        retry_candidates=rescue_candidates,
+    )
+    rescued_enriched_results, quality_summary = enrich_title_results(rescued_results)
+    return rescued_results, rescued_enriched_results, quality_summary, accepted_rescue_keywords
+
+
+def _build_practical_rescue_item(item: dict[str, Any]) -> TitleOutputItem | None:
+    keyword = normalize_text(item.get("keyword"))
+    keyword_key = normalize_key(keyword)
+    if not keyword or not keyword_key:
+        return None
+
+    rescue_kind = _resolve_practical_rescue_kind(keyword_key)
+    if not rescue_kind:
+        return None
+
+    category = detect_category(keyword)
+    naver_suffixes, blog_suffixes = _resolve_practical_rescue_suffixes(
+        keyword=keyword,
+        rescue_kind=rescue_kind,
+        category=category,
+    )
+    return {
+        **_strip_generated_fields(item),
+        "keyword": keyword,
+        "titles": {
+            "naver_home": [f"{keyword}, {suffix}" for suffix in naver_suffixes[:2]],
+            "blog": [f"{keyword} {suffix}" for suffix in blog_suffixes[:2]],
+        },
+    }
+
+
+def _resolve_practical_rescue_kind(keyword_key: str) -> str:
+    for rescue_kind, patterns in _PRACTICAL_RESCUE_KIND_PATTERNS:
+        if any(pattern in keyword_key for pattern in patterns):
+            return rescue_kind
+    return ""
+
+
+def _resolve_practical_rescue_suffixes(
+    *,
+    keyword: str,
+    rescue_kind: str,
+    category: str,
+) -> tuple[list[str], list[str]]:
+    seed = _stable_rescue_seed(keyword)
+    use_product_rescue = category in _PRODUCT_CATEGORY_KEYS or _looks_product_like_keyword(keyword)
+    if rescue_kind == "setting":
+        return _rotate_rescue_pair(
+            [
+                (
+                    ["블루투스 연결부터 끝내기", "버튼·감도 설정 보기"],
+                    ["블루투스 연결 순서와 점검 포인트", "버튼·감도 세팅 체크"],
+                ),
+                (
+                    ["연결 오류 줄이는 순서", "처음 세팅할 때 볼 포인트"],
+                    ["연결 오류 줄이는 세팅 방법", "처음 설정할 때 막히는 부분 정리"],
+                ),
+                (
+                    ["자주 막히는 설정부터 끝내기", "실수 줄이는 체크포인트"],
+                    ["설정 순서와 체크포인트", "실수 줄이는 세팅 방법"],
+                ),
+            ],
+            seed,
+        ) if use_product_rescue else _rotate_rescue_pair(
+            [
+                (
+                    ["자주 막히는 설정부터 끝내기", "실수 줄이는 체크포인트"],
+                    ["설정 순서와 체크포인트", "실수 줄이는 설정 방법"],
+                ),
+                (
+                    ["처음 세팅할 때 볼 포인트", "내게 맞는 기준 찾기"],
+                    ["처음 설정할 때 막히는 부분 정리", "내게 맞는 설정 기준 정리"],
+                ),
+                (
+                    ["초기 설정부터 점검", "문제 줄이는 순서"],
+                    ["초기 설정 순서와 점검 포인트", "문제 줄이는 설정 체크"],
+                ),
+            ],
+            seed,
+        )
+
+    if rescue_kind == "real_use":
+        return _rotate_rescue_pair(
+            [
+                (
+                    ["그립감과 무게 체감", "장시간 사용 차이"],
+                    ["그립감·무게·버튼감 비교", "장시간 사용 기준으로 본 체감"],
+                ),
+                (
+                    ["버튼감과 사용 피로", "업무용/게임용 체감"],
+                    ["버튼감·사용 피로 비교", "업무용/게임용 기준으로 본 체감"],
+                ),
+                (
+                    ["직접 써본 기준", "손에 남는 차이"],
+                    ["직접 써본 기준 정리", "사용 환경별 체감 비교"],
+                ),
+            ],
+            seed,
+        ) if use_product_rescue else _rotate_rescue_pair(
+            [
+                (
+                    ["장시간 사용 체감", "상황별 체감은 어땠나"],
+                    ["장시간 사용 기준으로 본 체감", "상황별 체감 차이 정리"],
+                ),
+                (
+                    ["사용 환경별 체감", "직접 써본 기준"],
+                    ["사용 환경별 체감 비교", "직접 써본 기준 정리"],
+                ),
+                (
+                    ["몸에 남는 차이", "생활 동선 체감"],
+                    ["몸에 남는 차이 정리", "생활 동선 기준으로 본 체감"],
+                ),
+            ],
+            seed,
+        )
+
+    if rescue_kind == "pros_cons":
+        return _rotate_rescue_pair(
+            [
+                (
+                    ["그립감과 아쉬운 점", "장시간 사용 기준"],
+                    ["그립감과 아쉬운 점 정리", "장시간 사용 기준으로 본 장단점"],
+                ),
+                (
+                    ["좋았던 점과 불편한 점", "누가 쓰면 맞을까"],
+                    ["좋았던 점과 불편한 점 정리", "누가 쓰면 맞는지 기준 정리"],
+                ),
+                (
+                    ["실사용 기준 장단점", "선택 전에 볼 포인트"],
+                    ["실사용 기준 장단점 정리", "선택 전에 볼 포인트 정리"],
+                ),
+            ],
+            seed,
+        )
+
+    if rescue_kind == "problem":
+        return _rotate_rescue_pair(
+            [
+                (
+                    ["원인부터 점검", "해결 순서 바로 보기"],
+                    ["원인·해결·예방 정리", "증상별 점검 순서"],
+                ),
+                (
+                    ["문제 생겼을 때 먼저 볼 것", "재발 막는 체크포인트"],
+                    ["문제 생겼을 때 먼저 볼 것 정리", "재발 막는 점검 포인트"],
+                ),
+                (
+                    ["증상별 원인 확인", "해결 전에 볼 체크포인트"],
+                    ["증상별 원인과 해결 순서", "해결 전에 볼 체크포인트 정리"],
+                ),
+            ],
+            seed,
+        )
+
+    return _rotate_rescue_pair(
+        [
+            (
+                ["일정과 링크 확인", "실수 없이 진행하는 순서"],
+                ["준비물과 신청 순서", "놓치기 쉬운 일정 체크"],
+            ),
+            (
+                ["신청 순서부터 보기", "마감 전에 볼 포인트"],
+                ["일정·링크·준비물 정리", "신청 전에 꼭 볼 체크"],
+            ),
+            (
+                ["준비물부터 체크", "실수 줄이는 진행 순서"],
+                ["준비물과 진행 순서 정리", "놓치기 쉬운 체크포인트 정리"],
+            ),
+        ],
+        seed,
+    )
+
+
+def _rotate_rescue_pair(
+    options: list[tuple[list[str], list[str]]],
+    seed: int,
+) -> tuple[list[str], list[str]]:
+    if not options:
+        return [], []
+    index = seed % len(options)
+    naver_home, blog = options[index]
+    return list(naver_home), list(blog)
+
+
+def _stable_rescue_seed(keyword: str) -> int:
+    return sum((index + 1) * ord(character) for index, character in enumerate(keyword))
+
+
+def _looks_product_like_keyword(keyword: str) -> bool:
+    keyword_key = normalize_key(keyword)
+    if not keyword_key:
+        return False
+    return any(pattern in keyword_key for pattern in _PRODUCT_RESCUE_KEY_PATTERNS)
 
 
 def _build_quality_summary_from_items(items: list[TitleOutputItem]) -> dict[str, Any]:

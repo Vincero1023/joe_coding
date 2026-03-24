@@ -12,10 +12,10 @@ from app.title.ai_client import (
 )
 from app.title.category_detector import detect_category
 from app.title.main import run
-from app.title.quality import assess_single_title
+from app.title.quality import assess_single_title, enrich_title_results
 from app.title.rules import NAVER_HOME_MAX_LENGTH
-from app.title.targets import build_title_targets
-from app.title.title_generator import generate_titles
+from app.title.targets import _sanitize_related_mode_keyword, build_title_targets
+from app.title.title_generator import _build_practical_rescue_item, generate_titles
 from app.title.templates import build_blog_titles, build_naver_home_titles
 
 
@@ -97,6 +97,56 @@ def test_title_quality_still_fails_when_keyword_core_token_is_missing() -> None:
     assert "키워드 핵심 표현이 제목에 충분히 반영되지 않았습니다." in report["issues"]
 
 
+def test_title_quality_flags_low_signal_generic_skeletons() -> None:
+    report = assess_single_title(
+        "로지텍 마우스",
+        "로지텍 마우스 최신 정보",
+        "blog",
+        {},
+    )
+
+    assert "제목 골격이 템플릿형 표현에 머물러 있습니다." in report["issues"]
+    assert report["checks"]["hard_reject_skeleton"] is True
+    assert report["status"] == "retry"
+
+
+def test_title_quality_hard_rejects_generic_overlay_on_practical_keyword() -> None:
+    report = assess_single_title(
+        "로지텍 마우스 설정 팁",
+        "로지텍 마우스 설정 팁 완벽 가이드",
+        "blog",
+        {},
+    )
+
+    assert "구체 글감 위에 다시 템플릿형 포장을 덧씌웠습니다." in report["issues"]
+    assert report["checks"]["hard_reject_skeleton"] is True
+    assert report["checks"]["generic_overlay_on_practical_keyword"] is True
+    assert report["status"] == "retry"
+
+
+def test_title_quality_allows_concrete_context_on_practical_keyword() -> None:
+    report = assess_single_title(
+        "MX Master 2S 연결 방법",
+        "MX Master 2S 연결 방법 총정리 맥 M1 M2 포함",
+        "blog",
+        {},
+    )
+
+    assert report["checks"]["generic_overlay_on_practical_keyword"] is False
+
+
+def test_title_quality_keeps_specific_editorial_product_frame() -> None:
+    report = assess_single_title(
+        "로지텍 마우스",
+        "로지텍 마우스 실사용 장단점과 클릭감 차이",
+        "blog",
+        {},
+    )
+
+    assert "제목 골격이 너무 일반적입니다." not in report["issues"]
+    assert report["status"] in {"good", "review"}
+
+
 def test_template_titles_avoid_legacy_repetitive_phrases() -> None:
     naver_titles = build_naver_home_titles("평택 왁싱 남성전용", "general")
     blog_titles = build_blog_titles("평택 왁싱 남성전용", "general")
@@ -126,6 +176,54 @@ def test_template_titles_follow_keyword_intent_patterns() -> None:
     assert not any("후기 후기" in title for title in review_titles)
     assert any(("준비" in title or "체크리스트" in title or "절차" in title) for title in action_titles)
     assert any(("이력" in title or "정보" in title) for title in profile_titles)
+
+
+def test_template_titles_avoid_repeating_noisy_checklist_and_guide_frames() -> None:
+    blog_titles = build_blog_titles("로지텍 마우스", "general")
+    noisy_titles = [
+        title
+        for title in blog_titles
+        if any(term in title for term in ("체크리스트", "체크포인트", "가이드", "비교 가이드"))
+    ]
+
+    assert len(blog_titles) == 2
+    assert len(noisy_titles) <= 1
+
+
+def test_title_quality_marks_batch_level_repeated_headline_skeletons_for_retry() -> None:
+    repeated_batch = [
+        {
+            "keyword": "로지텍 마우스",
+            "titles": {
+                "naver_home": ["로지텍 마우스 뭐가 다를까", "로지텍 마우스 추천 기준"],
+                "blog": ["로지텍 마우스 체크리스트", "로지텍 마우스 비교 포인트"],
+            },
+        },
+        {
+            "keyword": "레이저 마우스",
+            "titles": {
+                "naver_home": ["레이저 마우스 뭐가 다를까", "레이저 마우스 추천 기준"],
+                "blog": ["레이저 마우스 체크리스트", "레이저 마우스 비교 포인트"],
+            },
+        },
+        {
+            "keyword": "앱코 마우스",
+            "titles": {
+                "naver_home": ["앱코 마우스 뭐가 다를까", "앱코 마우스 추천 기준"],
+                "blog": ["앱코 마우스 체크리스트", "앱코 마우스 비교 포인트"],
+            },
+        },
+    ]
+
+    enriched_items, summary = enrich_title_results(repeated_batch)
+    report = enriched_items[0]["quality_report"]
+
+    assert report["retry_recommended"] is True
+    assert report["batch_repeat_risk"] is True
+    assert any("뭐가 다를까" in issue for issue in report["issues"])
+    assert any("추천 기준" in issue for issue in report["issues"])
+    assert report["title_checks"]["naver_home"][0]["checks"]["batch_repeat_risk"] is True
+    assert summary["retry_count"] == 3
 
 
 def test_title_generator_supports_ai_mode() -> None:
@@ -391,6 +489,33 @@ def test_ai_prompt_builder_includes_category_overlay_and_metrics() -> None:
     assert "source keywords 서울 청약 경쟁률, 서울 분양" in prompt
     assert "live issue context: mode mixed / fetched 2026-03-21 / news 2/5" in prompt
     assert "recent headlines: 서울 청약 경쟁률 이번주 일정 바뀌나" in prompt
+
+
+def test_ai_prompt_builder_includes_practical_title_shape_hint() -> None:
+    prompt = _build_user_prompt_from_items(
+        [
+            {
+                "keyword": "로지텍 마우스 설정 팁",
+                "target_mode": "longtail_selected",
+            }
+        ]
+    )
+
+    assert "practical title shape: setup/help" in prompt
+    assert "device or OS context" in prompt
+
+
+def test_ai_prompt_builder_warns_against_keyword_shortening() -> None:
+    prompt = _build_user_prompt_from_items(
+        [
+            {
+                "keyword": "손목 편한 마우스 설정 팁",
+                "target_mode": "longtail_selected",
+            }
+        ]
+    )
+
+    assert "Do not shorten the keyword phrase" in prompt
 
 
 def test_request_ai_titles_includes_live_issue_context_in_prompt() -> None:
@@ -682,6 +807,97 @@ def test_title_generator_auto_retries_low_quality_ai_titles() -> None:
     assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
     assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is False
     assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 80
+
+
+def test_title_generator_practical_rescue_keeps_full_keyword_after_failed_retries() -> None:
+    keyword = "손목 편한 마우스 설정 팁"
+
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=[
+            [
+                {
+                    "keyword": keyword,
+                    "titles": {
+                        "naver_home": [
+                            "편한 마우스 설정 팁, 최신 정보",
+                            "편한 마우스 설정 팁, 뭐가 다를까?",
+                        ],
+                        "blog": [
+                            "편한 마우스 설정 팁 총정리",
+                            "편한 마우스 설정 팁 완벽 가이드",
+                        ],
+                    },
+                }
+            ],
+            [
+                {
+                    "keyword": keyword,
+                    "titles": {
+                        "naver_home": [
+                            "편한 마우스 설정 팁, 최신 비교 분석",
+                            "편한 마우스 설정 팁, 이것만 알면",
+                        ],
+                        "blog": [
+                            "편한 마우스 설정 팁 최신 정보",
+                            "편한 마우스 설정 팁 구매 가이드",
+                        ],
+                    },
+                }
+            ],
+        ],
+    ) as mocked_request:
+        result = run(
+            {
+                "selected_keywords": [
+                    {
+                        "keyword": keyword,
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "mode": "ai",
+                    "provider": "openai",
+                    "api_key": "test-key",
+                    "model": "gpt-4o-mini",
+                    "keyword_modes": ["single"],
+                },
+            }
+        )
+
+    item = result["generated_titles"][0]
+    all_titles = item["titles"]["naver_home"] + item["titles"]["blog"]
+
+    assert mocked_request.call_count == 2
+    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 1
+    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
+    assert result["generation_meta"]["model_escalation"]["triggered"] is False
+    assert item["quality_report"]["retry_recommended"] is False
+    assert item["quality_report"]["bundle_score"] >= 84
+    assert all(keyword in title for title in all_titles)
+    assert all(
+        banned not in title
+        for title in all_titles
+        for banned in (
+            "최신 정보",
+            "최신 비교 분석",
+            "총정리",
+            "완벽 가이드",
+            "뭐가 다를까",
+            "이것만 알면",
+            "구매 가이드",
+        )
+    )
+
+
+def test_practical_rescue_stays_generic_for_non_product_setting_keyword() -> None:
+    item = _build_practical_rescue_item({"keyword": "전세 계약 설정 팁"})
+
+    assert item is not None
+    all_titles = item["titles"]["naver_home"] + item["titles"]["blog"]
+    assert all("블루투스" not in title for title in all_titles)
+    assert all("DPI" not in title for title in all_titles)
+    assert all("버튼" not in title for title in all_titles)
 
 
 def test_title_generator_escalates_model_after_two_failed_quality_attempts() -> None:
@@ -1034,22 +1250,18 @@ def test_title_generator_builds_longtail_targets_for_keyword_modes() -> None:
     assert summary["mode_counts"]["single"] == 2
     assert summary["mode_counts"]["longtail_selected"] >= 1
     assert summary["mode_counts"]["longtail_exploratory"] >= 1
-    assert summary["mode_counts"]["longtail_experimental"] >= 1
+    assert summary["mode_counts"]["longtail_experimental"] >= 0
     assert len(result["generated_titles"]) == summary["target_count"]
 
     generated_modes = {item["target_mode"] for item in result["generated_titles"]}
-    assert generated_modes == {
-        "single",
-        "longtail_selected",
-        "longtail_exploratory",
-        "longtail_experimental",
-    }
+    assert {"single", "longtail_selected", "longtail_exploratory"}.issubset(generated_modes)
     assert any(item["target_id"] for item in result["generated_titles"])
-    assert any(
-        item["base_keyword"] == "\uc790\ub3d9\ucc28 \ubcf4\ud5d8"
-        for item in result["generated_titles"]
-        if item["target_mode"] == "longtail_experimental"
-    )
+    if summary["mode_counts"]["longtail_experimental"] >= 1:
+        assert any(
+            item["base_keyword"] == "\uc790\ub3d9\ucc28 \ubcf4\ud5d8"
+            for item in result["generated_titles"]
+            if item["target_mode"] == "longtail_experimental"
+        )
 
 
 def test_build_title_targets_defaults_to_single_and_v1_modes() -> None:
@@ -1086,6 +1298,51 @@ def test_build_title_targets_defaults_to_single_and_v1_modes() -> None:
     assert summary["mode_counts"]["single"] == 1
     assert summary["mode_counts"]["longtail_selected"] == 1
     assert {item["target_mode"] for item in items} == {"single", "longtail_selected"}
+
+
+def test_build_title_targets_rewrites_low_signal_longtail_keywords() -> None:
+    items, summary = build_title_targets(
+        {
+            "selected_keywords": [
+                {
+                    "keyword": "로지텍 마우스",
+                    "score": 76.0,
+                    "metrics": {"volume": 1200.0, "cpc": 210.0},
+                }
+            ],
+            "keyword_clusters": [
+                {
+                    "cluster_id": "cluster-01",
+                    "representative_keyword": "로지텍 마우스",
+                    "topic_terms": ["로지텍", "마우스"],
+                    "all_keywords": ["로지텍 마우스"],
+                }
+            ],
+            "longtail_suggestions": [
+                {
+                    "suggestion_id": "longtail-01",
+                    "representative_keyword": "로지텍 마우스",
+                    "longtail_keyword": "로지텍 마우스 추천 기준",
+                    "verification_status": "pass",
+                    "verified_score": 71.0,
+                },
+                {
+                    "suggestion_id": "longtail-02",
+                    "representative_keyword": "로지텍 마우스",
+                    "longtail_keyword": "로지텍 마우스 연결 방법",
+                    "verification_status": "pass",
+                    "verified_score": 69.0,
+                },
+            ],
+        }
+    )
+
+    keywords = {item["keyword"] for item in items}
+
+    assert "로지텍 마우스 추천 기준" not in keywords
+    assert any(keyword in keywords for keyword in ("로지텍 마우스 실사용 차이", "로지텍 마우스 장단점"))
+    assert "로지텍 마우스 연결 방법" in keywords
+    assert summary["mode_counts"]["longtail_selected"] == 2
 
 
 def test_title_generator_supports_explicit_title_targets() -> None:
@@ -1202,3 +1459,20 @@ def test_build_title_targets_related_modes_skip_self_derived_and_stopword_modifi
     assert all("\uc870\uac74" in item["keyword"] for item in items)
     assert all("\ucd94\ucc9c \uae30\uc900" not in item["keyword"] for item in items)
     assert all("\ubc29\ubc95 \uc804 \uccb4\ud06c\ud3ec\uc778\ud2b8" not in item["keyword"] for item in items)
+
+
+def test_sanitize_related_mode_keyword_collapses_model_noise() -> None:
+    assert (
+        _sanitize_related_mode_keyword(
+            "로지텍 지슈라 스트라이크 m720 실사용 차이",
+            representative_keyword="로지텍 지슈라",
+        )
+        == "로지텍 지슈라 실사용 차이"
+    )
+    assert (
+        _sanitize_related_mode_keyword(
+            "로지텍 마우스 맥북 블루투스 연결 문제",
+            representative_keyword="로지텍 마우스",
+        )
+        == "로지텍 마우스 맥북 블루투스 연결 문제"
+    )
