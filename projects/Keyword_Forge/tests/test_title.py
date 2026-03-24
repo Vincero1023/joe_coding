@@ -1,5 +1,6 @@
 from unittest.mock import patch
 import csv
+import json
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -289,6 +290,79 @@ def test_enrich_title_results_sorts_best_titles_first_for_output() -> None:
     assert item["quality_report"]["title_checks"]["blog"][0]["status"] == "good"
 
 
+def test_title_quality_retries_unverified_freshness_claim_without_issue_context() -> None:
+    report = assess_single_title(
+        "로지텍 마우스",
+        "로지텍 마우스, 2주 실사용 후 장점은?",
+        "naver_home",
+        {},
+        item_context={
+            "keyword": "로지텍 마우스",
+            "target_mode": "single",
+            "source_kind": "selected_keyword",
+        },
+    )
+
+    assert report["status"] == "retry"
+    assert report["checks"]["unverified_freshness_claim"] is True
+
+
+def test_title_quality_allows_freshness_claim_when_issue_context_exists() -> None:
+    report = assess_single_title(
+        "서울 청약 경쟁률",
+        "서울 청약 경쟁률, 이번주 일정 바뀌나",
+        "naver_home",
+        {},
+        item_context={
+            "keyword": "서울 청약 경쟁률",
+            "target_mode": "single",
+            "issue_context": {
+                "query": "서울 청약 경쟁률",
+                "title_count": 1,
+            },
+        },
+    )
+
+    assert report["checks"]["unverified_freshness_claim"] is False
+
+
+def test_title_quality_normalizes_colon_style_and_flags_it() -> None:
+    report = assess_single_title(
+        "로지텍 마우스",
+        "로지텍 마우스：장단점 정리",
+        "naver_home",
+        {},
+    )
+
+    assert ":" not in report["title"]
+    assert "：" not in report["title"]
+    assert report["checks"]["forbidden_punctuation_used"] is True
+
+
+def test_enrich_title_results_strips_colons_from_output_titles() -> None:
+    enriched_items, _ = enrich_title_results(
+        [
+            {
+                "keyword": "닌텐도 스위치2 사전예약",
+                "titles": {
+                    "naver_home": [
+                        "닌텐도 스위치2 사전예약：오픈 시간 확인",
+                        "닌텐도 스위치2 사전예약:결제 조건 확인",
+                    ],
+                    "blog": [
+                        "닌텐도 스위치2 사전예약：오픈 시간·결제 조건 정리",
+                        "닌텐도 스위치2 사전예약:수령 일정과 인증 정리",
+                    ],
+                },
+            }
+        ]
+    )
+
+    item = enriched_items[0]
+    assert all(":" not in title and "：" not in title for title in item["titles"]["naver_home"])
+    assert all(":" not in title and "：" not in title for title in item["titles"]["blog"])
+
+
 def test_title_quality_keeps_specific_editorial_product_frame() -> None:
     report = assess_single_title(
         "로지텍 마우스",
@@ -473,6 +547,7 @@ def test_title_generator_exports_csv_by_default_when_enabled(tmp_path: Path) -> 
     artifact_path = Path(export_artifact["path"])
     assert artifact_path.exists()
     assert artifact_path.suffix == ".csv"
+    assert artifact_path.parent.name == "csv"
     assert export_artifact["category"] == "비즈니스경제"
     assert export_artifact["seed_keyword"] == "보험 추천"
     export_artifacts = result["generation_meta"]["export_artifacts"]
@@ -525,6 +600,45 @@ def test_title_generator_can_export_multiple_formats_when_requested(tmp_path: Pa
     markdown_text = markdown_path.read_text(encoding="utf-8")
     assert "# Title Export" in markdown_text
     assert "## 보험 추천" in markdown_text
+
+
+def test_title_generator_can_export_queue_txt_bundle_with_manifest(tmp_path: Path) -> None:
+    result = run(
+        {
+            "category": "비즈니스경제",
+            "seed_input": "보험 추천",
+            "selected_keywords": [
+                {
+                    "keyword": "보험 추천",
+                    "score": 1.0,
+                }
+            ],
+            "title_export": {
+                "enabled": True,
+                "output_dir": str(tmp_path),
+                "queue_export": {
+                    "enabled": True,
+                    "destination": "wordpress",
+                    "topic": "보험",
+                },
+            },
+        }
+    )
+
+    export_artifacts = result["generation_meta"]["export_artifacts"]
+    artifact_paths = {item["format"]: Path(item["path"]) for item in export_artifacts}
+    assert "txt_live" in artifact_paths
+    assert "txt_archive" in artifact_paths
+    assert "manifest_json" in artifact_paths
+    assert result["generation_meta"]["queue_export"]["destination"] == "wordpress"
+    assert artifact_paths["txt_live"].parent.name == "wordpress"
+    assert artifact_paths["txt_live"].read_text(encoding="utf-8").strip()
+    selected_title = result["generated_titles"][0]["titles"]["blog"][0]
+    assert selected_title in artifact_paths["txt_live"].read_text(encoding="utf-8")
+    manifest_payload = json.loads(artifact_paths["manifest_json"].read_text(encoding="utf-8"))
+    assert manifest_payload["destination"] == "wordpress"
+    assert manifest_payload["topic"] == "보험"
+    assert manifest_payload["entries"][0]["selected_title"] == selected_title
 
 
 def test_title_generation_options_keep_custom_system_prompt() -> None:

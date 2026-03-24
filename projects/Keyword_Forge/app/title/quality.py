@@ -12,6 +12,7 @@ from app.title.rules import NAVER_HOME_MAX_LENGTH
 TITLE_QUALITY_PASS_SCORE = 84
 TITLE_QUALITY_REVIEW_SCORE = 75
 _NOISY_PUNCTUATION_RE = re.compile(r"[!?]{2,}|\.{3,}")
+_FORBIDDEN_TITLE_PUNCTUATION = (":", "：")
 _MODEL_NUMBER_TOKEN_RE = re.compile(r"(?i)^[a-z]{1,6}\d{2,4}[a-z0-9-]*$")
 _CLICKSBAIT_TERMS = (
     "무조건",
@@ -237,6 +238,19 @@ _SINGLE_VAGUE_TEASER_PATTERNS = (
     "바꿔보세요",
     "알고사자",
 )
+_UNVERIFIED_FRESHNESS_PATTERNS = (
+    "오늘",
+    "이번주",
+    "이번달",
+    "요즘",
+    "방금",
+    "2주",
+    "2주차",
+    "3주",
+    "최신할인율",
+    "최저가",
+    "가격변동",
+)
 _GENERIC_SINGLE_LOW_INFO_TOKENS = {
     normalize_key(token)
     for token in (
@@ -392,7 +406,9 @@ def assess_single_title(
     duplicate_counts: dict[str, int],
     item_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    normalized_title = normalize_text(title)
+    raw_title = normalize_text(title)
+    forbidden_punctuation_used = any(mark in raw_title for mark in _FORBIDDEN_TITLE_PUNCTUATION)
+    normalized_title = _normalize_title_surface(raw_title)
     canonical_title = normalize_key(normalized_title)
     issues: list[str] = []
     score = 100
@@ -447,8 +463,17 @@ def assess_single_title(
         issues.append("템플릿 표현이 지나치게 고정적입니다.")
         score -= 10
 
+    if forbidden_punctuation_used:
+        issues.append("제목에서 콜론 표기는 제거하는 편이 자연스럽습니다.")
+        score -= 4
+
     generic_overlay_on_practical = _has_generic_overlay_on_practical_keyword(keyword, normalized_title)
     generic_single_overlay = _has_generic_single_overlay(
+        keyword,
+        normalized_title,
+        item_context=item_context or {},
+    )
+    unverified_freshness_claim = _has_unverified_freshness_claim(
         keyword,
         normalized_title,
         item_context=item_context or {},
@@ -457,6 +482,7 @@ def assess_single_title(
         _is_hard_reject_title_skeleton(keyword, normalized_title)
         or generic_overlay_on_practical
         or generic_single_overlay
+        or unverified_freshness_claim
     )
     if generic_overlay_on_practical:
         issues.append("구체 글감 위에 다시 템플릿형 포장을 덧씌웠습니다.")
@@ -465,6 +491,10 @@ def assess_single_title(
     elif generic_single_overlay:
         issues.append("단일 키워드 제목이 의도 대비 너무 추상적이거나 낚시형입니다.")
         score -= 18
+        critical = True
+    elif unverified_freshness_claim:
+        issues.append("근거 없는 최신성·기간·가격 변화 표현이 포함돼 있습니다.")
+        score -= 16
         critical = True
     elif hard_reject_skeleton:
         issues.append("제목 골격이 템플릿형 표현에 머물러 있습니다.")
@@ -497,6 +527,8 @@ def assess_single_title(
             "hard_reject_skeleton": hard_reject_skeleton,
             "generic_overlay_on_practical_keyword": generic_overlay_on_practical,
             "generic_single_overlay": generic_single_overlay,
+            "unverified_freshness_claim": unverified_freshness_claim,
+            "forbidden_punctuation_used": forbidden_punctuation_used,
         },
     }
 
@@ -527,7 +559,16 @@ def summarize_title_quality(reports: list[dict[str, Any]]) -> dict[str, Any]:
 def _normalize_title_list(raw_titles: Any) -> list[str]:
     if not isinstance(raw_titles, list):
         return []
-    return [normalize_text(title) for title in raw_titles if normalize_text(title)]
+    return [_normalize_title_surface(title) for title in raw_titles if _normalize_title_surface(title)]
+
+
+def _normalize_title_surface(value: Any) -> str:
+    text = normalize_text(value)
+    if not text:
+        return ""
+    for mark in _FORBIDDEN_TITLE_PUNCTUATION:
+        text = text.replace(mark, " ")
+    return normalize_text(text)
 
 
 def _build_bundle_report(
@@ -854,6 +895,24 @@ def _is_generic_low_info_single_skeleton(skeleton_key: str, skeleton_tokens: lis
     return False
 
 
+def _has_unverified_freshness_claim(
+    keyword: str,
+    title: str,
+    *,
+    item_context: dict[str, Any],
+) -> bool:
+    title_key = normalize_key(title)
+    if not title_key:
+        return False
+    keyword_key = normalize_key(keyword)
+    if any(pattern in keyword_key for pattern in _UNVERIFIED_FRESHNESS_PATTERNS):
+        return False
+    if any(pattern in title_key for pattern in _UNVERIFIED_FRESHNESS_PATTERNS):
+        issue_context = item_context.get("issue_context")
+        return not isinstance(issue_context, dict)
+    return False
+
+
 def _infer_single_keyword_domain(keyword: str, item_context: dict[str, Any]) -> str:
     keyword_key = normalize_key(keyword)
     if not keyword_key:
@@ -934,11 +993,11 @@ def _sort_channel_titles_by_quality(
     entries = [
         (
             index,
-            normalize_text(title),
+            _normalize_title_surface(title),
             title_reports[index] if index < len(title_reports) and isinstance(title_reports[index], dict) else {},
         )
         for index, title in enumerate(titles)
-        if normalize_text(title)
+        if _normalize_title_surface(title)
     ]
     if not entries:
         return [], []

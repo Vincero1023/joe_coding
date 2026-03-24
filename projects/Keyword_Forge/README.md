@@ -107,3 +107,5 @@
 
 - Vertex AI Express Mode API key로 실제 제목 생성과 fallback 동작을 수동 확인하기
 - Status HTML에 `used_mode`, `fallback_reason`, `provider` 표시를 더 명확히 남기기
+- 플랫폼 안정화 이후 `텔레그램 / 외부 에이전트` 연동용 자동화 API 흐름 설계하기
+  - 예: 키워드/주제 지시 -> 시드 생성 또는 queue 등록 -> 완료 알림 -> artifact/요약 전송

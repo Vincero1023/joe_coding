@@ -55,6 +55,13 @@ class TitleService:
                         meta["export_artifact"] = primary_artifact
                     if artifact_list:
                         meta["export_artifacts"] = artifact_list
+                    queue_export = (
+                        export_payload.get("queue_export")
+                        if isinstance(export_payload.get("queue_export"), dict)
+                        else {}
+                    )
+                    if queue_export:
+                        meta["queue_export"] = queue_export
 
         if isinstance(input_data, list):
             return generated

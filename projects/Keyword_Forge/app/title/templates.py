@@ -297,7 +297,8 @@ def _detect_noisy_frame_family(keyword: str, title: str) -> str:
 
 
 def _normalize_candidate(candidate: str, *, max_length: int | None = None) -> str:
-    title = normalize_text(candidate).replace(":", "")
+    title = normalize_text(candidate).replace(":", " ").replace("：", " ")
+    title = normalize_text(title)
     if not title:
         return ""
     if max_length is not None and len(title) > max_length:

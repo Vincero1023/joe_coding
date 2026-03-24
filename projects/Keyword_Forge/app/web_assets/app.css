@@ -4821,8 +4821,33 @@ body.utility-drawer-open {
     border: 1px solid rgba(15, 23, 42, 0.08);
 }
 
+.topic-seed-suggestion-card.is-recent-action {
+    border-color: rgba(14, 116, 144, 0.28);
+    box-shadow: 0 14px 30px rgba(14, 116, 144, 0.12);
+    background: linear-gradient(180deg, rgba(240, 249, 255, 0.98), rgba(236, 253, 245, 0.9));
+}
+
+.topic-seed-suggestion-main {
+    display: grid;
+    gap: 6px;
+}
+
 .topic-seed-suggestion-card strong {
     line-height: 1.35;
+}
+
+.topic-seed-feedback {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(14, 116, 144, 0.12);
+    color: #0f766e;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
 }
 
 .topic-seed-suggestion-actions {
@@ -4830,6 +4855,18 @@ body.utility-drawer-open {
     flex-wrap: wrap;
     gap: 8px;
     justify-content: flex-end;
+}
+
+.topic-seed-suggestion-actions .ghost-chip.is-active {
+    border-color: rgba(14, 116, 144, 0.38);
+    background: rgba(14, 116, 144, 0.12);
+    color: #0f766e;
+}
+
+#seedInput.topic-seed-applied {
+    border-color: rgba(14, 116, 144, 0.45);
+    box-shadow: 0 0 0 4px rgba(14, 116, 144, 0.16);
+    background: linear-gradient(180deg, rgba(240, 249, 255, 0.98), rgba(255, 255, 255, 1));
 }
 
 .keyword-vault-edit-grid {
@@ -4858,6 +4895,10 @@ body.utility-drawer-open {
     .topic-seed-suggestion-card {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .topic-seed-suggestion-main {
+        width: 100%;
     }
 
     .topic-seed-suggestion-actions {

@@ -29,7 +29,13 @@ const TOPIC_SEED_INTENT_LABELS = {
     need: "정보형",
     profit: "수익형",
 };
+const TOPIC_SEED_ACTION_FEEDBACK_LABELS = {
+    use: "현재 시드 입력창에 반영됨",
+    collect: "이 시드로 수집 실행됨",
+    vault: "보관함에 저장됨",
+};
 const SECTION_NAV_LINK_SELECTOR = ".app-topbar-link[href^='#section-'], .workspace-nav-link[href^='#section-']";
+let topicSeedInputFlashTimer = 0;
 
 window.bindElements = function bindElementsOverride() {
     originalBindElements?.();
@@ -521,6 +527,9 @@ function ensureWorkflowUtilityState() {
     }
     if (typeof state.topicSeedRequestPending !== "boolean") {
         state.topicSeedRequestPending = false;
+    }
+    if (!state.topicSeedLastAction || typeof state.topicSeedLastAction !== "object") {
+        state.topicSeedLastAction = null;
     }
 }
 
@@ -1437,6 +1446,9 @@ function renderTopicSeedSuggestions() {
     const suggestions = Array.isArray(state.topicSeedSuggestions) ? state.topicSeedSuggestions : [];
     const meta = state.topicSeedMeta || {};
     const pending = Boolean(state.topicSeedRequestPending);
+    const lastAction = state.topicSeedLastAction && typeof state.topicSeedLastAction === "object"
+        ? state.topicSeedLastAction
+        : null;
     if (elements.generateTopicSeedsButton) {
         elements.generateTopicSeedsButton.disabled = pending || state.isBusy;
         elements.generateTopicSeedsButton.textContent = pending ? "생성 중..." : "시드 만들기";
@@ -1446,7 +1458,10 @@ function renderTopicSeedSuggestions() {
             elements.topicSeedStatus.textContent = "주제에서 시작용 시드를 만드는 중입니다.";
         } else if (suggestions.length) {
             const providerLabel = meta.provider ? formatTitleProviderLabel(meta.provider) : "AI";
-            elements.topicSeedStatus.textContent = `${TOPIC_SEED_INTENT_LABELS[meta.intent] || "균형형"} / ${providerLabel} / ${meta.model || ""} 기준으로 ${suggestions.length}개를 만들었습니다.`;
+            const actionLabel = lastAction?.keyword
+                ? ` 방금 "${lastAction.keyword}"는 ${TOPIC_SEED_ACTION_FEEDBACK_LABELS[lastAction.action] || "적용됨"}.`
+                : "";
+            elements.topicSeedStatus.textContent = `${TOPIC_SEED_INTENT_LABELS[meta.intent] || "균형형"} / ${providerLabel} / ${meta.model || ""} 기준으로 ${suggestions.length}개를 만들었습니다.${actionLabel}`;
         } else if (meta.error_message) {
             elements.topicSeedStatus.textContent = String(meta.error_message);
         } else {
@@ -1455,33 +1470,45 @@ function renderTopicSeedSuggestions() {
     }
     if (elements.topicSeedSuggestionList) {
         elements.topicSeedSuggestionList.innerHTML = suggestions.length
-            ? suggestions.map((seedKeyword, index) => `
-                <div class="topic-seed-suggestion-card">
-                    <strong>${escapeHtml(seedKeyword)}</strong>
+            ? suggestions.map((seedKeyword, index) => {
+                const isRecentAction = Boolean(lastAction && lastAction.keyword === seedKeyword);
+                const feedbackLabel = isRecentAction
+                    ? (TOPIC_SEED_ACTION_FEEDBACK_LABELS[lastAction.action] || "적용됨")
+                    : "";
+                const useLabel = isRecentAction && lastAction.action === "use" ? "시드 입력됨" : "시드 입력";
+                const collectLabel = isRecentAction && lastAction.action === "collect" ? "수집 실행됨" : "바로 수집";
+                const vaultLabel = isRecentAction && lastAction.action === "vault" ? "보관됨" : "보관";
+                return `
+                <div class="topic-seed-suggestion-card${isRecentAction ? " is-recent-action" : ""}">
+                    <div class="topic-seed-suggestion-main">
+                        <strong>${escapeHtml(seedKeyword)}</strong>
+                        ${feedbackLabel ? `<span class="topic-seed-feedback">${escapeHtml(feedbackLabel)}</span>` : ""}
+                    </div>
                     <div class="topic-seed-suggestion-actions">
                         <button
                             type="button"
-                            class="ghost-chip"
+                            class="ghost-chip${isRecentAction && lastAction.action === "use" ? " is-active" : ""}"
                             data-topic-seed-action="use"
                             data-topic-seed="${escapeHtml(seedKeyword)}"
-                        >시드 입력</button>
+                        >${useLabel}</button>
                         <button
                             type="button"
-                            class="ghost-chip"
+                            class="ghost-chip${isRecentAction && lastAction.action === "collect" ? " is-active" : ""}"
                             data-topic-seed-action="collect"
                             data-topic-seed="${escapeHtml(seedKeyword)}"
-                        >바로 수집</button>
+                        >${collectLabel}</button>
                         ${index < 5 ? `
                             <button
                                 type="button"
-                                class="ghost-chip"
+                                class="ghost-chip${isRecentAction && lastAction.action === "vault" ? " is-active" : ""}"
                                 data-topic-seed-action="vault"
                                 data-topic-seed="${escapeHtml(seedKeyword)}"
-                            >보관</button>
+                            >${vaultLabel}</button>
                         ` : ""}
                     </div>
                 </div>
-            `).join("")
+            `;
+            }).join("")
             : "";
     }
 }
@@ -1513,6 +1540,7 @@ async function generateTopicSeedSuggestions() {
     const titleOptions = buildTopicSeedTitleOptions();
 
     state.topicSeedRequestPending = true;
+    state.topicSeedLastAction = null;
     state.topicSeedMeta = { topic, intent, provider: titleOptions.provider, model: titleOptions.model, error_message: "" };
     renderTopicSeedSuggestions();
     try {
@@ -1530,6 +1558,7 @@ async function generateTopicSeedSuggestions() {
             throw new Error("주제에서 시드 후보를 만들지 못했습니다.");
         }
         state.topicSeedSuggestions = keywords;
+        state.topicSeedLastAction = null;
         state.topicSeedMeta = {
             topic,
             intent,
@@ -1552,6 +1581,21 @@ async function generateTopicSeedSuggestions() {
     }
 }
 
+function flashTopicSeedInput() {
+    if (!elements.seedInput) {
+        return;
+    }
+    elements.seedInput.classList.remove("topic-seed-applied");
+    void elements.seedInput.offsetWidth;
+    elements.seedInput.classList.add("topic-seed-applied");
+    if (topicSeedInputFlashTimer) {
+        window.clearTimeout(topicSeedInputFlashTimer);
+    }
+    topicSeedInputFlashTimer = window.setTimeout(() => {
+        elements.seedInput?.classList.remove("topic-seed-applied");
+    }, 1600);
+}
+
 function useTopicSeedKeyword(seedKeyword, shouldCollect = false) {
     const keyword = String(seedKeyword || "").trim();
     if (!keyword) {
@@ -1562,9 +1606,16 @@ function useTopicSeedKeyword(seedKeyword, shouldCollect = false) {
     });
     if (elements.seedInput) {
         elements.seedInput.value = keyword;
+        elements.seedInput.focus();
     }
+    state.topicSeedLastAction = {
+        keyword,
+        action: shouldCollect ? "collect" : "use",
+        recorded_at: Date.now(),
+    };
     renderInputState();
     renderAll();
+    flashTopicSeedInput();
     if (shouldCollect) {
         void runWithGuard(runFreshCollectFlow, `주제 시드 ${keyword} 수집 실행 중`);
     }
@@ -1595,6 +1646,12 @@ function handleTopicSeedSuggestionClick(event) {
     if (action === "vault") {
         const entry = saveKeywordToVault(seedKeyword, "topic_seed");
         if (entry) {
+            state.topicSeedLastAction = {
+                keyword: seedKeyword,
+                action: "vault",
+                recorded_at: Date.now(),
+            };
+            renderTopicSeedSuggestions();
             addLog(`주제 시드를 보관함에 저장했습니다: ${seedKeyword}`, "success");
         }
     }

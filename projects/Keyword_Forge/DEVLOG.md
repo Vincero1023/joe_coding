@@ -33,6 +33,62 @@
 ---
 
 ## Date
+- 2026-03-25 02:45 (KST)
+
+## What changed (변경점)
+- `app/title/exporter.py`, `app/title/main.py`를 정리해 기본 제목 산출물을 `output/csv` 아래로 모으고, 1차 설계 기준의 `txt queue export` 기반을 추가했다.
+- `title_export.queue_export` 설정으로 `output/txt/live/<destination>/<topic>.txt`, `output/txt/archive/...txt`, `output/manifests/...json`을 함께 남길 수 있게 했고, `generation_meta.queue_export`에도 결과 메타를 실었다.
+- `tests/test_title.py`에 `csv 하위 폴더`, `txt live/archive/manifest` 회귀를 추가했고, pipeline 경로 테스트와 전체 테스트도 다시 통과시켰다.
+
+## Why (원인/배경)
+- 현재 실제 운영 흐름은 `제목 생성 -> 주제별 txt 파일 -> PRIME가 순차 포스팅`에 가깝고, 기존 `output/*.csv`만으로는 이 큐 등록 흐름을 추적하기 어려웠다.
+- 또 `txtoutput`처럼 별도 루트를 더 만들기보다 `output` 아래에서 `csv/txt/manifests`로 통합하는 편이 구조를 덜 복잡하게 유지할 수 있었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/exporter.py app/title/main.py tests/test_title.py`
+- [x] `pytest -q tests/test_title.py -k "exports_csv_by_default or queue_txt_bundle or export_multiple_formats"`
+- [x] `pytest -q tests/test_pipeline.py -k "generate_title_endpoint_returns_wrapped_title_sets or pipeline_endpoint_runs_end_to_end"`
+- [x] `pytest -q`
+- [ ] 브라우저에서 `워드프레스용 / 홈판용 txt 보내기` UI 연결 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 제목 결과는 자동 저장되지만, 실제 포스팅 큐로 넘기는 `주제별 txt` 구조와 상태 추적 기준이 없었다.
+- 원인: exporter가 `csv/xlsx/md/txt` 파일 포맷 중심이었고, `한 키워드 한 채널` 기준의 queue 개념과 manifest 저장이 없었다.
+- 해결: 1차 설계로 범위를 줄여 `txt export = queued` 기반만 먼저 만들고, `output/csv`, `output/txt/live`, `output/txt/archive`, `output/manifests` 구조를 서버에서 바로 만들도록 정리했다.
+
+## Next (다음 작업)
+- 결과 카드에서 선택한 제목을 `워드프레스용 txt` 또는 `홈판용 txt`로 보내는 UI 버튼 붙이기
+- `queued` 상태와 중복 경고를 `txt export 시점` 기준으로만 반영하도록 프런트 상태 흐름 단순화하기
+
+---
+
+## Date
+- 2026-03-25 02:20 (KST)
+
+## What changed (변경점)
+- `README.md` 다음 작업 목록에 `텔레그램 / 외부 에이전트` 연동용 자동화 API 아이디어를 추후 과제로 기록했다.
+- 방향은 `키워드/주제 지시 -> 시드 생성 또는 queue 등록 -> 완료 알림 -> artifact/요약 전송` 흐름이다.
+
+## Why (원인/배경)
+- 현재 queue/API 구조만으로도 외부 자동화 연결 여지는 충분하지만, 지금 우선순위는 플랫폼 완성도와 제목 품질 안정화다.
+- 그래서 당장 구현하지 않고, 후속 자동화 방향만 문서에 먼저 남겨 두는 편이 맞았다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `README.md` 다음 작업 목록 반영 확인
+- [ ] 실제 자동화 API 사양 문서화
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 외부 자동화 아이디어가 대화에만 남으면 후속 우선순위에서 빠질 수 있었다.
+- 원인: 별도 backlog 항목 없이 즉흥 아이디어 수준으로만 존재했다.
+- 해결: README/DEVLOG에 후속 자동화 방향을 명시해 추후 개발 목록으로 승격했다.
+
+## Next (다음 작업)
+- 제목 품질과 결과 신뢰도를 더 끌어올리는 쪽에 집중하기
+- 외부 자동화는 플랫폼 안정화 후 `API 토큰 / 웹훅 / queue callback` 설계와 함께 착수하기
+
+---
+
+## Date
 - 2026-03-24 17:55 (KST)
 
 ## What changed (변경점)

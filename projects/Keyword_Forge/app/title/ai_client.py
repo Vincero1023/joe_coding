@@ -241,7 +241,7 @@ _DEFAULT_SYSTEM_PROMPT = (
     f"Each naver_home title must be {NAVER_HOME_MAX_LENGTH} characters or fewer.\n"
     "Write natural Korean titles that sound like a real editor wrote them.\n"
     "Keep the keyword near the front unless it becomes awkward.\n"
-    "Do not use a colon in any title.\n"
+    "Do not use a colon in any title, including full-width punctuation like ：.\n"
     "Prefer zero or one comma per title.\n"
     "The 2 naver_home titles for the same keyword must use clearly different framing.\n"
     "The 2 blog titles for the same keyword must use clearly different framing.\n"
@@ -254,6 +254,7 @@ _DEFAULT_SYSTEM_PROMPT = (
     "For preorder or reservation keywords, prefer 일정, 오픈 시간, 링크, 인증, 결제, 혜택, 수령, or 제한 같은 구체 명사를 쓰고 teaser questions로 흐리지 마라.\n"
     "For value or 가성비 keywords, prefer 위치, 교통, 추가요금, 조식, 객실, 취소 조건, 예산, or 후기 분포 같은 구체 축을 써라.\n"
     "For broad single product keywords, prefer 실사용, 장단점, 가격대, 추천 대상, 클릭감, 배터리, 그립, or 연결 안정성 같은 평가 축을 써라.\n"
+    "Do not invent unsupported freshness, price movement, discount windows, or experience-duration claims such as 오늘, 이번주, 이번달, 최저가, 할인율, 가격 변동, or 2주 사용 unless the keyword or provided issue context explicitly supports them.\n"
     "Search-visible effective blog patterns are concrete: model + symptom or benefit + timeframe or environment, model + connection or setup + device context, or model + problem + fix or result.\n"
     "Do not wrap already-concrete keywords such as 실사용 차이, 장단점, 설정 팁, 연결 방법, 연결 문제, or 자주 생기는 문제 with stale wrappers like 총정리, 완벽 가이드, 최신 정보, 최신 비교 분석, 이것만 알면, or 꼭 알아두세요.\n"
     "Avoid clickbait, exaggerated fear, and empty filler.\n"
@@ -621,7 +622,7 @@ def _build_user_prompt_from_items(input_items: list[Any]) -> str:
         "- Prioritize the hottest current issue, update, comparison point, ranking shift, policy change, spike or drop, or reversal angle implied by the keyword.\n"
         "- Each naver_home title should feel optimized for Naver home-feed exposure while staying semi-safe.\n"
         f"- Keep every naver_home title within {NAVER_HOME_MAX_LENGTH} Korean characters.\n"
-        "- Do not use colons in any title.\n"
+        "- Do not use colons in any title, including full-width punctuation like ：.\n"
         "- Prefer zero or one comma per title.\n"
         "- Use freshness cues aggressively when natural, such as 오늘, 어제, 방금, 이번주, 이번달, or 올해 누계.\n"
         "- Include at least one timely or concrete data cue when natural, such as a recent time stamp, ranking, percentage, price, duration, wait time, budget, or checklist count.\n"
@@ -1445,7 +1446,7 @@ def _normalize_title_list(raw_titles: Any, max_length: int | None = None) -> lis
     normalized_titles: list[str] = []
     seen: set[str] = set()
     for raw_title in raw_titles:
-        title = normalize_text(raw_title).replace(":", "")
+        title = _normalize_title_surface(raw_title)
         if not title:
             continue
         if max_length is not None and len(title) > max_length:
@@ -1455,6 +1456,14 @@ def _normalize_title_list(raw_titles: Any, max_length: int | None = None) -> lis
         seen.add(title)
         normalized_titles.append(title)
     return normalized_titles[:2]
+
+
+def _normalize_title_surface(value: Any) -> str:
+    title = normalize_text(value)
+    if not title:
+        return ""
+    title = title.replace(":", " ").replace("：", " ")
+    return normalize_text(title)
 
 
 def _extract_error_message(raw_text: str) -> str:
