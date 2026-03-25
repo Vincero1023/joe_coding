@@ -125,6 +125,29 @@ def test_expand_analyze_stream_endpoint_emits_analysis_and_result() -> None:
     assert any('"event": "completed"' in line for line in lines)
 
 
+def test_generate_title_stream_endpoint_emits_progress_and_result() -> None:
+    with client.stream(
+        "POST",
+        "/generate-title/stream",
+        json={
+            "input_data": {
+                "selected_keywords": [
+                    {"keyword": "보험 추천"},
+                    {"keyword": "카드 비교"},
+                ],
+                "title_options": {
+                    "mode": "template",
+                },
+            }
+        },
+    ) as response:
+        lines = [line for line in response.iter_lines() if line]
+
+    assert response.status_code == 200
+    assert any('"event": "progress"' in line for line in lines)
+    assert any('"event": "completed"' in line for line in lines)
+
+
 def test_analyze_endpoint_accepts_manual_keywords() -> None:
     response = client.post(
         "/analyze",

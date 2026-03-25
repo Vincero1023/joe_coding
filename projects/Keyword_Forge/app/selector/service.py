@@ -15,12 +15,17 @@ from app.analyzer.scorer import (
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
 from app.selector.cannibalization import build_cannibalization_report
 from app.selector.content_map import build_content_map
+from app.selector.exporter import export_selected_keywords
 from app.selector.longtail import build_longtail_map, resolve_longtail_options
 
 
 _EDITORIAL_FALLBACK_LIMIT = 8
 _MIN_DEFAULT_SELECTION_COUNT = 4
-_DEFAULT_SELECTION_TOP_UP_RATIO = 0.12
+_DEFAULT_SELECTION_MAX_COUNT = 14
+_DEFAULT_SELECTION_TOP_UP_RATIO = 0.16
+_DEFAULT_SELECTION_MEDIUM_POOL_THRESHOLD = 20
+_DEFAULT_SELECTION_LARGE_POOL_THRESHOLD = 45
+_DEFAULT_SELECTION_XL_POOL_THRESHOLD = 80
 _TEMPLATE_HEAVY_KEYWORD_PATTERNS = (
     "추천 기준",
     "고를 때 체크",
@@ -100,7 +105,11 @@ class SelectorService:
             ]
             if isinstance(input_data, list):
                 return selected
-            return _build_selected_payload(selected, longtail_options=select_options.get("longtail_options"))
+            return _build_selected_payload(
+                selected,
+                longtail_options=select_options.get("longtail_options"),
+                input_data=input_data,
+            )
 
         if mode == "grade_filter" and allowed_grades:
             selected = [
@@ -110,7 +119,11 @@ class SelectorService:
             ]
             if isinstance(input_data, list):
                 return selected
-            return _build_selected_payload(selected, longtail_options=select_options.get("longtail_options"))
+            return _build_selected_payload(
+                selected,
+                longtail_options=select_options.get("longtail_options"),
+                input_data=input_data,
+            )
 
         selected = [_decorate_default_selected_item(item) for item in items if is_golden_keyword(item)]
         target_count = _resolve_default_selection_target_count(items)
@@ -122,13 +135,18 @@ class SelectorService:
 
         if isinstance(input_data, list):
             return selected
-        return _build_selected_payload(selected, longtail_options=select_options.get("longtail_options"))
+        return _build_selected_payload(
+            selected,
+            longtail_options=select_options.get("longtail_options"),
+            input_data=input_data,
+        )
 
 
 def _build_selected_payload(
     selected: list[dict[str, Any]],
     *,
     longtail_options: dict[str, Any] | None = None,
+    input_data: Any = None,
 ) -> dict[str, Any]:
     content_map = build_content_map(selected)
     resolved_longtail_options = resolve_longtail_options(longtail_options)
@@ -142,12 +160,16 @@ def _build_selected_payload(
         content_map.get("keyword_clusters") if isinstance(content_map, dict) else [],
         longtail_map.get("longtail_suggestions") if isinstance(longtail_map, dict) else [],
     )
-    return {
+    payload = {
         "selected_keywords": selected,
         **content_map,
         **longtail_map,
         "cannibalization_report": cannibalization_report,
     }
+    export_payload = export_selected_keywords(input_data, selected)
+    if export_payload:
+        payload["selection_export"] = export_payload
+    return payload
 
 
 def _coerce_input_items(input_data: Any) -> list[dict[str, Any]]:
@@ -305,7 +327,13 @@ def _resolve_default_selection_target_count(items: list[dict[str, Any]]) -> int:
     if measured_count <= 0:
         return 0
     scaled_target = int(math.ceil(measured_count * _DEFAULT_SELECTION_TOP_UP_RATIO))
-    return max(_MIN_DEFAULT_SELECTION_COUNT, min(_EDITORIAL_FALLBACK_LIMIT, scaled_target))
+    if measured_count >= _DEFAULT_SELECTION_XL_POOL_THRESHOLD:
+        scaled_target = max(scaled_target, 12)
+    elif measured_count >= _DEFAULT_SELECTION_LARGE_POOL_THRESHOLD:
+        scaled_target = max(scaled_target, 9)
+    elif measured_count >= _DEFAULT_SELECTION_MEDIUM_POOL_THRESHOLD:
+        scaled_target = max(scaled_target, 6)
+    return max(_MIN_DEFAULT_SELECTION_COUNT, min(_DEFAULT_SELECTION_MAX_COUNT, scaled_target))
 
 
 def _top_up_default_selection(

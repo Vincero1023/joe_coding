@@ -50,6 +50,7 @@ class PipelineService:
                     "category": input_data.get("category", collector_input.get("category", "")),
                     "seed_input": input_data.get("seed_input", collector_input.get("seed_input", "")),
                     "select_options": input_data.get("select_options", {}),
+                    "selection_export": _build_selection_export_input(input_data),
                 }
             ),
         )
@@ -77,6 +78,9 @@ class PipelineService:
             if isinstance(selected_result, dict)
             else {},
             "cannibalization_report": selected_result.get("cannibalization_report", {})
+            if isinstance(selected_result, dict)
+            else {},
+            "selection_export": selected_result.get("selection_export", {})
             if isinstance(selected_result, dict)
             else {},
             "title_generation_meta": titled_result.get("generation_meta", {})
@@ -178,6 +182,17 @@ def _build_title_export_input(input_data: dict[str, Any]) -> dict[str, Any]:
     return {
         **raw_export,
         "enabled": enabled,
+    }
+
+
+def _build_selection_export_input(input_data: dict[str, Any]) -> dict[str, Any]:
+    raw_export = input_data.get("selection_export") if isinstance(input_data.get("selection_export"), dict) else {}
+    title_export = input_data.get("title_export") if isinstance(input_data.get("title_export"), dict) else {}
+    enabled = _coerce_boolish(raw_export.get("enabled"), default=True)
+    return {
+        **raw_export,
+        "enabled": enabled,
+        "output_dir": raw_export.get("output_dir") or title_export.get("output_dir"),
     }
 
 

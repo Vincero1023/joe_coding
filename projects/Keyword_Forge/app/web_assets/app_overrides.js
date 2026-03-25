@@ -753,6 +753,7 @@ async function runSelectStage(options = {}) {
         stageKey: "selected",
         endpoint: "/select",
         inputData: {
+            ...buildTitleExportRequestContext(),
             analyzed_keywords: selectionCandidates,
             select_options: {
                 ...(hasExplicitFilters
@@ -790,6 +791,17 @@ async function runSelectStage(options = {}) {
             : `선별 완료: ${countItems(result.selected_keywords)}건`,
         "success",
     );
+    const selectionExportArtifacts = Array.isArray(result.selection_export?.artifacts)
+        ? result.selection_export.artifacts
+        : result.selection_export?.artifact
+            ? [result.selection_export.artifact]
+            : [];
+    if (selectionExportArtifacts.length) {
+        addLog(
+            `선별 키워드 파일 저장: ${selectionExportArtifacts.map((item) => item.filename).filter(Boolean).join(", ")}`,
+            "success",
+        );
+    }
     renderAll();
     return state.results.selected;
 }
@@ -816,24 +828,193 @@ async function runTitleStage() {
             : "제목 생성 시작: template 규칙 기반 제목을 생성합니다.",
     );
     clearStageAndDownstream("titled");
-    const result = await executeStage({
-        stageKey: "titled",
-        endpoint: "/generate-title",
-        inputData: {
-            selected_keywords: state.results.selected?.selected_keywords || [],
-            keyword_clusters: state.results.selected?.keyword_clusters || [],
-            longtail_suggestions: state.results.selected?.longtail_suggestions || [],
-            longtail_options: state.results.selected?.longtail_options || null,
-            analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
-            serp_competition_summary: state.results.selected?.serp_competition_summary || null,
-            title_options: titleOptions,
-        },
+    const result = await executeTitleStageStream({
+        selected_keywords: state.results.selected?.selected_keywords || [],
+        keyword_clusters: state.results.selected?.keyword_clusters || [],
+        longtail_suggestions: state.results.selected?.longtail_suggestions || [],
+        longtail_options: state.results.selected?.longtail_options || null,
+        analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
+        serp_competition_summary: state.results.selected?.serp_competition_summary || null,
+        title_options: titleOptions,
     });
 
     state.results.titled = result;
     addLog(`제목 생성 완료: ${countItems(result.generated_titles)}세트`, "success");
     renderAll();
     return result;
+}
+
+function buildTitleStreamStatusMessage(streamMeta) {
+    if (!streamMeta) {
+        return "제목 생성 준비 중";
+    }
+
+    const phase = String(streamMeta.phase || "generate");
+    const percent = Number(streamMeta.progressPercent || 0);
+    const processedCount = Number(streamMeta.processedCount || 0);
+    const totalCount = Number(streamMeta.totalCount || 0);
+    const message = String(streamMeta.message || "").trim();
+
+    if (phase === "generate" && totalCount > 0) {
+        return `${processedCount} / ${totalCount}세트 · ${percent}%`;
+    }
+    if ((phase === "auto_retry" || phase === "model_escalation") && totalCount > 0) {
+        return `${message || `${processedCount} / ${totalCount}건`} · ${percent}%`;
+    }
+    if (message) {
+        return `${message} · ${percent}%`;
+    }
+    return `${percent}%`;
+}
+
+function applyTitleStreamEvent(eventPayload, startedAt) {
+    if (!eventPayload || eventPayload.event !== "progress") {
+        return;
+    }
+
+    const progress = eventPayload.data || {};
+    const currentResult = state.results.titled || createEmptyTitledResult();
+    const currentMeta = currentResult.stream_meta || {};
+    currentResult.stream_meta = {
+        phase: progress.phase || currentMeta.phase || "generate",
+        progressPercent: Number(progress.progress_percent ?? currentMeta.progressPercent ?? 0),
+        processedCount: Number(progress.processed_count ?? currentMeta.processedCount ?? 0),
+        totalCount: Number(progress.total_count ?? currentMeta.totalCount ?? 0),
+        currentKeyword: progress.current_keyword || currentMeta.currentKeyword || "",
+        message: progress.message || currentMeta.message || "",
+    };
+    state.results.titled = currentResult;
+    state.stageStatus.titled = {
+        state: "running",
+        message: buildTitleStreamStatusMessage(currentResult.stream_meta),
+        startedAt,
+        finishedAt: null,
+        durationMs: null,
+    };
+    renderAll();
+}
+
+async function executeTitleStageStream(inputData) {
+    const stageKey = "titled";
+    const stage = getStage(stageKey);
+    const startedAt = Date.now();
+    const startedAtLabel = new Date(startedAt).toISOString();
+    const streamController = beginStreamRequest("/generate-title/stream");
+    const targetCount = countItems(inputData?.selected_keywords || []);
+
+    setActiveResultView(stageKey);
+    state.results.titled = {
+        ...createEmptyTitledResult(),
+        stream_meta: {
+            phase: "generate",
+            progressPercent: 0,
+            processedCount: 0,
+            totalCount: targetCount,
+            currentKeyword: "",
+            message: "제목 생성 준비 중",
+        },
+    };
+    state.stageStatus[stageKey] = {
+        state: "running",
+        message: targetCount ? `0 / ${targetCount}세트 · 0%` : "제목 생성 준비 중",
+        startedAt,
+        finishedAt: null,
+        durationMs: null,
+    };
+    renderAll();
+
+    try {
+        const response = await postModuleStream(
+            "/generate-title/stream",
+            inputData,
+            (eventPayload) => {
+                if (eventPayload?.event === "progress") {
+                    applyTitleStreamEvent(eventPayload, startedAt);
+                }
+            },
+            { signal: streamController.signal },
+        );
+        const result = response.result || createEmptyTitledResult();
+        const itemCount = countItems(result.generated_titles);
+        const durationMs = Date.now() - startedAt;
+
+        state.stageStatus[stageKey] = {
+            state: "success",
+            message: `${itemCount}세트 완료`,
+            startedAt,
+            finishedAt: Date.now(),
+            durationMs,
+        };
+        state.diagnostics[stageKey] = {
+            stageKey,
+            stageLabel: stage.label,
+            status: "success",
+            endpoint: "/generate-title/stream",
+            requestId: response.requestId,
+            startedAt: startedAtLabel,
+            durationMs,
+            request: sanitizeSensitiveData(inputData),
+            responseSummary: buildResponseSummary(stageKey, result),
+            backendDebug: result.debug || null,
+        };
+        return result;
+    } catch (error) {
+        if (isAbortLikeError(error)) {
+            const finishedAt = Date.now();
+            const durationMs = finishedAt - startedAt;
+            state.stageStatus[stageKey] = {
+                state: "cancelled",
+                message: "사용자 중지",
+                startedAt,
+                finishedAt,
+                durationMs,
+            };
+            state.diagnostics[stageKey] = {
+                stageKey,
+                stageLabel: stage.label,
+                status: "cancelled",
+                endpoint: "/generate-title/stream",
+                requestId: "",
+                startedAt: startedAtLabel,
+                durationMs,
+                request: sanitizeSensitiveData(inputData),
+            };
+            renderAll();
+            throw error;
+        }
+
+        const normalizedError = normalizeError(error, {
+            stageKey,
+            endpoint: "/generate-title/stream",
+            request: inputData,
+            startedAt: startedAtLabel,
+            durationMs: Date.now() - startedAt,
+        });
+
+        state.stageStatus[stageKey] = {
+            state: "error",
+            message: normalizedError.message,
+            startedAt,
+            finishedAt: Date.now(),
+            durationMs: normalizedError.durationMs,
+        };
+        state.diagnostics[stageKey] = {
+            stageKey,
+            stageLabel: stage.label,
+            status: "error",
+            endpoint: "/generate-title/stream",
+            requestId: normalizedError.requestId,
+            startedAt: startedAtLabel,
+            durationMs: normalizedError.durationMs,
+            request: sanitizeSensitiveData(inputData),
+            error: normalizedError,
+        };
+        state.lastError = normalizedError;
+        renderAll();
+        throw normalizedError;
+    } finally {
+        completeStreamRequest(streamController);
+    }
 }
 
 function buildLongtailAnalyzerOptions() {

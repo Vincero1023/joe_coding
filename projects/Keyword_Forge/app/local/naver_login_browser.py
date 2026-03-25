@@ -11,9 +11,9 @@ from typing import Any
 
 _LOGIN_TARGET_URL = "https://creator-advisor.naver.com/naver_blog/goodbuy40/trends"
 _COOKIE_NAMES = ("NID_AUT", "NID_SES", "NID_JKL", "NNB")
-_SESSION_DIR = Path(".local") / "naver_playwright"
-_SESSION_CACHE_FILE = _SESSION_DIR / "naver_creator_session.json"
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_SESSION_DIR = _PROJECT_ROOT / ".local" / "naver_playwright"
+_SESSION_CACHE_FILE = _SESSION_DIR / "naver_creator_session.json"
 
 
 @dataclass(frozen=True)

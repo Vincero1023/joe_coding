@@ -241,13 +241,19 @@ _DEFAULT_SYSTEM_PROMPT = (
     f"Each naver_home title must be {NAVER_HOME_MAX_LENGTH} characters or fewer.\n"
     "Write natural Korean titles that sound like a real editor wrote them.\n"
     "Keep the keyword near the front unless it becomes awkward.\n"
+    "Prefer concise hook-first wording: one clear hook plus one concrete noun is better than a long abstract explanation.\n"
     "Do not use a colon in any title, including full-width punctuation like ：.\n"
     "Prefer zero or one comma per title.\n"
     "The 2 naver_home titles for the same keyword must use clearly different framing.\n"
     "The 2 blog titles for the same keyword must use clearly different framing.\n"
+    "For naver_home titles, when natural, combine at least two of issue/update, debate/comparison, and reversal/question framing.\n"
     "Across the whole batch, avoid repeating the same headline skeleton.\n"
     "Favor timely issue-aware framing over evergreen encyclopedia phrasing when the keyword allows it.\n"
     "Reflect the search intent in the wording: price, review, comparison, reservation, profile, location, how-to, or guide.\n"
+    "For blog titles, prioritize search exposure structure before copywriting flair.\n"
+    "When natural, shape each blog title like main keyword + support keyword + concrete descriptor, similar to a common top-ranked Naver search-result pattern for that intent.\n"
+    "For blog titles, full keyword coverage and structure fit matter more than forcing the keyword into the absolute first token.\n"
+    "Keep strict category boundaries. Do not import another category's jargon, entities, or policy concepts just to make a title feel smarter.\n"
     "Prefer concrete nouns such as 실사용, 장단점, 차이, 성능, 가격대, 세팅, 연결, 사용감, 추천 대상, or 주의점 over vague labels.\n"
     "Avoid low-information skeletons such as '최신 정보', '업데이트 확인', '왜 인기?', '이것만 알면', '구매 가이드', '사용 후기', '신상', or a bare '비교' unless the keyword itself truly requires that wording.\n"
     "Avoid generic template phrases such as '완벽 정리', '한 번에 정리', '갑자기 바뀌었다', '이유가 이상하다', '놓치면 손해' unless they are truly necessary.\n"
@@ -255,8 +261,13 @@ _DEFAULT_SYSTEM_PROMPT = (
     "For value or 가성비 keywords, prefer 위치, 교통, 추가요금, 조식, 객실, 취소 조건, 예산, or 후기 분포 같은 구체 축을 써라.\n"
     "For broad single product keywords, prefer 실사용, 장단점, 가격대, 추천 대상, 클릭감, 배터리, 그립, or 연결 안정성 같은 평가 축을 써라.\n"
     "Do not invent unsupported freshness, price movement, discount windows, or experience-duration claims such as 오늘, 이번주, 이번달, 최저가, 할인율, 가격 변동, or 2주 사용 unless the keyword or provided issue context explicitly supports them.\n"
+    "For finance keywords without verified live issue context, prefer hook frames based on gap, interpretation, checkpoint, variable, condition, timing, or domestic-vs-global difference rather than pretending to know today's move.\n"
+    "For finance keywords, avoid device-style frames such as 실사용 차이, 사용 후기, 자주 생기는 문제, 설정 팁, 연결 문제, or 동선 체크 unless the keyword itself naturally requires them.\n"
+    "For naver_home titles, do not stop at bare labels like 환율 영향, 확인 포인트, 기준선, 조건 차이, 실시간 현황, or 국내외 차이. Turn that axis into a real question, contrast, implication, or decision point.\n"
+    "For finance analysis titles, retrospective windows such as 2주 흐름, 2주간 추이, 3주 변동, or 1개월 비교 are acceptable only when they clearly describe analysis rather than fake breaking news.\n"
     "Search-visible effective blog patterns are concrete: model + symptom or benefit + timeframe or environment, model + connection or setup + device context, or model + problem + fix or result.\n"
     "Do not wrap already-concrete keywords such as 실사용 차이, 장단점, 설정 팁, 연결 방법, 연결 문제, or 자주 생기는 문제 with stale wrappers like 총정리, 완벽 가이드, 최신 정보, 최신 비교 분석, 이것만 알면, or 꼭 알아두세요.\n"
+    "In YMYL areas such as money, health, law, and real estate, use hedged wording and avoid certainty or guarantee language.\n"
     "Avoid clickbait, exaggerated fear, and empty filler.\n"
     "Do not include markdown, commentary, or code fences."
 )
@@ -578,6 +589,9 @@ def _build_user_prompt(keywords: list[str]) -> str:
         "- Do not shorten the keyword phrase. If the keyword starts with descriptive words, keep them all.\n"
         "- Write all titles in Korean.\n"
         "- naver_home and blog must each contain exactly 2 items.\n"
+        "- For blog titles, prioritize search exposure structure before catchy copywriting.\n"
+        "- When natural, use a structure like main keyword + support keyword + concrete descriptor.\n"
+        "- For blog titles, full keyword coverage and structure fit matter more than forcing the keyword into the absolute first token.\n"
         "- When the keyword already contains a concrete practical angle such as 실사용 차이, 장단점, 설정 팁, 연결 방법, 연결 문제, or 자주 생기는 문제, keep that angle and deepen it with timeframe, environment, symptom, cause, fix, user type, or device context instead of adding generic wrappers.\n"
         "- Search-visible blog titles usually work when they read like model + symptom or benefit + timeframe or environment, model + setup + device context, or model + problem + fix or result.\n"
         "- Avoid duplicate titles within the same keyword.\n"
@@ -618,10 +632,15 @@ def _build_user_prompt_from_items(input_items: list[Any]) -> str:
         "- Write all titles in Korean.\n"
         "- Treat every input item independently on a 1:1 basis.\n"
         "- naver_home and blog must each contain exactly 2 items.\n"
+        "- Prefer concise hook-first wording: one clear hook plus one concrete noun is better than a long abstract explanation.\n"
         "- Apply only one category overlay per keyword.\n"
+        "- Keep strict category boundaries. Do not import another category's jargon, entities, or policy concepts into the title.\n"
         "- Prioritize the hottest current issue, update, comparison point, ranking shift, policy change, spike or drop, or reversal angle implied by the keyword.\n"
         "- Each naver_home title should feel optimized for Naver home-feed exposure while staying semi-safe.\n"
         f"- Keep every naver_home title within {NAVER_HOME_MAX_LENGTH} Korean characters.\n"
+        "- For blog titles, prioritize search exposure structure before catchy copywriting.\n"
+        "- When natural, use a structure like main keyword + support keyword + concrete descriptor, similar to a common top-ranked Naver search-result pattern for that intent.\n"
+        "- For blog titles, full keyword coverage and structure fit matter more than forcing the keyword into the absolute first token.\n"
         "- Do not use colons in any title, including full-width punctuation like ：.\n"
         "- Prefer zero or one comma per title.\n"
         "- Use freshness cues aggressively when natural, such as 오늘, 어제, 방금, 이번주, 이번달, or 올해 누계.\n"
@@ -631,10 +650,15 @@ def _build_user_prompt_from_items(input_items: list[Any]) -> str:
         "- Avoid using the same sentence frame repeatedly across keywords.\n"
         "- If current-issue evidence is weak, use update, checkpoint, comparison, or decision framing instead of fabricating controversy.\n"
         "- Never invent unsupported facts, rankings, official changes, prices, dates, or percentages. Use concrete signals only when they are provided.\n"
+        "- For finance keywords without verified live issue context, prefer hook frames based on gap, interpretation, checkpoint, variable, condition, timing, or domestic-vs-global difference rather than pretending to know today's move.\n"
+        "- For finance keywords, avoid device-style frames such as 실사용 차이, 사용 후기, 자주 생기는 문제, 설정 팁, 연결 문제, or 동선 체크 unless the keyword itself naturally requires them.\n"
+        "- For naver_home titles, do not stop at bare labels like 환율 영향, 확인 포인트, 기준선, 조건 차이, 실시간 현황, or 국내외 차이. Turn that axis into a real question, contrast, implication, or decision point.\n"
+        "- For finance analysis titles, retrospective windows such as 2주 흐름, 2주간 추이, 3주 변동, or 1개월 비교 are acceptable only when they clearly describe analysis rather than fake breaking news.\n"
         "- If live issue context or recent headlines are provided, use them as framing cues for home-feed style without copying them verbatim.\n"
         "- If community reaction or community headlines are provided, treat them as selected-domain reaction cues rather than universal public consensus.\n"
         "- Treat live issue context as search-result evidence, not as confirmed fact.\n"
         "- Usually split the 2 naver_home titles into issue/update + debate/comparison and issue/update + reversal/question/surprise.\n"
+        "- When natural, let each naver_home title combine at least two of issue/update, debate/comparison, and reversal/question framing.\n"
         "- Make the 2 naver_home titles differ in angle such as issue, debate, comparison, reversal, question, update, or decision point.\n"
         "- Make the 2 blog titles differ in angle such as guide, FAQ, checklist, comparison, practical tips, or issue recap.\n"
         "- Prefer specific wording that matches the keyword intent instead of generic SEO filler.\n"
@@ -819,6 +843,122 @@ def _build_practical_title_shape_hint(keyword: str) -> str:
             "price, portability, or button feel."
         )
     return ""
+
+
+def _build_practical_title_shape_hint(keyword: str) -> str:
+    keyword_text = normalize_text(keyword)
+    keyword_key = normalize_key(keyword_text)
+    if not keyword_key:
+        return ""
+    if detect_category(keyword_text) == "finance":
+        if any(token in keyword_text for token in ("지수", "선물", "실시간", "시세", "금시세", "금값", "코스피", "ETF", "리밸런싱")):
+            return (
+                "finance market: use gap, interpretation, checkpoint, variable, update timing, "
+                "domestic-vs-global difference, or reaction split. Avoid fake live claims and device-style frames."
+            )
+        return (
+            "finance account/policy: use eligibility, fee, benefit, delay reason, document, timing, "
+            "or non-face-to-face process frames. Avoid 실사용 차이 or device-style setup framing."
+        )
+    if any(token in keyword_text for token in ("사전예약", "예약방법", "요청방법", "오픈일정")):
+        return (
+            "preorder/application: use open time, link, card benefit, stock window, authentication, "
+            "pickup, or payment context instead of generic hype."
+        )
+    if "가성비" in keyword_text:
+        return (
+            "value decision: use budget, location, transport, included options, hidden fee, "
+            "room condition, or cancellation context instead of vague recommendation language."
+        )
+    if any(token in keyword_text for token in ("기준", "조건", "포인트", "체크포인트")):
+        return (
+            "criteria/checkpoint: spell out concrete evaluation axes, limits, fees, timing, "
+            "eligibility, or trade-offs instead of meta wrappers."
+        )
+    if any(token in keyword_text for token in ("자주 생기는 문제", "연결 문제", "문제", "오류", "안됨", "더블클릭")):
+        return (
+            "problem/solution: use one symptom plus one cause, fix, or result. "
+            "Avoid wrappers like 총정리, 완벽 가이드, or 최신 정보."
+        )
+    if any(token in keyword_text for token in ("설정 팁", "설정방법", "연결방법")):
+        return (
+            "setup/help: add device or OS context and the benefit or problem solved. "
+            "Prefer cues like OS, pairing, device mode, shortcut, mapping, or benefit solved."
+        )
+    if "실사용 차이" in keyword_text:
+        return (
+            "real-use difference: use timeframe, user type, grip, weight, click feel, battery, "
+            "or workflow context instead of generic review language."
+        )
+    if "장단점" in keyword_text:
+        return (
+            "pros/cons decision: show a concrete trade-off such as grip, weight, noise, battery, "
+            "price, portability, or button feel."
+        )
+    return ""
+    """
+    keyword_key = normalize_key(keyword)
+    if not keyword_key:
+        return ""
+    if detect_category(keyword) == "finance":
+        if any(token in keyword_key for token in ("지수", "선물", "시세", "금시세", "금값", "코스피", "etf", "리밸런싱")):
+            return (
+                "finance market: use gap, interpretation, checkpoint, variable, update timing, "
+                "domestic-vs-global difference, or reaction split. Avoid fake live claims and device-style frames."
+            )
+        return (
+            "finance account/policy: use eligibility, fee, benefit, delay reason, document, timing, "
+            "or non-face-to-face process frames. Avoid 실사용 차이 or device-style setup framing."
+        )
+    if any(pattern in keyword_key for pattern in ("?ъ쟾?덉빟", "?덉빟諛⑸쾿", "?좎껌諛⑸쾿", "?ㅽ뵂?쇱젙")):
+        return (
+            "preorder/application: use open time, link, card benefit, stock window, authentication, "
+            "pickup, or payment context instead of generic hype."
+        )
+    if "媛?깅퉬" in keyword_key:
+        return (
+            "value decision: use budget, location, transport, included options, hidden fee, "
+            "room condition, or cancellation context instead of vague recommendation language."
+        )
+    if any(pattern in keyword_key for pattern in ("湲곗?", "議곌굔", "?ъ씤??, "泥댄겕?ъ씤??)):
+        return (
+            "criteria/checkpoint: spell out concrete evaluation axes, limits, fees, timing, "
+            "eligibility, or trade-offs instead of meta wrappers."
+        )
+    if any(pattern in keyword_key for pattern in ("?먯＜?앷린?붾Ц??, "?곌껐臾몄젣", "臾몄젣", "?ㅻ쪟", "?덈맖", "?딄?", "?붾툝?대┃")):
+        return (
+            "problem/solution: use one symptom plus one cause, fix, or result. "
+            "Avoid wrappers like 珥앹젙由? ?꾨꼍 媛?대뱶, or 理쒖떊 ?뺣낫."
+        )
+    if any(pattern in keyword_key for pattern in ("?ㅼ젙??, "?ㅼ젙諛⑸쾿", "?곌껐諛⑸쾿")):
+        if any(pattern in keyword_key for pattern in ("?ㅻ낫??, "?ㅽ뙣??, "?쒖쁺", "諛곗뿴", "?ㅻ㏊", "fn")):
+            return (
+                "setup/help: add device or OS context and the benefit or problem solved. "
+                "Prefer cues like 釉붾（?ъ뒪, 硫?고럹?대쭅, ?ㅻ㏊, ?쒖쁺 ?꾪솚, FN Lock, 諛곗뿴, or ?⑥텞??"
+            )
+        if any(pattern in keyword_key for pattern in ("留덉슦??, "?몃옓蹂?, "踰꾪떚而?, "?좊땲?뚯엵", "dpi", "?대┃")):
+            return (
+                "setup/help: add device or OS context and the benefit or problem solved. "
+                "Prefer cues like 留λ턿, ?덈룄?? 釉붾（?ъ뒪, ?좊땲?뚯엵, DPI, 踰꾪듉 ?ㅼ젙, or 媛먮룄."
+            )
+        return (
+            "setup/help: add device or OS context and the benefit or problem solved. "
+            "Prefer cues like OS, pairing, device mode, shortcut, mapping, or benefit solved."
+        )
+    if "?ㅼ궗?⑹감?? in keyword_key:
+        return (
+            "real-use difference: use timeframe, user type, grip, weight, click feel, battery, "
+            "or workflow context instead of generic review language."
+        )
+    if "?λ떒?? in keyword_key:
+        return (
+            "pros/cons decision: show a concrete trade-off such as grip, weight, noise, battery, "
+            "price, portability, or button feel."
+        )
+    return ""
+
+
+    """
 
 
 def _map_explicit_prompt_category(value: Any) -> str:

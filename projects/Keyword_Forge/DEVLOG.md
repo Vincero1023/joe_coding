@@ -6,6 +6,85 @@
 3. 추측은 가정으로 표시하고, 확인 후 즉시 갱신한다.
 
 ## Date
+- 2026-03-25 21:15 (KST)
+
+## What changed (변경점)
+- 최신 실행 결과 [Status/수익형 키워드 발굴&제목 생성기-2026-03-25T12-08-09.html](D:/joe_coding/projects/keyword_forge/Status/수익형%20키워드%20발굴&제목%20생성기-2026-03-25T12-08-09.html)을 점검해 제목 생성 스트림, 품질 분포, 선별 TXT export 반영 여부를 확인했다.
+
+## Why (원인/배경)
+- 다른 환경에서 이어서 작업할 예정이라, 마지막 실전 run 결과와 아직 남은 확인 포인트를 문서에 남겨둘 필요가 있었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] 최신 status html 요약 수치 확인
+- [x] 최신 CSV 산출물 확인
+- [x] `output/txt/selected/live` 경로 생성 여부 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 최신 run은 정상 완료됐지만 `selection_export` 로그와 `output/txt/selected/live` 파일이 이번 status에는 보이지 않았다.
+- 원인: 제목 스트림 패치는 반영된 상태였지만, 선별 TXT export 패치가 반영되기 전 서버/asset 상태로 실행됐을 가능성이 높다.
+- 해결: 다음 run 전 서버 재시작 후 다시 실행해서 선별 TXT 생성 여부를 바로 재확인하기로 했다.
+
+## Next (다음 작업)
+- 서버 재시작 후 같은 카테고리로 재실행
+- 선별 TXT export 실제 생성 확인
+- 제목 반복 프레임(`왜 국내 시세와 다를까`, `무엇을 먼저 봐야 할까`) 분산 패치
+
+## Date
+- 2026-03-25 19:45 (KST)
+
+## What changed (변경점)
+- [app/selector/exporter.py](D:/joe_coding/projects/keyword_forge/app/selector/exporter.py)를 추가해 선별된 키워드를 항상 줄바꿈 TXT로 `output/txt/selected/live`, `output/txt/selected/archive`에 저장하도록 했다.
+- [app/selector/service.py](D:/joe_coding/projects/keyword_forge/app/selector/service.py), [app/api/routes/selector.py](D:/joe_coding/projects/keyword_forge/app/api/routes/selector.py), [app/pipeline/service.py](D:/joe_coding/projects/keyword_forge/app/pipeline/service.py)에서 selector 실행 시 기본 export가 켜지도록 연결하고, 결과 payload에 `selection_export` 메타를 넣었다.
+- [app/web_assets/app.js](D:/joe_coding/projects/keyword_forge/app/web_assets/app.js), [app/web_assets/app_overrides.js](D:/joe_coding/projects/keyword_forge/app/web_assets/app_overrides.js), [app/web.py](D:/joe_coding/projects/keyword_forge/app/web.py)에서 selector 호출에 `mode/category/seed_input`를 같이 보내고, 저장된 TXT 파일명을 activity log에 남기도록 보강했다.
+
+## Why (원인/배경)
+- 제목 품질이 아쉬운 경우 선별 키워드만 먼저 뽑아 사람이 직접 제목을 잡고 싶다는 운영 요구가 생겼다.
+- 기존엔 선별 결과가 status/UI 안에만 남고 별도 TXT 큐처럼 바로 꺼내 쓰는 파일이 없었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/selector/exporter.py app/selector/service.py app/api/routes/selector.py app/pipeline/service.py app/web.py`
+- [x] `node --check app/web_assets/app.js`
+- [x] `node --check app/web_assets/app_overrides.js`
+- [x] `pytest -q tests/test_selector.py -k "export_selected_keywords_txt or scales_default_selection_for_large_measured_pool"`
+- [x] `pytest -q tests/test_pipeline.py -k "pipeline_run_returns_all_stage_outputs"`
+- [x] `pytest -q`
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 선별 키워드를 사람이 직접 제목화하려고 해도 UI나 status에서 복사해야 했고, 실행 단위 TXT 파일이 없었다.
+- 원인: export 기능이 제목 단계에만 집중돼 있었고 selector 단계는 파일 산출물을 만들지 않았다.
+- 해결: selector 단계에 live/archive TXT export를 추가하고, category면 `날짜__카테고리.txt`, seed면 `날짜__시드키워드.txt` 규칙으로 항상 저장되게 했다.
+
+## Next (다음 작업)
+- 실제 selector run 후 생성되는 `selection_export` 메타를 status 화면에도 더 눈에 띄게 보여줄지 검토
+- 제목 품질과 선별 export를 함께 써서 실전 발행 큐를 더 단순화
+
+## Date
+- 2026-03-25 19:20 (KST)
+
+## What changed (변경점)
+- [app/title/quality.py](D:/joe_coding/projects/keyword_forge/app/title/quality.py)에서 `환율 영향`, `확인 포인트`, `국내외 차이` 같은 축약형 홈 제목을 별도 감점하고, 금융 키워드의 `2주간 추이 분석` 같은 회고형 분석 표현은 무조건 최신성 위반으로 자르지 않도록 완화했다.
+- [app/title/ai_client.py](D:/joe_coding/projects/keyword_forge/app/title/ai_client.py), [app/title/title_generator.py](D:/joe_coding/projects/keyword_forge/app/title/title_generator.py)에 `bare label` 금지와 금융 분석형 시간 표현 허용 규칙을 추가하고, 금융 rescue 제목을 질문/대조형으로 더 강하게 바꿨다.
+- [tests/test_title.py](D:/joe_coding/projects/keyword_forge/tests/test_title.py)에 약한 홈 제목 감점과 금융 분석형 시간 표현 허용 회귀 테스트를 추가했다.
+
+## Why (원인/배경)
+- 최신 status에서 `24K금값, 환율 영향` 같은 축약형 제목이 과대평가되고, 반대로 `국제금시세, 2주간의 추이 분석`은 근거 없는 최신성 표현으로 잘리는 판단이 나왔다.
+- 사용 의도는 `홈판은 더 후킹 있게`, `정보형은 검색 구조에 맞게`, `금융은 거짓 실시간성만 막고 회고형 분석은 허용` 쪽이었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/quality.py app/title/ai_client.py app/title/title_generator.py`
+- [x] `pytest -q tests/test_title.py`
+- [x] `pytest -q`
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 짧고 라벨형인 홈 제목이 후킹으로 잘못 인식되고, 금융 분석형 시간 표현까지 같은 규칙으로 잘려 품질 판단이 어색했다.
+- 원인: 홈 훅 신호에 `포인트/기준선/변수` 같은 축약 라벨이 섞여 있었고, 최신성 검사가 `오늘/이번주`와 `2주간 추이`를 구분하지 않았다.
+- 해결: 홈 제목의 축약 라벨 감점을 분리하고, 금융은 회고형 분석 창(`2주/3주/1개월 + 추이/분석/흐름`)만 예외 허용하도록 바꿨다.
+
+## Next (다음 작업)
+- 서버 재시작 후 같은 금융/비즈니스 카테고리로 다시 실행
+- 최신 status에서 홈 제목 점수와 실제 체감이 더 가까워졌는지 확인
+
+## Date
 - YYYY-MM-DD HH:mm (KST)
 
 ## What changed (변경점)
@@ -29,6 +108,304 @@
 
 ## Next (다음 작업)
 - [다음 1~2개 작업]
+
+---
+
+## Date
+- 2026-03-25 18:22 (KST)
+
+## What changed (변경점)
+- [app/api/routes/generate_title.py](D:/joe_coding/projects/keyword_forge/app/api/routes/generate_title.py) 스트림 제너레이터에 `except` 가드를 추가하고 `json.dumps(..., default=str)`로 직렬화 실패를 흡수하도록 보강했다.
+
+## Why (원인/배경)
+- 최신 status에서 제목 단계는 `/generate-title/stream`으로 들어가고 `request_id`도 받았지만, 브라우저는 `stream_read_error / network error`만 표시했다.
+- 이 패턴은 스트림이 열린 뒤 서버 쪽 예외가 제너레이터 내부에서 처리되지 않아 소켓이 끊길 때 자주 나온다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/api/routes/generate_title.py`
+- [x] `pytest -q tests/test_stage_entrypoints.py -k "generate_title_stream"`
+- [x] `pytest -q`
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 제목 생성 중 실제 서버 예외가 나도 status에는 `network error`만 남아 원인 파악이 어려웠다.
+- 원인: 제목 스트림 라우트가 `expand` 스트림처럼 제너레이터 예외를 잡아 `error payload`로 내보내지 않았고, 직렬화 실패도 그대로 연결 종료로 이어질 수 있었다.
+- 해결: 제너레이터 예외를 `stream_generator_error` payload로 내려주고, 직렬화는 `default=str`로 안전하게 처리하도록 수정했다.
+
+## Next (다음 작업)
+- 서버 재시작 후 같은 제목 run 재실행
+- 다음 status에서 `network error`가 사라지는지, 또는 실제 내부 예외 메시지가 노출되는지 확인
+
+## Date
+- 2026-03-25 18:15 (KST)
+
+## What changed (변경점)
+- [app/web.py](D:/joe_coding/projects/keyword_forge/app/web.py)의 asset version을 `20260325-title-stream-v66`으로 올렸다.
+
+## Why (원인/배경)
+- 최신 status를 보니 제목 단계가 아직 `/generate-title` 일반 POST를 타고 있었고, 새로 추가한 `/generate-title/stream`이 브라우저에 반영되지 않았다.
+- 원인은 정적 자산 캐시로 보였고, 구버전 JS가 남아 있어 실시간 제목 진행률과 스트림 요청이 적용되지 않았다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/web.py app/api/routes/generate_title.py app/title/main.py app/title/title_generator.py`
+- [x] `pytest -q tests/test_stage_entrypoints.py -k "generate_title_stream"`
+- [ ] 브라우저 강력 새로고침 후 `/generate-title/stream` 호출 여부 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 제목 생성이 오래 걸릴 때 브라우저가 `/generate-title` 일반 요청으로 대기하다 `Failed to fetch`로 끊겼다.
+- 원인: 스트림 경로를 추가했지만 프런트 asset cache가 갱신되지 않아 구버전 JS가 그대로 실행됐다.
+- 해결: asset version을 올려 새 JS를 강제 로드하게 했다.
+
+## Next (다음 작업)
+- 서버 재시작 후 브라우저 강력 새로고침
+- 다음 status에서 제목 단계 endpoint가 `/generate-title/stream`으로 찍히는지 확인
+
+## Date
+- 2026-03-25 18:07 (KST)
+
+## What changed (변경점)
+- [app/api/routes/generate_title.py](D:/joe_coding/projects/keyword_forge/app/api/routes/generate_title.py)에 `/generate-title/stream`을 추가해 제목 단계도 `progress -> completed` 스트림을 내보내게 했다.
+- [app/title/title_generator.py](D:/joe_coding/projects/keyword_forge/app/title/title_generator.py), [app/title/main.py](D:/joe_coding/projects/keyword_forge/app/title/main.py)에서 제목 생성, 품질 검사, 자동 재작성, 모델 승격, export 단계별 진행 퍼센트를 실시간으로 publish하게 했다.
+- [app/web_assets/app_overrides.js](D:/joe_coding/projects/keyword_forge/app/web_assets/app_overrides.js), [app/web_assets/app.js](D:/joe_coding/projects/keyword_forge/app/web_assets/app.js)에서 제목 단계가 `N / total 세트 · %`로 보이도록 바꿨고, [tests/test_stage_entrypoints.py](D:/joe_coding/projects/keyword_forge/tests/test_stage_entrypoints.py)에 스트림 엔드포인트 테스트를 추가했다.
+
+## Why (원인/배경)
+- 제목 생성은 체감상 오래 걸리는데, 기존 UI는 `실행 중` 상태만 보여줘서 멈춘 것처럼 느껴졌다.
+- 특히 자동 재작성과 모델 승격이 붙는 run에서는 완료 시점 예측이 어려워서, 최소한 현재 몇 세트 처리했고 어느 phase인지 보여줄 필요가 있었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/main.py app/title/title_generator.py app/api/routes/generate_title.py`
+- [x] `node --check app/web_assets/app_overrides.js`
+- [x] `node --check app/web_assets/app.js`
+- [x] `pytest -q tests/test_stage_entrypoints.py -k "generate_title_stream or expand_stream or expand_analyze_stream"`
+- [x] `pytest -q`
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 제목 단계는 완료 전까지 정적인 상태 표시만 있고, 사용자는 실제 진행률을 알 수 없었다.
+- 원인: `/generate-title`가 일반 POST 응답만 쓰고, 생성기 내부에서도 progress callback을 전혀 내보내지 않았다.
+- 해결: 제목 단계도 스트리밍 라우트와 progress 이벤트를 추가하고, 프런트에서 `생성 -> 품질 검사 -> 재작성 -> 저장` phase를 퍼센트와 함께 표시하도록 연결했다.
+
+## Next (다음 작업)
+- 실제 브라우저에서 제목 생성 중 퍼센트 표시와 phase 문구가 자연스러운지 확인
+- 필요하면 `재작성 3/10건` 같은 세부 문구를 더 짧게 다듬기
+
+## Date
+- 2026-03-25 14:57 (KST)
+
+## What changed (변경점)
+- [app/title/quality.py](D:/joe_coding/projects/keyword_forge/app/title/quality.py)에서 `blog` 채널은 `메인 키워드 + 서브 키워드 + 문장부` 구조를 더 높게 보고, 단순 훅 질문형이나 너무 일반적인 문장부는 감점하게 바꿨다.
+- 키워드가 제목 맨 앞에 오지 않아도 구조가 충분히 강하면 블로그형에서 바로 감점하지 않게 조정했다.
+- [app/title/ai_client.py](D:/joe_coding/projects/keyword_forge/app/title/ai_client.py) 프롬프트도 `블로그는 상위노출 구조 우선, 홈판은 후킹 우선` 방향으로 명시했고, [tests/test_title.py](D:/joe_coding/projects/keyword_forge/tests/test_title.py)에 구조 중심 회귀 테스트를 추가했다.
+
+## Why (원인/배경)
+- 최근 status를 보면 `home/blog 분리`는 작동했지만, 블로그형도 아직 `최근 동향과 전망`, `영향 분석`, `왜 다르게 보일까` 같은 느슨한 문장부가 남아 있었다.
+- 사용자 기준도 `카피라이팅`보다 `상위노출 구조`가 더 중요했고, `키워드 맨 앞 배치` 같은 구식 규칙보다 상위 결과 공통 구조를 따라가는 방향이 맞았다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/quality.py app/title/ai_client.py`
+- [x] `pytest -q tests/test_title.py -k "hookier or informational_blog or search_structure or generic_blog_wrapper or keyword_tokens_with_inserted_modifiers"`
+- [x] `pytest -q`
+- [ ] 실제 category run에서 blog 제목이 더 구조적으로 바뀌는지 재확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 블로그 점수식이 아직 `정보성 유무` 중심이라, 상위노출 구조는 맞지만 키워드 맨 앞이 아니거나, 반대로 훅만 있고 구조가 약한 제목을 충분히 구분하지 못했다.
+- 원인: 구조 적합성보다 일부 문구 패턴과 앞배치 여부를 더 직접적으로 봤다.
+- 해결: `blog_search_structure`, `blog_generic_wrapper` 체크를 추가하고, 프롬프트에도 `main + support + descriptor` 원칙을 명시했다.
+
+## Next (다음 작업)
+- 실제 status/csv에서 블로그형 제목이 `구조 우선`으로 바뀌는지 확인
+- 필요하면 category별 상위노출형 문장부 사전을 더 넓히고, generic wrapper 감점을 미세조정
+
+## Date
+- 2026-03-25 16:00 (KST)
+
+## What changed (변경점)
+- [app/title/quality.py](D:/joe_coding/projects/keyword_forge/app/title/quality.py)에서 채널별 점수 기준을 분리해 `naver_home`은 후킹 신호, `blog`는 정보 신호를 추가 체크하게 했다.
+- `naver_home` 제목이 너무 설명서형이면 감점하고, `blog` 제목이 감정훅만 있고 정보 의도가 안 보이면 감점하도록 점수식을 조정했다.
+- [tests/test_title.py](D:/joe_coding/projects/keyword_forge/tests/test_title.py)에 홈판 후킹/블로그 정보성 분리 회귀 테스트를 추가했다.
+
+## Why (원인/배경)
+- 같은 제목이라도 홈판은 `눌리느냐`, 블로그는 `검색 의도와 정보 구조가 보이느냐`가 중요해서, 같은 점수식으로 평가하면 채널 차이가 흐려졌다.
+- 특히 홈판은 너무 설명서 같으면 약하고, 블로그는 너무 감정훅만 남으면 검색형 글 제목으로 약했다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/quality.py`
+- [x] `pytest -q tests/test_title.py -k "hookier or informational_blog or quality"`
+- [x] `pytest -q`
+- [ ] 실제 run에서 home/blog channel score 분포 재확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 홈판과 블로그가 서로 다른 역할인데 제목 검수는 거의 공통 점수축으로만 움직였다.
+- 원인: 품질 체크가 키워드 충실도, 템플릿성, 중복성 중심이라 `후킹 부족`과 `정보축 부족`을 채널별로 분리해 보지 못했다.
+- 해결: 홈판에는 `후킹 포인트`, 블로그에는 `정보 의도` 체크를 추가하고, 블로그의 앞부분 키워드 배치 패널티도 조금 더 강하게 조정했다.
+
+## Next (다음 작업)
+- 실제 status/csv에서 `naver_home_score`와 `blog_score` 분포 비교
+- 필요하면 홈판 훅 신호를 카테고리별로 더 미세 조정
+
+## Date
+- 2026-03-25 15:35 (KST)
+
+## What changed (변경점)
+- [app/title/exporter.py](D:/joe_coding/projects/keyword_forge/app/title/exporter.py)에서 CSV export에 `bundle_score`, `bundle_status`, `naver_home_score`, `blog_score`, `target_mode`, `source_kind` 열을 추가했다.
+- queue txt export에 기본 품질 게이트를 넣어, `review` 이상이면서 `bundle/channel score >= 75`인 제목만 플랫폼별 live/archive txt에 들어가게 했다.
+- `queue_export`는 `quality_gate_enabled`, `min_bundle_score`, `min_channel_score`, `allowed_statuses`를 받도록 확장했고, manifest에도 이 필터 메타를 같이 남긴다.
+- `home`와 `wordpress` 사이에서도 제목이 겹치지 않도록 전역 dedupe를 넣고, 첫 제목이 겹치면 채널의 2순위 제목으로 자동 대체하게 했다.
+- txt 파일명도 더 단순하게 바꿔, live는 `날짜__카테고리.txt` 또는 `날짜__시드.txt`, archive는 `타임스탬프__카테고리.txt` 또는 `타임스탬프__시드.txt` 형태로 저장되게 했다.
+
+## Why (원인/배경)
+- 지금까지 txt queue export는 채널 첫 제목을 그대로 내보내서, 저품질 후보도 바로 발행 큐에 섞일 수 있었다.
+- 운영 방식상 필요한 건 `제목 많이 생성 -> 점수/상태로 거름 -> 플랫폼별 큐에 적재` 흐름이었고, CSV에서도 그 판단 근거가 바로 보여야 했다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/exporter.py`
+- [x] `pytest -q tests/test_title.py -k "export or queue"`
+- [x] `pytest -q`
+- [ ] 실제 UI/실전 run에서 queue filtering 체감 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: txt export가 점수 기반이 아니라서 발행 큐를 다시 사람이 골라야 했다.
+- 원인: exporter가 `quality_report`를 참조하지 않고 채널 첫 제목만 중복 제거 후 적재했다.
+- 해결: exporter가 `quality_report.status`, `bundle_score`, `channel_scores`를 읽어 기본적으로 `review 이상 / 75점 이상`만 큐에 넣도록 바꿨고, 필요하면 설정으로 끌 수 있게 했다.
+- 문제: 홈판/워프가 따로 저장돼도 제목 자체가 같으면 같은 블로그 안에서 재활용 냄새가 났다.
+- 원인: dedupe 범위가 플랫폼 내부로만 제한돼 있었고, 파일명도 topic 중심이라 운영 기준으로 보기엔 덜 직관적이었다.
+- 해결: multi-destination export 시 전역 dedupe를 걸고, 같은 제목 충돌 시 각 채널의 대체 제목을 우선 사용하도록 바꿨다. 파일명도 `카테고리 또는 시드 + 날짜` 기준으로 단순화했다.
+
+## Next (다음 작업)
+- UI에서 queue quality gate 설정을 조절할 수 있게 노출
+- 발행용 txt를 `topic/channel` 단위로 더 세밀하게 분리할지 검토
+
+## Date
+- 2026-03-25 15:10 (KST)
+
+## What changed (변경점)
+- [app/title/exporter.py](D:/joe_coding/projects/keyword_forge/app/title/exporter.py)에 `queue_export.destination=all/both`를 추가해, 한 번의 제목 생성 결과를 `home`과 `wordpress`로 따로 live/archive/manifest에 내보낼 수 있게 했다.
+- 같은 제목은 플랫폼 내부에서만 dedupe하고, `home`과 `wordpress` 사이에는 같은 제목이 있어도 각각 유지되도록 했다.
+- [tests/test_title.py](D:/joe_coding/projects/keyword_forge/tests/test_title.py)에 dual queue export와 플랫폼별 dedupe 회귀 테스트를 추가했다.
+
+## Why (원인/배경)
+- 운영 방식이 `홈판용 후킹 제목`과 `워프용 정보 제목`을 분리해 누적하는 구조인데, 기존 queue export는 목적지를 한 번에 하나만 처리했다.
+- 또 같은 키워드가 플랫폼별로 겹치는 것은 허용하되, 같은 플랫폼 안에서만 중복이 막혀야 실제 발행 큐 운영에 맞는다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/exporter.py`
+- [x] `pytest -q tests/test_title.py -k "queue or split_queue or export"`
+- [ ] 실제 UI/운영 루트에서 `destination=all` 사용 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 홈판/워프를 함께 운영하려면 같은 생성 결과를 플랫폼별로 따로 쌓아야 하는데, export는 단일 destination 기준이었다.
+- 원인: queue export가 `home` 또는 `wordpress` 하나만 받도록 설계돼 있었고, dedupe도 그 단일 목적지 문맥만 고려했다.
+- 해결: destination alias(`all/both`)와 multi-bundle export를 추가해 플랫폼별 파일을 각각 만들고, dedupe는 각 플랫폼 live txt 안에서만 동작하게 했다.
+
+## Next (다음 작업)
+- CSV에 `bundle_score/status/channel score` 열 추가
+- min score / status 기반 txt queue filtering 추가
+
+## Date
+- 2026-03-25 14:45 (KST)
+
+## What changed (변경점)
+- [app/selector/service.py](D:/joe_coding/projects/keyword_forge/app/selector/service.py) 기본 자동 선별 목표치를 확장량 연동형으로 바꿔, measured pool이 커질수록 `4 -> 6 -> 9 -> 최대 14`까지 늘어나게 했다.
+- [tests/test_selector.py](D:/joe_coding/projects/keyword_forge/tests/test_selector.py)에 대형 후보 풀에서 선별 수가 9건까지 확장되는 회귀 테스트를 추가했다.
+
+## Why (원인/배경)
+- 실제 운영에서 `3개 확장`과 `100개 확장`이 둘 다 선별 8건 안팎으로 끝나 체감상 selector가 확장량을 반영하지 못했다.
+- 기존 기본값은 `ceil(measured * 0.12)`를 계산해도 상한을 8로 잘라 버려, 후보 풀이 커져도 제목 작업용 seed 다양성이 거의 늘지 않았다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/selector/service.py`
+- [x] `pytest -q tests/test_selector.py`
+- [ ] 실제 large expansion run에서 선별 수 증가 재확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 확장 수를 크게 늘려도 기본 자동 선별 결과가 8건 근처에서 고정됐다.
+- 원인: default selection target이 최소 4, 최대 8로 고정돼 있었고, top-up ratio도 보수적이었다.
+- 해결: 기본 target을 `0.16` 비율 + 구간별 floor로 다시 잡고, 최종 상한도 14까지 열어 확장량이 큰 run에서는 선별 풀이 실제로 늘어나게 했다.
+
+## Next (다음 작업)
+- 실제 리뷰/금융 run에서 선별 수와 제목 품질의 균형 확인
+- 필요하면 UI에 `보수적/표준/공격적 선별` preset 추가
+
+## Date
+- 2026-03-25 14:20 (KST)
+
+## What changed (변경점)
+- [app/title/category_detector.py](D:/joe_coding/projects/keyword_forge/app/title/category_detector.py), [app/selector/longtail.py](D:/joe_coding/projects/keyword_forge/app/selector/longtail.py), [app/title/targets.py](D:/joe_coding/projects/keyword_forge/app/title/targets.py)에 `finance` 전용 분기를 넣어 `시세/지수/계좌` 키워드를 더 정확히 분류하고, `실사용 차이/자주 생기는 문제` 같은 기기형 롱테일은 건너뛰게 했다.
+- [app/title/ai_client.py](D:/joe_coding/projects/keyword_forge/app/title/ai_client.py), [app/title/quality.py](D:/joe_coding/projects/keyword_forge/app/title/quality.py), [app/title/title_generator.py](D:/joe_coding/projects/keyword_forge/app/title/title_generator.py)에서 금융 제목을 `괴리/해석/기준선/변수/조건` 중심으로 유도하고, 어색한 프레임이 나오면 품질 단계와 rescue 단계에서 다시 걸러내게 했다.
+- [tests/test_title.py](D:/joe_coding/projects/keyword_forge/tests/test_title.py)에 금융 mismatch, 프롬프트 힌트, title target 필터 회귀를 추가했다.
+
+## Why (원인/배경)
+- 실제 run에서 `국제금시세`, `코스피200 야간선물`, `ISA 계좌 개설` 같은 금융 키워드에 `실사용 차이`, `자주 생기는 문제`, `동선 체크`류가 붙으면서 홈판 후킹은 있어도 신뢰성과 의도 일치가 무너졌다.
+- 특히 금융은 `오늘/방금` 같은 가짜 실시간 훅보다 `왜 다르게 보이는지`, `어떤 기준을 먼저 봐야 하는지` 식의 해석 훅이 더 안전하고 맞는 방향이었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/selector/longtail.py app/title/category_detector.py app/title/targets.py app/title/quality.py app/title/ai_client.py app/title/title_generator.py`
+- [x] `pytest -q tests/test_title.py tests/test_selector.py`
+- [x] `pytest -q`
+- [ ] 실제 finance seed로 새 status/csv 재확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 금융 키워드가 일반/기기형 practical 프레임으로 흘러 제목과 롱테일이 어색해졌다.
+- 원인: 카테고리 감지 범위가 좁았고, `finance`여도 longtail/title/rescue가 공통 practical 분기를 타는 구간이 남아 있었다.
+- 해결: `finance market`와 `finance account/policy`를 분리해 longtail, prompt, quality, rescue를 모두 `괴리/판단/조건/확인 포인트` 축으로 재정렬했다.
+
+## Next (다음 작업)
+- 실제 `finance` 실전 run 결과에서 `재생성 권장`, `실사용 차이`, `자주 생기는 문제` 잔존량 확인
+- 필요하면 `naver_home` 쪽에서 `괴리형/판단형/조건형` pair 분기를 한 단계 더 세분화
+
+## Date
+- 2026-03-25 12:45 (KST)
+
+## What changed (변경점)
+- [app/collector/naver_trend.py](D:/joe_coding/projects/keyword_forge/app/collector/naver_trend.py)와 [app/local/naver_login_browser.py](D:/joe_coding/projects/keyword_forge/app/local/naver_login_browser.py)의 Creator Advisor 세션 캐시 경로를 상대경로 `.local/...` 대신 프로젝트 루트 기준 절대경로로 고정했다.
+- [tests/test_naver_trend.py](D:/joe_coding/projects/keyword_forge/tests/test_naver_trend.py), [tests/test_local_naver.py](D:/joe_coding/projects/keyword_forge/tests/test_local_naver.py)에 경로 고정 회귀를 추가했다.
+
+## Why (원인/배경)
+- 실전 category 수집에서 `Unauthorized: no user logged in`, `HTTP 423`, `auth_lock_active: true`가 나왔고, 로컬 로그인 세션은 저장돼 있는데 수집기가 못 읽는 정황이 있었다.
+- 원인을 보면 세션 파일 경로가 `Path(".local")` 상대경로라서, 서버를 `D:\joe_coding`에서 띄우면 `D:\joe_coding\.local`을 보고, 프로젝트 폴더에서 띄우면 `projects\keyword_forge\.local`을 보는 식으로 실행 위치에 따라 달라질 수 있었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/collector/naver_trend.py app/local/naver_login_browser.py tests/test_naver_trend.py tests/test_local_naver.py`
+- [x] `pytest -q tests/test_naver_trend.py tests/test_local_naver.py`
+- [x] `pytest -q`
+- [ ] 서버 재시작 후 실제 category + naver_trend 실전 재확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 로그인은 했는데 category 수집 시 Creator Advisor가 비로그인으로 판정되며 보호 락까지 걸렸다.
+- 원인: 세션 캐시가 실행 작업 디렉터리에 따라 서로 다른 `.local`을 보게 되어, 저장한 세션과 읽는 세션 경로가 엇갈릴 수 있었다.
+- 해결: 네이버 세션/로그인 브라우저 경로를 모두 프로젝트 루트 절대경로로 통일했다.
+
+## Next (다음 작업)
+- 서버 재시작 후 `보호 락 해제 -> 전용 로그인 브라우저 -> category 수집` 순서로 실전 확인
+- 필요하면 `auth_lock_active`가 있을 때 UI에서 더 직접적인 복구 버튼/문구를 보여주기
+
+---
+
+## Date
+- 2026-03-25 10:20 (KST)
+
+## What changed (변경점)
+- 예전에 쓰던 `네이버 홈판 최적화 프롬프트`의 핵심을 현재 엔진에 맞게 흡수해 [app/title/category_detector.py](D:/joe_coding/projects/keyword_forge/app/title/category_detector.py) 감지 키워드를 넓히고, [app/title/ai_client.py](D:/joe_coding/projects/keyword_forge/app/title/ai_client.py) 프롬프트에 `카테고리 경계 유지`, `이슈/논쟁/반전 2중 결합`, `YMYL 완곡 표현` 규칙을 더 명시했다.
+- [app/title/targets.py](D:/joe_coding/projects/keyword_forge/app/title/targets.py)에서 selected keyword dedupe 서명에 `추천/비교/방법/설정` 같은 intent token을 조건부로 포함하게 바꿔 `경제 뉴스 추천`과 `경제 뉴스 비교`가 하나로 합쳐지지 않게 했다.
+- [tests/test_title.py](D:/joe_coding/projects/keyword_forge/tests/test_title.py)에 `청약 vs ETF` 카테고리 분류, `기초연금` senior overlay, `intent token 다른 single keyword 보존` 회귀를 추가했다.
+
+## Why (원인/배경)
+- 사용자가 주신 예전 홈판 프롬프트에는 현재 엔진보다 더 분명한 `카테고리별 데이터 훅`, `도메인 경계`, `준최2/YMYL 톤`, `홈판용 프레임 결합` 기준이 있었고, 그중 좋은 부분은 지금 구조에 녹일 가치가 있었다.
+- 동시에 현재 HEAD는 `selected_keywords 4개 -> generated_titles 3개` 회귀로 [tests/test_pipeline.py](D:/joe_coding/projects/keyword_forge/tests/test_pipeline.py) 2건이 실패했고, 실제 누락 키워드는 `경제 뉴스 비교`였다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/category_detector.py app/title/ai_client.py app/title/targets.py tests/test_title.py`
+- [x] `pytest -q tests/test_title.py -k "detect_category_distinguishes_real_estate_and_finance_signals or category_boundary_rule_and_senior_overlay or keeps_single_keywords_when_intent_token_differs"`
+- [x] `pytest -q tests/test_pipeline.py -k "test_pipeline_run_returns_all_stage_outputs or test_pipeline_endpoint_runs_end_to_end"`
+- [x] `pytest -q`
+- [ ] 실제 제목 run에서 홈판형 출력이 과하게 템플릿화되지 않는지 확인
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 홈판용 제목 방향은 있었지만 카테고리 경계/안전 톤이 프롬프트에 더 명확히 반영될 여지가 있었고, title target dedupe가 `비교` 같은 의미 차이를 지워서 파이프라인 결과 수를 줄였다.
+- 원인: detector/prompt가 예전 홈판 프롬프트만큼 넓은 키워드 범위를 커버하지 않았고, dedupe signature는 stop token을 너무 공격적으로 제거해 `추천`과 `비교`를 같은 묶음으로 봤다.
+- 해결: 프롬프트는 홈판 규칙을 더 직접적으로 명시하고, dedupe signature는 의미가 달라지는 intent token은 보존하도록 바꿨다.
+
+## Next (다음 작업)
+- 실제 status를 다시 뽑아 홈판형 `naver_home` 제목이 예전 프롬프트 방향으로 더 자연스러워졌는지 확인하기
+- `senior_health_info`와 일반 `health`를 지금처럼 묶어 둘지, 카테고리를 더 세분화할지 검토하기
 
 ---
 

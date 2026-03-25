@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from pathlib import Path
 
 from app.collector.categories import CATEGORY_CHOICES, resolve_category_name
 from app.collector.naver_trend import (
@@ -8,6 +9,14 @@ from app.collector.naver_trend import (
     NaverTrendOptions,
     resolve_trend_date,
 )
+
+
+def test_naver_trend_cache_file_is_project_root_relative() -> None:
+    from app.collector import naver_trend
+
+    expected = Path(naver_trend.__file__).resolve().parents[2] / ".local" / "naver_playwright" / "naver_creator_session.json"
+
+    assert naver_trend._LOCAL_SESSION_CACHE_FILE == expected
 
 
 def test_naver_trend_client_retries_with_cached_local_session(

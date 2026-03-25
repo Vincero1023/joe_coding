@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import patch
 
 from app.selector.cannibalization import build_cannibalization_report
@@ -794,3 +795,70 @@ def test_serp_summary_parses_titles_and_builds_competition_summary() -> None:
     assert summary["queries"][0]["query"] == "\ubcf4\ud5d8 \ucd94\ucc9c"
     assert summary["queries"][0]["competition_level"] in {"medium", "high"}
     assert len(summary["queries"][0]["top_titles"]) == 3
+
+
+def test_selector_scales_default_selection_for_large_measured_pool() -> None:
+    analyzed_keywords = [
+        {
+            "keyword": f"large pool keyword {index}",
+            "profitability_grade": "D",
+            "attackability_grade": "1" if index % 3 == 0 else "2",
+            "combo_grade": "D1" if index % 3 == 0 else "D2",
+            "golden_bucket": "experimental",
+            "score": 37.0 - (index * 0.05),
+            "analysis_mode": "search_metrics",
+            "confidence": 0.96,
+            "metrics": {"volume": 2400.0 - index, "cpc": 90.0},
+        }
+        for index in range(50)
+    ]
+
+    result = run({"analyzed_keywords": analyzed_keywords})
+
+    selected_keywords = result["selected_keywords"]
+    assert len(selected_keywords) == 9
+    assert all(item["selection_mode"] == "editorial_support" for item in selected_keywords)
+
+
+def test_selector_can_export_selected_keywords_txt(tmp_path) -> None:
+    result = run(
+        {
+            "mode": "category",
+            "category": "비즈니스경제",
+            "selection_export": {
+                "enabled": True,
+                "output_dir": str(tmp_path),
+            },
+            "analyzed_keywords": [
+                {
+                    "keyword": "보험 추천",
+                    "profitability_grade": "A",
+                    "attackability_grade": "2",
+                    "combo_grade": "A2",
+                    "golden_bucket": "gold",
+                    "score": 76.0,
+                    "analysis_mode": "search_metrics",
+                    "metrics": {"volume": 1200.0, "cpc": 210.0},
+                },
+                {
+                    "keyword": "ISA 계좌 개설",
+                    "profitability_grade": "B",
+                    "attackability_grade": "1",
+                    "combo_grade": "B1",
+                    "golden_bucket": "gold",
+                    "score": 71.0,
+                    "analysis_mode": "search_metrics",
+                    "metrics": {"volume": 740.0, "cpc": 165.0},
+                },
+            ],
+        }
+    )
+
+    export_payload = result["selection_export"]
+    assert export_payload["row_count"] == len(result["selected_keywords"])
+    live_path = next(Path(item["path"]) for item in export_payload["artifacts"] if item["format"] == "txt_live")
+    archive_path = next(Path(item["path"]) for item in export_payload["artifacts"] if item["format"] == "txt_archive")
+    assert live_path.exists()
+    assert archive_path.exists()
+    assert live_path.read_text(encoding="utf-8").splitlines() == [item["keyword"] for item in result["selected_keywords"]]
+    assert live_path.name.endswith("__비즈니스경제.txt")

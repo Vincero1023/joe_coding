@@ -10,6 +10,7 @@ from app.selector.longtail import (
     resolve_longtail_options,
     rewrite_low_signal_longtail_suggestion,
 )
+from app.title.category_detector import detect_category
 
 TITLE_KEYWORD_MODE_LABELS: dict[str, str] = {
     "single": "단일 키워드",
@@ -121,6 +122,40 @@ _TITLE_TARGET_GENERIC_TOKENS = {
 _TITLE_TARGET_GENERIC_TOKEN_KEYS = {
     normalize_key(token) for token in _TITLE_TARGET_GENERIC_TOKENS if normalize_key(token)
 }
+_SELECTED_SIGNATURE_INTENT_TOKENS = (
+    "추천",
+    "비교",
+    "차이",
+    "장단점",
+    "후기",
+    "리뷰",
+    "방법",
+    "설정",
+    "연결",
+    "문제",
+    "오류",
+    "가격",
+    "예약",
+    "신청",
+    "체크",
+    "체크리스트",
+)
+_SELECTED_SIGNATURE_INTENT_TOKEN_KEYS = {
+    normalize_key(token) for token in _SELECTED_SIGNATURE_INTENT_TOKENS if normalize_key(token)
+}
+_FINANCE_MISMATCH_TARGET_PATTERNS = (
+    "실사용 차이",
+    "실사용",
+    "사용 후기",
+    "자주 생기는 문제",
+    "설정 팁",
+    "연결 문제",
+    "연결 방법",
+    "동선 체크",
+)
+_FINANCE_MISMATCH_TARGET_KEYS = tuple(
+    normalize_key(pattern) for pattern in _FINANCE_MISMATCH_TARGET_PATTERNS if normalize_key(pattern)
+)
 
 
 def resolve_title_keyword_modes(input_data: Any) -> list[str]:
@@ -314,6 +349,8 @@ def _resolve_selected_longtail_suggestions(
         if verification_status in {"fail", "error"}:
             continue
         for candidate_suggestion in rewrite_low_signal_longtail_suggestion(suggestion, limit=1):
+            if _is_finance_frame_mismatch_keyword(candidate_suggestion.get("longtail_keyword")):
+                continue
             grouped_suggestions[representative_key].append(candidate_suggestion)
 
     output: list[dict[str, Any]] = []
@@ -661,6 +698,16 @@ def _is_low_signal_longtail_keyword(keyword: Any) -> bool:
     return any(pattern in keyword_key for pattern in _LOW_SIGNAL_LONGTAIL_KEYS)
 
 
+def _is_finance_frame_mismatch_keyword(keyword: Any) -> bool:
+    normalized_keyword = normalize_text(keyword)
+    keyword_key = normalize_key(normalized_keyword)
+    if not keyword_key:
+        return False
+    if detect_category(normalized_keyword) != "finance":
+        return False
+    return any(pattern in keyword_key for pattern in _FINANCE_MISMATCH_TARGET_KEYS)
+
+
 def _sanitize_related_mode_keyword(keyword: str, *, representative_keyword: str) -> str:
     normalized_keyword = _collapse_duplicate_keyword_tokens(normalize_text(keyword))
     normalized_representative = normalize_text(representative_keyword)
@@ -834,7 +881,11 @@ def _resolve_selected_item_signature(
         and normalize_key(token) not in _TITLE_TARGET_GENERIC_TOKEN_KEYS
     ]
     if filtered_token_keys:
-        return "|".join(sorted(set(filtered_token_keys)))
+        signature_token_keys = sorted(set(filtered_token_keys))
+        intent_token_key = _resolve_selected_item_intent_token(keyword)
+        if intent_token_key and len(signature_token_keys) <= 2:
+            signature_token_keys.append(f"intent:{intent_token_key}")
+        return "|".join(signature_token_keys)
 
     fallback_token_keys = [
         normalize_key(token)
@@ -846,6 +897,17 @@ def _resolve_selected_item_signature(
     if fallback_token_keys:
         return f"kw:{'|'.join(sorted(set(fallback_token_keys)))}"
     return f"raw:{normalize_key(keyword)}"
+
+
+def _resolve_selected_item_intent_token(keyword: str) -> str:
+    intent_token_keys = [
+        normalize_key(token)
+        for token in tokenize_text(keyword)
+        if normalize_key(token) in _SELECTED_SIGNATURE_INTENT_TOKEN_KEYS
+    ]
+    if not intent_token_keys:
+        return ""
+    return intent_token_keys[-1]
 
 
 def _pick_preferred_selected_item(
@@ -947,6 +1009,8 @@ def _should_skip_related_mode_suggestion(
     representative_keyword: str,
 ) -> bool:
     if _is_low_signal_longtail_keyword(suggestion.get("longtail_keyword")):
+        return True
+    if _is_finance_frame_mismatch_keyword(suggestion.get("longtail_keyword")):
         return True
 
     source_keyword = normalize_text(suggestion.get("source_keyword"))

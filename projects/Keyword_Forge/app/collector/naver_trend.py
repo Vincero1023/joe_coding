@@ -17,7 +17,8 @@ from app.expander.utils.throttle import wait_for_naver_keyword_request
 _API_BASE = "https://creator-advisor.naver.com/api/v6"
 _DEFAULT_TIMEOUT = 8.0
 _KST = ZoneInfo("Asia/Seoul")
-_LOCAL_SESSION_CACHE_FILE = Path(".local") / "naver_playwright" / "naver_creator_session.json"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_LOCAL_SESSION_CACHE_FILE = _PROJECT_ROOT / ".local" / "naver_playwright" / "naver_creator_session.json"
 
 
 class NaverTrendError(RuntimeError):

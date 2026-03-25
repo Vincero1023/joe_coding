@@ -1,6 +1,7 @@
 import sys
 import json
 from http.cookiejar import Cookie, CookieJar
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
@@ -177,6 +178,15 @@ def test_local_naver_session_cache_endpoint_returns_cached_summary() -> None:
     assert result["available"] is True
     assert result["browser"] == "chrome"
     assert result["cookie_count"] == 3
+
+
+def test_local_naver_login_browser_session_paths_use_project_root() -> None:
+    from app.local import naver_login_browser
+
+    expected_root = Path(naver_login_browser.__file__).resolve().parents[2]
+
+    assert naver_login_browser._SESSION_DIR == expected_root / ".local" / "naver_playwright"
+    assert naver_login_browser._SESSION_CACHE_FILE == expected_root / ".local" / "naver_playwright" / "naver_creator_session.json"
 
 
 def test_local_naver_login_browser_service_wraps_playwright_startup_error() -> None:

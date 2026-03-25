@@ -223,6 +223,13 @@ def test_pipeline_run_returns_all_stage_outputs(tmp_path: Path) -> None:
     assert isinstance(result["longtail_suggestions"], list)
     assert result["longtail_summary"]["suggestion_count"] == len(result["longtail_suggestions"])
     assert "cannibalization_report" in result
+    assert result["selection_export"]["row_count"] == len(result["selected_keywords"])
+    selection_live_path = next(
+        Path(item["path"])
+        for item in result["selection_export"]["artifacts"]
+        if item["format"] == "txt_live"
+    )
+    assert selection_live_path.exists()
     assert len(result["generated_titles"]) == len(result["selected_keywords"])
     assert all(len(item["titles"]["naver_home"]) == 2 for item in result["generated_titles"][:10])
     assert Path(result["title_generation_meta"]["export_artifact"]["path"]).exists()

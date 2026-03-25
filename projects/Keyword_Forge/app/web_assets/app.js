@@ -6828,7 +6828,11 @@ function renderProgress() {
     elements.progressText.textContent = `${completedCount} / ${STAGES.length} 단계 완료`;
 
     if (runningStage) {
-        elements.progressDetail.textContent = `${runningStage.label} 진행 중 · ${formatElapsed(state.stageStatus[runningStage.key])}`;
+        const runningStatus = state.stageStatus[runningStage.key];
+        const runningMessage = String(runningStatus?.message || "").trim();
+        elements.progressDetail.textContent = runningMessage
+            ? `${runningStage.label} 진행 중 · ${runningMessage} · ${formatElapsed(runningStatus)}`
+            : `${runningStage.label} 진행 중 · ${formatElapsed(runningStatus)}`;
         return;
     }
     if (cancelledStages.length > 0) {
@@ -11753,6 +11757,7 @@ async function runSelectStage(options = {}) {
         stageKey: "selected",
         endpoint: "/select",
         inputData: {
+            ...buildTitleExportRequestContext(),
             analyzed_keywords: guardedSelectionCandidates,
             select_options: allowedGrades.length
                 ? { allowed_grades: allowedGrades, mode: "grade_filter" }
@@ -11776,6 +11781,17 @@ async function runSelectStage(options = {}) {
             : `선별 완료: ${countItems(result.selected_keywords)}건`,
         "success",
     );
+    const selectionExportArtifacts = Array.isArray(result.selection_export?.artifacts)
+        ? result.selection_export.artifacts
+        : result.selection_export?.artifact
+            ? [result.selection_export.artifact]
+            : [];
+    if (selectionExportArtifacts.length) {
+        addLog(
+            `선별 키워드 파일 저장: ${selectionExportArtifacts.map((item) => item.filename).filter(Boolean).join(", ")}`,
+            "success",
+        );
+    }
     renderAll();
     return state.results.selected;
 }

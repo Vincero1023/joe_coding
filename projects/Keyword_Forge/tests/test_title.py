@@ -2,6 +2,7 @@ from unittest.mock import patch
 import csv
 import json
 from pathlib import Path
+import pytest
 
 from openpyxl import load_workbook
 
@@ -12,6 +13,7 @@ from app.title.ai_client import (
     request_ai_titles,
 )
 from app.title.category_detector import detect_category
+from app.title.exporter import export_generated_titles
 from app.title.main import run
 from app.title.quality import assess_single_title, enrich_title_results
 from app.title.rules import NAVER_HOME_MAX_LENGTH
@@ -22,6 +24,102 @@ from app.title.templates import build_blog_titles, build_naver_home_titles
 
 def test_detect_category_handles_finance_keyword() -> None:
     assert detect_category("보험 추천") == "finance"
+
+
+def test_detect_category_distinguishes_real_estate_and_finance_signals() -> None:
+    assert detect_category("서울 청약 경쟁률") == "real_estate"
+    assert detect_category("ETF 리밸런싱 일정") == "finance"
+
+
+def test_title_quality_rejects_finance_mismatch_frame() -> None:
+    report = assess_single_title(
+        "국제금시세",
+        "국제금시세 실사용 차이, 직접 써본 기준",
+        "naver_home",
+        {},
+    )
+
+    assert report["status"] == "retry"
+    assert report["checks"]["finance_domain_mismatch"] is True
+    assert "금융 카테고리와 맞지 않는 제목 프레임입니다." in report["issues"]
+
+
+def test_title_quality_rejects_finance_stale_investment_wrapper() -> None:
+    report = assess_single_title(
+        "국제금시세",
+        "국제금시세 투자 전략 가이드",
+        "blog",
+        {},
+    )
+
+    assert report["status"] == "retry"
+    assert report["checks"]["finance_stale_wrapper"] is True
+    assert "금융 키워드에 비해 제목이 너무 느슨한 투자형 템플릿입니다." in report["issues"]
+
+
+def test_ai_prompt_builder_adds_finance_market_shape_hint() -> None:
+    prompt = _build_user_prompt_from_items(
+        [
+            {
+                "keyword": "국제금시세",
+                "quality_report": {
+                    "bundle_score": 82,
+                    "status": "review",
+                    "channel_scores": {"naver_home": 81, "blog": 80},
+                },
+                "target_mode": "single",
+            }
+        ]
+    )
+
+    assert "finance market: use gap, interpretation, checkpoint, variable" in prompt
+    assert "Prefer concise hook-first wording" in prompt
+
+
+def test_build_title_targets_skips_finance_device_style_longtails() -> None:
+    items, summary = build_title_targets(
+        {
+            "selected_keywords": [
+                {"keyword": "국제금시세", "score": 52.0},
+            ],
+            "longtail_suggestions": [
+                {
+                    "suggestion_id": "longtail-01",
+                    "representative_keyword": "국제금시세",
+                    "source_keyword": "국제금시세",
+                    "longtail_keyword": "국제금시세 실사용 차이",
+                    "verification_status": "pass",
+                    "verified_score": 72.0,
+                },
+                {
+                    "suggestion_id": "longtail-02",
+                    "representative_keyword": "국제금시세",
+                    "source_keyword": "국제금시세",
+                    "longtail_keyword": "국제금시세 자주 생기는 문제",
+                    "verification_status": "pass",
+                    "verified_score": 70.0,
+                },
+                {
+                    "suggestion_id": "longtail-03",
+                    "representative_keyword": "국제금시세",
+                    "source_keyword": "국제금시세",
+                    "longtail_keyword": "국제금시세 국내외 차이",
+                    "verification_status": "pass",
+                    "verified_score": 69.0,
+                },
+            ],
+            "title_options": {
+                "keyword_modes": ["longtail_selected"],
+            },
+        }
+    )
+
+    keywords = {item["keyword"] for item in items}
+
+    assert summary["mode_counts"]["longtail_selected"] == 1
+    assert "국제금시세 국내외 차이" in keywords
+    assert "국제금시세 실사용 차이" not in keywords
+    assert "국제금시세 자주 생기는 문제" not in keywords
 
 
 def test_title_generator_returns_two_titles_per_type() -> None:
@@ -154,6 +252,126 @@ def test_title_quality_allows_concrete_context_on_practical_keyword() -> None:
     )
 
     assert report["checks"]["generic_overlay_on_practical_keyword"] is False
+
+
+def test_title_quality_prefers_hookier_naver_home_title() -> None:
+    plain = assess_single_title(
+        "ISA 계좌 개설",
+        "ISA 계좌 개설 조건과 절차 정리",
+        "naver_home",
+        {},
+    )
+    hooky = assess_single_title(
+        "ISA 계좌 개설",
+        "ISA 계좌 개설 왜 늦어질까",
+        "naver_home",
+        {},
+    )
+
+    assert plain["checks"]["home_hook_signal"] is False
+    assert hooky["checks"]["home_hook_signal"] is True
+    assert plain["score"] < hooky["score"]
+
+
+def test_title_quality_penalizes_underdeveloped_naver_home_axis_label() -> None:
+    weak = assess_single_title(
+        "24K금값",
+        "24K금값, 환율 영향",
+        "naver_home",
+        {},
+        item_context={
+            "keyword": "24K금값",
+            "target_mode": "single",
+            "source_kind": "selected_keyword",
+        },
+    )
+    hooky = assess_single_title(
+        "24K금값",
+        "24K금값, 왜 국내 시세와 다를까",
+        "naver_home",
+        {},
+        item_context={
+            "keyword": "24K금값",
+            "target_mode": "single",
+            "source_kind": "selected_keyword",
+        },
+    )
+
+    assert weak["checks"]["home_hook_signal"] is False
+    assert weak["checks"]["underdeveloped_home_title"] is True
+    assert "네이버홈형 제목인데 축약형 라벨만 던지고 끝납니다." in weak["issues"]
+    assert weak["score"] < hooky["score"]
+
+
+def test_title_quality_prefers_informational_blog_title_over_vague_hook() -> None:
+    vague = assess_single_title(
+        "ISA 계좌 개설",
+        "ISA 계좌 개설 왜 다르게 보일까",
+        "blog",
+        {},
+    )
+    concrete = assess_single_title(
+        "ISA 계좌 개설",
+        "ISA 계좌 개설 준비물과 소요 시간",
+        "blog",
+        {},
+    )
+
+    assert vague["checks"]["blog_info_signal"] is False
+    assert concrete["checks"]["blog_info_signal"] is True
+    assert vague["score"] < concrete["score"]
+
+
+def test_title_quality_prefers_blog_search_structure_over_hook_only() -> None:
+    vague = assess_single_title(
+        "ISA 계좌 개설",
+        "ISA 계좌 개설 왜 늦어질까",
+        "blog",
+        {},
+    )
+    structured = assess_single_title(
+        "ISA 계좌 개설",
+        "ISA 계좌 개설 준비물과 비대면 개설 순서",
+        "blog",
+        {},
+    )
+
+    assert vague["checks"]["blog_search_structure"] is False
+    assert structured["checks"]["blog_search_structure"] is True
+    assert vague["score"] < structured["score"]
+
+
+def test_title_quality_allows_non_prefix_blog_title_when_structure_is_strong() -> None:
+    report = assess_single_title(
+        "국제 금값 시세",
+        "환율과 국내 시세 차이, 국제 금값 시세 보는 법",
+        "blog",
+        {},
+    )
+
+    assert report["checks"]["contains_keyword"] is True
+    assert report["checks"]["starts_with_keyword"] is False
+    assert report["checks"]["blog_search_structure"] is True
+    assert "키워드가 제목 앞부분에 오지 않습니다." not in report["issues"]
+
+
+def test_title_quality_flags_generic_blog_wrapper_even_with_structure() -> None:
+    generic = assess_single_title(
+        "오늘금시세",
+        "오늘금시세 최근 동향과 전망",
+        "blog",
+        {},
+    )
+    concrete = assess_single_title(
+        "오늘금시세",
+        "오늘금시세 국내 시세와 국제 금값 차이 정리",
+        "blog",
+        {},
+    )
+
+    assert generic["checks"]["blog_generic_wrapper"] is True
+    assert concrete["checks"]["blog_generic_wrapper"] is False
+    assert generic["score"] < concrete["score"]
 
 
 def test_title_quality_rejects_vague_teaser_and_reveal_frames() -> None:
@@ -324,6 +542,23 @@ def test_title_quality_allows_freshness_claim_when_issue_context_exists() -> Non
     )
 
     assert report["checks"]["unverified_freshness_claim"] is False
+
+
+def test_title_quality_allows_finance_analysis_window_without_live_issue_context() -> None:
+    report = assess_single_title(
+        "국제금시세",
+        "국제금시세, 2주간의 추이 분석",
+        "blog",
+        {},
+        item_context={
+            "keyword": "국제금시세",
+            "target_mode": "single",
+            "source_kind": "selected_keyword",
+        },
+    )
+
+    assert report["checks"]["unverified_freshness_claim"] is False
+    assert report["status"] in {"review", "good"}
 
 
 def test_title_quality_normalizes_colon_style_and_flags_it() -> None:
@@ -559,6 +794,12 @@ def test_title_generator_exports_csv_by_default_when_enabled(tmp_path: Path) -> 
 
     assert rows[0] == [
         "keyword",
+        "bundle_score",
+        "bundle_status",
+        "naver_home_score",
+        "blog_score",
+        "target_mode",
+        "source_kind",
         "duplicate",
         "recent_used_date",
         "naver_home_1",
@@ -821,6 +1062,25 @@ def test_ai_prompt_builder_warns_against_keyword_shortening() -> None:
     assert "Do not shorten the keyword phrase" in prompt
 
 
+def test_ai_prompt_builder_includes_category_boundary_rule_and_senior_overlay() -> None:
+    prompt = _build_user_prompt_from_items(
+        [
+            {
+                "keyword": "기초연금 신청자격",
+                "quality_report": {
+                    "bundle_score": 80,
+                    "status": "review",
+                    "channel_scores": {"naver_home": 79, "blog": 78},
+                },
+                "target_mode": "single",
+            }
+        ]
+    )
+
+    assert "Keep strict category boundaries." in prompt
+    assert "eligibility, application timing, care, safety aids" in prompt
+
+
 def test_request_ai_titles_includes_live_issue_context_in_prompt() -> None:
     html = """
     <html>
@@ -951,6 +1211,61 @@ def test_resolve_retry_delay_seconds_reads_provider_hint() -> None:
     assert delay == 44.460159992
 
 
+@pytest.mark.skip(reason="legacy platform-dedupe expectation replaced by global cross-platform dedupe")
+def test_title_export_can_split_queue_by_platform_with_platform_only_dedupe(tmp_path: Path) -> None:
+    export_payload = export_generated_titles(
+        {
+            "category": "비즈니스경제",
+            "seed_input": "국제금시세",
+            "title_export": {
+                "enabled": True,
+                "output_dir": str(tmp_path),
+                "queue_export": {
+                    "enabled": True,
+                    "destination": "all",
+                    "quality_gate_enabled": False,
+                    "topic": "금융",
+                },
+            },
+        },
+        [
+            {
+                "keyword": "국제금시세",
+                "titles": {
+                    "naver_home": ["같은 제목", "보조 홈 제목"],
+                    "blog": ["같은 제목", "보조 블로그 제목"],
+                },
+                "target_mode": "single",
+            },
+            {
+                "keyword": "오늘금시세",
+                "titles": {
+                    "naver_home": ["같은 제목", "다른 홈 제목"],
+                    "blog": ["같은 제목", "다른 블로그 제목"],
+                },
+                "target_mode": "single",
+            },
+        ],
+    )
+
+    queue_export = export_payload["queue_export"]
+    assert queue_export["destination"] == "all"
+    assert set(queue_export["destinations"]) == {"home", "wordpress"}
+    assert len(queue_export["bundles"]) == 2
+
+    bundles = {bundle["destination"]: bundle for bundle in queue_export["bundles"]}
+    assert bundles["home"]["row_count"] == 1
+    assert bundles["wordpress"]["row_count"] == 1
+
+    home_live_path = next(Path(item["path"]) for item in bundles["home"]["artifacts"] if item["format"] == "txt_live")
+    wordpress_live_path = next(Path(item["path"]) for item in bundles["wordpress"]["artifacts"] if item["format"] == "txt_live")
+
+    assert home_live_path.parent.name == "home"
+    assert wordpress_live_path.parent.name == "wordpress"
+    assert home_live_path.read_text(encoding="utf-8").splitlines() == ["같은 제목"]
+    assert wordpress_live_path.read_text(encoding="utf-8").splitlines() == ["같은 제목"]
+
+
 def test_title_generation_options_parse_quality_retry_settings() -> None:
     options = TitleGenerationOptions.from_input(
         {
@@ -964,6 +1279,103 @@ def test_title_generation_options_parse_quality_retry_settings() -> None:
 
     assert options.auto_retry_enabled is False
     assert options.quality_retry_threshold == 92
+
+
+def test_title_export_queue_filters_retry_items_by_default(tmp_path: Path) -> None:
+    export_payload = export_generated_titles(
+        {
+            "title_export": {
+                "enabled": True,
+                "output_dir": str(tmp_path),
+                "queue_export": {
+                    "enabled": True,
+                    "destination": "wordpress",
+                    "topic": "finance",
+                },
+            },
+        },
+        [
+            {
+                "keyword": "alpha keyword",
+                "titles": {
+                    "blog": ["keep this title"],
+                    "naver_home": ["home keep"],
+                },
+                "quality_report": {
+                    "bundle_score": 82,
+                    "status": "review",
+                    "channel_scores": {"naver_home": 80, "blog": 79},
+                },
+            },
+            {
+                "keyword": "beta keyword",
+                "titles": {
+                    "blog": ["drop this title"],
+                    "naver_home": ["home drop"],
+                },
+                "quality_report": {
+                    "bundle_score": 61,
+                    "status": "retry",
+                    "channel_scores": {"naver_home": 62, "blog": 60},
+                },
+            },
+        ],
+    )
+
+    queue_export = export_payload["queue_export"]
+    assert queue_export["destination"] == "wordpress"
+    assert queue_export["row_count"] == 1
+    live_path = next(Path(item["path"]) for item in queue_export["artifacts"] if item["format"] == "txt_live")
+    assert live_path.read_text(encoding="utf-8").splitlines() == ["keep this title"]
+
+
+def test_title_export_uses_fallback_titles_to_avoid_cross_platform_duplicates(tmp_path: Path) -> None:
+    export_payload = export_generated_titles(
+        {
+            "category": "finance",
+            "seed_input": "gold price",
+            "title_export": {
+                "enabled": True,
+                "output_dir": str(tmp_path),
+                "queue_export": {
+                    "enabled": True,
+                    "destination": "all",
+                    "quality_gate_enabled": False,
+                    "topic": "finance",
+                },
+            },
+        },
+        [
+            {
+                "keyword": "gold price",
+                "titles": {
+                    "naver_home": ["shared title", "home alt"],
+                    "blog": ["shared title", "blog alt"],
+                },
+                "target_mode": "single",
+            },
+            {
+                "keyword": "today gold price",
+                "titles": {
+                    "naver_home": ["shared title", "home alt 2"],
+                    "blog": ["shared title", "blog alt 2"],
+                },
+                "target_mode": "single",
+            },
+        ],
+    )
+
+    bundles = {bundle["destination"]: bundle for bundle in export_payload["queue_export"]["bundles"]}
+    assert bundles["home"]["row_count"] == 2
+    assert bundles["wordpress"]["row_count"] == 2
+
+    home_live_path = next(Path(item["path"]) for item in bundles["home"]["artifacts"] if item["format"] == "txt_live")
+    wordpress_live_path = next(Path(item["path"]) for item in bundles["wordpress"]["artifacts"] if item["format"] == "txt_live")
+
+    assert home_live_path.read_text(encoding="utf-8").splitlines() == ["shared title", "home alt 2"]
+    assert wordpress_live_path.read_text(encoding="utf-8").splitlines() == ["blog alt", "blog alt 2"]
+    assert home_live_path.name.endswith("__finance.txt")
+    assert wordpress_live_path.name.endswith("__finance.txt")
 
 
 def test_title_generator_reports_preset_metadata() -> None:
@@ -1963,6 +2375,28 @@ def test_build_title_targets_dedupes_near_duplicate_single_keywords() -> None:
         "로지텍 지슈스 사전예약",
         "로지텍 g304",
     }
+
+
+def test_build_title_targets_keeps_single_keywords_when_intent_token_differs() -> None:
+    items, summary = build_title_targets(
+        {
+            "selected_keywords": [
+                {"keyword": "경제 뉴스 추천", "score": 51.0},
+                {"keyword": "경제 뉴스 비교", "score": 49.0},
+                {"keyword": "경제 정책 추천", "score": 47.0},
+            ],
+            "title_options": {
+                "keyword_modes": ["single"],
+            },
+        }
+    )
+
+    single_keywords = {item["keyword"] for item in items if item["target_mode"] == "single"}
+
+    assert summary["mode_counts"]["single"] == 3
+    assert "경제 뉴스 추천" in single_keywords
+    assert "경제 뉴스 비교" in single_keywords
+    assert "경제 정책 추천" in single_keywords
 
 
 def test_build_title_targets_uses_deduped_selected_base_for_v1_suggestions() -> None:

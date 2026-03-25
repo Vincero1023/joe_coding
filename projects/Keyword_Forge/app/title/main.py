@@ -11,7 +11,8 @@ if _SCRIPT_DIR in sys.path:
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from typing import Any
+from threading import Event
+from typing import Any, Callable
 
 from app.core.interfaces import ModuleRunner
 from app.expander.utils.tokenizer import normalize_text
@@ -22,7 +23,13 @@ from app.title.title_generator import generate_titles
 
 
 class TitleService:
-    def run(self, input_data: Any) -> Any:
+    def run(
+        self,
+        input_data: Any,
+        *,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        stop_event: Event | None = None,
+    ) -> Any:
         if isinstance(input_data, dict):
             items, target_summary = build_title_targets(input_data)
             options = TitleGenerationOptions.from_input(input_data)
@@ -31,11 +38,23 @@ class TitleService:
             items = _coerce_input_items(input_data)
             target_summary = {}
             options = None
-        generated, meta = generate_titles(items, options=options)
+        generated, meta = generate_titles(
+            items,
+            options=options,
+            progress_callback=progress_callback,
+            stop_event=stop_event,
+        )
         if target_summary:
             meta["target_summary"] = target_summary
         if isinstance(input_data, dict):
             try:
+                _publish_title_service_progress(
+                    progress_callback,
+                    phase="export",
+                    progress_percent=98,
+                    total_count=len(generated),
+                    message="제목 결과 저장 중",
+                )
                 export_payload = export_generated_titles(input_data, generated)
             except Exception as exc:  # pragma: no cover - defensive runtime guard
                 meta["export_artifact_error"] = str(exc)
@@ -62,6 +81,14 @@ class TitleService:
                     )
                     if queue_export:
                         meta["queue_export"] = queue_export
+        _publish_title_service_progress(
+            progress_callback,
+            phase="completed",
+            progress_percent=100,
+            processed_count=len(generated),
+            total_count=len(generated),
+            message=f"{len(generated)} / {len(generated)}세트 완료" if generated else "제목 생성 완료",
+        )
 
         if isinstance(input_data, list):
             return generated
@@ -103,6 +130,15 @@ EXAMPLE_INPUT = [
 
 def run(input_data: Any) -> Any:
     return service.run(input_data)
+
+
+def run_with_progress(
+    input_data: Any,
+    *,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    stop_event: Event | None = None,
+) -> Any:
+    return service.run(input_data, progress_callback=progress_callback, stop_event=stop_event)
 
 
 class TitleModule(ModuleRunner):
@@ -203,3 +239,12 @@ if __name__ == "__main__":
 
     print("제목 생성 예시 결과")
     pprint(run(EXAMPLE_INPUT), sort_dicts=False)
+
+
+def _publish_title_service_progress(
+    progress_callback: Callable[[dict[str, Any]], None] | None,
+    **payload: Any,
+) -> None:
+    if progress_callback is None:
+        return
+    progress_callback({"type": "phase", **payload})

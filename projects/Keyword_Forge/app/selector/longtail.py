@@ -12,6 +12,7 @@ from app.analyzer.scorer import (
 )
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
 from app.selector.cannibalization import build_cannibalization_report
+from app.title.category_detector import detect_category
 
 
 _OPTIONAL_SUFFIX_LIBRARY: dict[str, dict[str, str]] = {
@@ -97,6 +98,58 @@ _FINANCE_CONCRETE_SUFFIXES: dict[str, tuple[str, ...]] = {
     "action": ("막히는 이유", "신청 방법", "주의점"),
     "info": ("바뀐 점", "주의점", "자주 묻는 질문"),
     "policy": ("놓치기 쉬운 조건", "바뀐 점", "주의점"),
+}
+
+
+_FINANCE_MARKET_TOPIC_TOKENS = (
+    "지수",
+    "선물",
+    "야간선물",
+    "실시간",
+    "시세",
+    "금시세",
+    "금값",
+    "국제금",
+    "환율",
+    "달러",
+    "코스피",
+    "코스닥",
+    "나스닥",
+    "s&p",
+    "etf",
+    "리밸런싱",
+)
+_FINANCE_ACCOUNT_TOPIC_TOKENS = (
+    "계좌",
+    "개설",
+    "가입",
+    "신청",
+    "청약",
+    "보험",
+    "카드",
+    "대출",
+    "연금",
+    "지원금",
+    "환급",
+    "공제",
+)
+_FINANCE_MARKET_CONCRETE_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "general": ("국내외 차이", "같이 봐야 할 변수", "확인 포인트"),
+    "commercial": ("체크할 기준선", "국내외 차이", "같이 보는 변수"),
+    "review": ("표시 가격과 다른 이유", "국내 시세와 차이", "환율 영향"),
+    "action": ("확인 시간", "보는 순서", "반영 시차"),
+    "info": ("보는 법", "업데이트 시간", "반영 시차"),
+    "location": ("기준선", "확인 포인트", "흐름 포인트"),
+    "policy": ("체크할 기준선", "같이 봐야 할 변수", "국내외 차이"),
+}
+_FINANCE_ACCOUNT_CONCRETE_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "general": ("조건 차이", "개설 전 확인할 것", "지연되는 이유"),
+    "commercial": ("혜택 차이", "조건 차이", "선택 기준"),
+    "review": ("비대면과 영업점 차이", "체감되는 차이", "소요 시간 차이"),
+    "action": ("준비물", "비대면 개설 순서", "막히는 이유"),
+    "info": ("조건", "준비물", "자주 막히는 이유"),
+    "location": ("확인 포인트", "먼저 볼 기준", "헷갈리는 포인트"),
+    "policy": ("신청 조건", "놓치기 쉬운 조건", "변경 포인트"),
 }
 
 
@@ -274,7 +327,54 @@ def _build_cluster_longtail_suggestions(
         unique_rows.append(row)
         if len(unique_rows) >= 3:
             break
+    optional_suffix_keys = list(longtail_options.get("optional_suffix_keys", []))
+    if optional_suffix_keys:
+        unique_rows = _ensure_optional_suffix_row(
+            unique_rows,
+            candidate_rows,
+            optional_suffix_keys=optional_suffix_keys,
+        )
     return unique_rows
+
+
+def _ensure_optional_suffix_row(
+    selected_rows: list[dict[str, Any]],
+    candidate_rows: list[dict[str, Any]],
+    *,
+    optional_suffix_keys: list[str],
+) -> list[dict[str, Any]]:
+    if not selected_rows or not optional_suffix_keys:
+        return selected_rows
+    if any(_has_optional_suffix(row.get("longtail_keyword"), optional_suffix_keys=optional_suffix_keys) for row in selected_rows):
+        return selected_rows
+
+    optional_candidates = [
+        row
+        for row in sorted(candidate_rows, key=_longtail_sort_key, reverse=True)
+        if _has_optional_suffix(row.get("longtail_keyword"), optional_suffix_keys=optional_suffix_keys)
+    ]
+    if not optional_candidates:
+        return selected_rows
+
+    replacement = optional_candidates[0]
+    replacement_key = normalize_key(replacement.get("longtail_keyword"))
+    if any(normalize_key(row.get("longtail_keyword")) == replacement_key for row in selected_rows):
+        return selected_rows
+    return [*selected_rows[:-1], replacement]
+
+
+def _has_optional_suffix(keyword: Any, *, optional_suffix_keys: list[str]) -> bool:
+    normalized_keyword = normalize_text(keyword)
+    if not normalized_keyword:
+        return False
+    for raw_key in optional_suffix_keys:
+        option = _OPTIONAL_SUFFIX_LIBRARY.get(str(raw_key or "").strip().lower())
+        if not option:
+            continue
+        suffix = normalize_text(option.get("suffix"))
+        if suffix and normalized_keyword.endswith(suffix):
+            return True
+    return False
 
 
 def _build_longtail_suggestion(
@@ -349,7 +449,16 @@ def _build_longtail_candidates(
 
     candidates: list[str] = []
 
-    if intent_key == "review":
+    if _looks_like_finance_keyword(base_phrase):
+        candidates.extend(
+            _build_concrete_longtail_candidates(
+                base_phrase,
+                normalized_modifier,
+                representative_keyword=representative_keyword or base_phrase,
+                intent_key=intent_key,
+            )
+        )
+    elif intent_key == "review":
         candidates.extend([
             f"{base_phrase} {normalized_modifier or '후기'} 체크포인트",
             f"{base_phrase} {normalized_modifier or '리뷰'} 보기 전 체크",
@@ -505,11 +614,42 @@ def _build_concrete_longtail_candidates(
 
 def _resolve_concrete_suffixes(keyword: str, *, intent_key: str) -> tuple[str, ...]:
     keyword_key = normalize_key(keyword)
-    if any(token in keyword_key for token in _FINANCE_TOPIC_TOKENS):
-        return _FINANCE_CONCRETE_SUFFIXES.get(intent_key) or _FINANCE_CONCRETE_SUFFIXES["general"]
+    if _looks_like_finance_keyword(keyword):
+        return _resolve_finance_concrete_suffixes(keyword, intent_key=intent_key)
     if any(token in keyword_key for token in _DEVICE_TOPIC_TOKENS):
         return _DEVICE_CONCRETE_SUFFIXES.get(intent_key) or _DEVICE_CONCRETE_SUFFIXES["general"]
     return _DEFAULT_CONCRETE_SUFFIXES.get(intent_key) or _DEFAULT_CONCRETE_SUFFIXES["general"]
+
+
+def _looks_like_finance_keyword(keyword: str) -> bool:
+    keyword_key = normalize_key(keyword)
+    if not keyword_key:
+        return False
+    if detect_category(keyword) == "finance":
+        return True
+    return any(token in keyword_key for token in _FINANCE_TOPIC_TOKENS)
+
+
+def _looks_like_finance_market_keyword(keyword: str) -> bool:
+    keyword_key = normalize_key(keyword)
+    if not keyword_key:
+        return False
+    return any(normalize_key(token) in keyword_key for token in _FINANCE_MARKET_TOPIC_TOKENS if normalize_key(token))
+
+
+def _looks_like_finance_account_keyword(keyword: str) -> bool:
+    keyword_key = normalize_key(keyword)
+    if not keyword_key:
+        return False
+    return any(normalize_key(token) in keyword_key for token in _FINANCE_ACCOUNT_TOPIC_TOKENS if normalize_key(token))
+
+
+def _resolve_finance_concrete_suffixes(keyword: str, *, intent_key: str) -> tuple[str, ...]:
+    if _looks_like_finance_market_keyword(keyword):
+        return _FINANCE_MARKET_CONCRETE_SUFFIXES.get(intent_key) or _FINANCE_MARKET_CONCRETE_SUFFIXES["general"]
+    if _looks_like_finance_account_keyword(keyword):
+        return _FINANCE_ACCOUNT_CONCRETE_SUFFIXES.get(intent_key) or _FINANCE_ACCOUNT_CONCRETE_SUFFIXES["general"]
+    return _FINANCE_CONCRETE_SUFFIXES.get(intent_key) or _FINANCE_CONCRETE_SUFFIXES["general"]
 
 
 def _build_optional_suffix_candidates(

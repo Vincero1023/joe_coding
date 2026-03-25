@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from openpyxl import Workbook
 
 from app.expander.utils.tokenizer import normalize_text
+from app.title.quality import TITLE_QUALITY_REVIEW_SCORE
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -22,6 +23,12 @@ _FILENAME_SPACE_PATTERN = re.compile(r"\s+")
 _FORMAT_SPLIT_PATTERN = re.compile(r"[\s,|;/]+")
 _TITLE_EXPORT_HEADER = [
     "keyword",
+    "bundle_score",
+    "bundle_status",
+    "naver_home_score",
+    "blog_score",
+    "target_mode",
+    "source_kind",
     "duplicate",
     "recent_used_date",
     "naver_home_1",
@@ -44,6 +51,15 @@ _QUEUE_DESTINATION_CHANNEL_MAP = {
     "wordpress": "blog",
     "home": "naver_home",
 }
+_QUEUE_DESTINATION_ALIASES = {
+    "blog": "wordpress",
+    "wp": "wordpress",
+    "naver_home": "home",
+    "both": "all",
+    "separate": "all",
+}
+_QUEUE_ALLOWED_STATUSES = {"good", "review", "retry"}
+_DEFAULT_QUEUE_ALLOWED_STATUSES = ("good", "review")
 
 
 @dataclass(frozen=True)
@@ -52,6 +68,10 @@ class TitleQueueExportSettings:
     topic: str = ""
     destination: str = ""
     append: bool = True
+    quality_gate_enabled: bool = True
+    min_bundle_score: int = TITLE_QUALITY_REVIEW_SCORE
+    min_channel_score: int = TITLE_QUALITY_REVIEW_SCORE
+    allowed_statuses: tuple[str, ...] = _DEFAULT_QUEUE_ALLOWED_STATUSES
 
 
 @dataclass(frozen=True)
@@ -89,6 +109,17 @@ class TitleExportSettings:
             topic=normalize_text(raw_queue_export.get("topic")),
             destination=_normalize_queue_destination(raw_queue_export.get("destination")),
             append=_coerce_bool(raw_queue_export.get("append"), default=True),
+            quality_gate_enabled=_coerce_bool(raw_queue_export.get("quality_gate_enabled"), default=True),
+            min_bundle_score=_coerce_int(
+                raw_queue_export.get("min_bundle_score"),
+                raw_queue_export.get("min_score"),
+                default=TITLE_QUALITY_REVIEW_SCORE,
+            ),
+            min_channel_score=_coerce_int(
+                raw_queue_export.get("min_channel_score"),
+                default=TITLE_QUALITY_REVIEW_SCORE,
+            ),
+            allowed_statuses=_normalize_queue_allowed_statuses(raw_queue_export.get("allowed_statuses")),
         )
         return cls(
             enabled=enabled,
@@ -176,11 +207,19 @@ def _build_title_export_rows(generated_titles: list[dict[str, Any]]) -> list[lis
         if not isinstance(item, dict):
             continue
         titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
+        quality_report = item.get("quality_report") if isinstance(item.get("quality_report"), dict) else {}
+        channel_scores = quality_report.get("channel_scores") if isinstance(quality_report.get("channel_scores"), dict) else {}
         naver_home_titles = titles.get("naver_home") if isinstance(titles.get("naver_home"), list) else []
         blog_titles = titles.get("blog") if isinstance(titles.get("blog"), list) else []
         rows.append(
             [
                 normalize_text(item.get("keyword")),
+                str(int(quality_report.get("bundle_score") or 0)) if quality_report else "",
+                normalize_text(quality_report.get("status")),
+                str(int(channel_scores.get("naver_home") or 0)) if channel_scores else "",
+                str(int(channel_scores.get("blog") or 0)) if channel_scores else "",
+                normalize_text(item.get("target_mode")),
+                normalize_text(item.get("source_kind")),
                 "",
                 "",
                 normalize_text(naver_home_titles[0]) if len(naver_home_titles) > 0 else "",
@@ -205,18 +244,71 @@ def _export_title_queue_bundle(
     if not queue_settings.topic or not queue_settings.destination:
         return {}
 
+    destinations = _resolve_queue_destinations(queue_settings.destination)
+    bundles: list[dict[str, Any]] = []
+    all_artifacts: list[dict[str, Any]] = []
+    shared_seen_titles: set[str] = set()
+
+    for destination in destinations:
+        bundle = _export_single_queue_destination(
+            generated_titles=generated_titles,
+            destination=destination,
+            settings=queue_settings,
+            output_root=output_root,
+            now=now,
+            category_label=category_label,
+            seed_keyword_label=seed_keyword_label,
+            shared_seen_titles=shared_seen_titles,
+        )
+        if not bundle:
+            continue
+        bundles.append(bundle)
+        all_artifacts.extend(bundle.get("artifacts", []))
+
+    if not bundles:
+        return {}
+    if len(bundles) == 1:
+        return bundles[0]
+
+    return {
+        "topic": queue_settings.topic,
+        "destination": queue_settings.destination,
+        "destinations": [bundle["destination"] for bundle in bundles],
+        "row_count": sum(int(bundle.get("row_count") or 0) for bundle in bundles),
+        "bundles": bundles,
+        "artifacts": all_artifacts,
+    }
+
+
+def _export_single_queue_destination(
+    *,
+    generated_titles: list[dict[str, Any]],
+    destination: str,
+    settings: TitleQueueExportSettings,
+    output_root: Path,
+    now: datetime,
+    category_label: str,
+    seed_keyword_label: str,
+    shared_seen_titles: set[str] | None = None,
+) -> dict[str, Any]:
     queue_lines, manifest_entries = _build_queue_export_entries(
         generated_titles,
-        destination=queue_settings.destination,
-        topic=queue_settings.topic,
+        destination=destination,
+        topic=settings.topic,
+        quality_gate_enabled=settings.quality_gate_enabled,
+        min_bundle_score=settings.min_bundle_score,
+        min_channel_score=settings.min_channel_score,
+        allowed_statuses=settings.allowed_statuses,
+        shared_seen_titles=shared_seen_titles,
     )
     if not queue_lines:
         return {}
 
-    destination_segment = _sanitize_filename_segment(queue_settings.destination, fallback="queue")
-    topic_segment = _sanitize_filename_segment(queue_settings.topic, fallback="topic")
-    seed_segment = _sanitize_filename_segment(seed_keyword_label, fallback="titles")
+    destination_segment = _sanitize_filename_segment(destination, fallback="queue")
+    queue_label = _resolve_queue_label(category_label, seed_keyword_label)
+    queue_segment = _sanitize_filename_segment(queue_label, fallback="titles")
     timestamp = now.strftime("%Y%m%d-%H%M%S")
+    date_segment = now.strftime("%Y-%m-%d")
     archive_dir = output_root / "txt" / "archive" / now.strftime("%Y-%m-%d")
     live_dir = output_root / "txt" / "live" / destination_segment
     manifest_dir = output_root / "manifests" / now.strftime("%Y-%m-%d")
@@ -224,20 +316,24 @@ def _export_title_queue_bundle(
     live_dir.mkdir(parents=True, exist_ok=True)
     manifest_dir.mkdir(parents=True, exist_ok=True)
 
-    archive_path = archive_dir / f"{timestamp}__{destination_segment}__{topic_segment}__{seed_segment}.txt"
-    live_path = live_dir / f"{topic_segment}.txt"
-    manifest_path = manifest_dir / f"{timestamp}__{destination_segment}__{topic_segment}__{seed_segment}.json"
+    archive_path = archive_dir / f"{timestamp}__{queue_segment}.txt"
+    live_path = live_dir / f"{date_segment}__{queue_segment}.txt"
+    manifest_path = manifest_dir / f"{timestamp}__{destination_segment}__{queue_segment}.json"
 
     archive_text = "\n".join(queue_lines).rstrip() + "\n"
     archive_path.write_text(archive_text, encoding="utf-8")
-    _write_live_queue_file(live_path, queue_lines, append=queue_settings.append)
+    _write_live_queue_file(live_path, queue_lines, append=settings.append)
     manifest_payload = {
         "queued_at": now.isoformat(timespec="seconds"),
-        "topic": queue_settings.topic,
-        "destination": queue_settings.destination,
+        "topic": settings.topic,
+        "destination": destination,
         "category": category_label,
         "seed_keyword": seed_keyword_label,
-        "append_mode": queue_settings.append,
+        "append_mode": settings.append,
+        "quality_gate_enabled": settings.quality_gate_enabled,
+        "min_bundle_score": settings.min_bundle_score,
+        "min_channel_score": settings.min_channel_score,
+        "allowed_statuses": list(settings.allowed_statuses),
         "row_count": len(manifest_entries),
         "entries": manifest_entries,
         "artifacts": {
@@ -252,9 +348,13 @@ def _export_title_queue_bundle(
 
     row_count = len(manifest_entries)
     return {
-        "topic": queue_settings.topic,
-        "destination": queue_settings.destination,
+        "topic": settings.topic,
+        "destination": destination,
         "row_count": row_count,
+        "quality_gate_enabled": settings.quality_gate_enabled,
+        "min_bundle_score": settings.min_bundle_score,
+        "min_channel_score": settings.min_channel_score,
+        "allowed_statuses": list(settings.allowed_statuses),
         "artifacts": [
             _build_artifact_metadata(
                 format_key="txt_live",
@@ -469,6 +569,11 @@ def _build_queue_export_entries(
     *,
     destination: str,
     topic: str,
+    quality_gate_enabled: bool,
+    min_bundle_score: int,
+    min_channel_score: int,
+    allowed_statuses: tuple[str, ...],
+    shared_seen_titles: set[str] | None = None,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     channel_name = _QUEUE_DESTINATION_CHANNEL_MAP.get(destination)
     if not channel_name:
@@ -476,18 +581,28 @@ def _build_queue_export_entries(
 
     queue_lines: list[str] = []
     manifest_entries: list[dict[str, Any]] = []
-    seen_titles: set[str] = set()
+    seen_titles = shared_seen_titles if shared_seen_titles is not None else set()
     for item in generated_titles:
         if not isinstance(item, dict):
             continue
         keyword = normalize_text(item.get("keyword"))
         titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
+        quality_report = item.get("quality_report") if isinstance(item.get("quality_report"), dict) else {}
+        channel_scores = quality_report.get("channel_scores") if isinstance(quality_report.get("channel_scores"), dict) else {}
         channel_titles = titles.get(channel_name) if isinstance(titles.get(channel_name), list) else []
-        selected_title = normalize_text(channel_titles[0]) if channel_titles else ""
+        selected_title = _pick_queue_title(channel_titles, seen_titles)
         if not keyword or not selected_title:
             continue
-        normalized_lookup = normalize_text(selected_title)
-        if not normalized_lookup or normalized_lookup in seen_titles:
+        bundle_score = int(quality_report.get("bundle_score") or 0) if quality_report else 0
+        bundle_status = normalize_text(quality_report.get("status")).lower()
+        channel_score = int(channel_scores.get(channel_name) or 0) if channel_scores else 0
+        if quality_gate_enabled:
+            if bundle_status not in allowed_statuses:
+                continue
+            if bundle_score < min_bundle_score or channel_score < min_channel_score:
+                continue
+        normalized_lookup = _normalize_title_lookup(selected_title)
+        if not normalized_lookup:
             continue
         seen_titles.add(normalized_lookup)
         queue_lines.append(selected_title)
@@ -501,6 +616,9 @@ def _build_queue_export_entries(
                 "target_mode": normalize_text(item.get("target_mode")),
                 "base_keyword": normalize_text(item.get("base_keyword")),
                 "source_kind": normalize_text(item.get("source_kind")),
+                "bundle_score": bundle_score,
+                "bundle_status": bundle_status,
+                "channel_score": channel_score,
             }
         )
     return queue_lines, manifest_entries
@@ -638,9 +756,59 @@ def _coerce_bool(*values: Any, default: bool) -> bool:
     return default
 
 
+def _coerce_int(*values: Any, default: int) -> int:
+    for value in values:
+        if value is None:
+            continue
+        try:
+            return max(0, int(float(value)))
+        except (TypeError, ValueError):
+            continue
+    return default
+
+
+def _normalize_queue_allowed_statuses(value: Any) -> tuple[str, ...]:
+    raw_values = value if isinstance(value, (list, tuple, set)) else [value]
+    resolved: list[str] = []
+    for raw_value in raw_values:
+        normalized = normalize_text(raw_value).lower()
+        if normalized in _QUEUE_ALLOWED_STATUSES and normalized not in resolved:
+            resolved.append(normalized)
+    return tuple(resolved or _DEFAULT_QUEUE_ALLOWED_STATUSES)
+
+
 def _normalize_queue_destination(value: Any) -> str:
     normalized = normalize_text(value).lower()
-    return normalized if normalized in _QUEUE_DESTINATION_CHANNEL_MAP else ""
+    normalized = _QUEUE_DESTINATION_ALIASES.get(normalized, normalized)
+    return normalized if normalized in {"all", *tuple(_QUEUE_DESTINATION_CHANNEL_MAP.keys())} else ""
+
+
+def _resolve_queue_destinations(destination: str) -> tuple[str, ...]:
+    if destination == "all":
+        return ("home", "wordpress")
+    if destination in _QUEUE_DESTINATION_CHANNEL_MAP:
+        return (destination,)
+    return ()
+
+
+def _resolve_queue_label(category_label: str, seed_keyword_label: str) -> str:
+    normalized_category = normalize_text(category_label).lower()
+    if normalized_category and normalized_category not in {"uncategorized", "seed"}:
+        return category_label
+    return seed_keyword_label or category_label or "titles"
+
+
+def _pick_queue_title(channel_titles: list[str], seen_titles: set[str]) -> str:
+    for raw_title in channel_titles:
+        normalized_title = normalize_text(raw_title)
+        lookup = _normalize_title_lookup(normalized_title)
+        if normalized_title and lookup and lookup not in seen_titles:
+            return normalized_title
+    return ""
+
+
+def _normalize_title_lookup(value: Any) -> str:
+    return normalize_text(value).strip().lower()
 
 
 def _now_kst() -> datetime:

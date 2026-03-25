@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
+from threading import Event
+from typing import Any, Callable
 
 from app.expander.utils.tokenizer import normalize_key, normalize_text
 from app.title.ai_client import TitleGenerationOptions, TitleProviderError, request_ai_titles
@@ -62,21 +63,49 @@ _PRODUCT_RESCUE_KEY_PATTERNS = (
 )
 _MOUSE_SETTING_KEY_PATTERNS = ("마우스", "트랙볼", "버티컬", "유니파잉", "dpi", "클릭")
 _KEYBOARD_SETTING_KEY_PATTERNS = ("키보드", "키패드", "한영", "배열", "키맵", "fn", "멀티페어링")
+_INITIAL_GENERATION_PROGRESS_CAP = 70
+_QUALITY_PROGRESS_PERCENT = 78
+_AUTO_RETRY_PROGRESS_START = 80
+_AUTO_RETRY_PROGRESS_END = 90
+_MODEL_ESCALATION_PROGRESS_START = 92
+_MODEL_ESCALATION_PROGRESS_END = 96
+_FINALIZING_PROGRESS_PERCENT = 97
+
+TitleProgressCallback = Callable[[dict[str, Any]], None]
 
 
 def generate_titles(
     items: list[dict[str, Any]],
     options: TitleGenerationOptions | None = None,
+    *,
+    progress_callback: TitleProgressCallback | None = None,
+    stop_event: Event | None = None,
 ) -> tuple[list[TitleOutputItem], dict[str, Any]]:
     normalized_items = _normalize_input_items(items)
+    total_count = len(normalized_items)
     input_items_by_keyword = {
         normalize_text(item.get("keyword")): item
         for item in normalized_items
         if normalize_text(item.get("keyword"))
     }
+    _publish_title_progress(
+        progress_callback,
+        type="started",
+        phase="generate",
+        processed_count=0,
+        total_count=total_count,
+        progress_percent=0,
+        message="제목 생성 준비 중",
+    )
     if options is None or options.mode != "ai":
+        template_results = _build_template_results(
+            normalized_items,
+            progress_callback=progress_callback,
+            total_count=total_count,
+            stop_event=stop_event,
+        )
         return _finalize_generated_results(
-            _build_template_results(normalized_items),
+            template_results,
             _build_meta(
                 requested_mode=options.mode if options else "template",
                 used_mode="template",
@@ -92,13 +121,20 @@ def generate_titles(
                 issue_source_mode=options.issue_source_mode if options else "",
                 community_sources=list(options.community_sources) if options else [],
             ),
+            progress_callback=progress_callback,
         )
 
     if not options.api_key:
         if not options.fallback_to_template:
             raise TitleProviderError("AI mode requires an API key.")
+        template_results = _build_template_results(
+            normalized_items,
+            progress_callback=progress_callback,
+            total_count=total_count,
+            stop_event=stop_event,
+        )
         return _finalize_generated_results(
-            _build_template_results(normalized_items),
+            template_results,
             _build_meta(
                 requested_mode="ai",
                 used_mode="template_fallback",
@@ -115,36 +151,82 @@ def generate_titles(
                 issue_source_mode=options.issue_source_mode,
                 community_sources=list(options.community_sources),
             ),
+            progress_callback=progress_callback,
         )
 
     ai_results: dict[str, TitleOutputItem] = {}
     fallback_keywords: list[str] = []
+    processed_count = 0
 
     try:
         for chunk in _chunk_keywords(normalized_items, options.batch_size):
+            if stop_event is not None and stop_event.is_set():
+                break
             response_items = request_ai_titles(
                 chunk,
                 options=options,
             )
-            for item in response_items:
-                keyword = normalize_text(item.get("keyword"))
-                titles = item.get("titles") if isinstance(item, dict) else None
+            response_by_keyword = {
+                normalize_text(item.get("keyword")): item
+                for item in response_items
+                if isinstance(item, dict) and normalize_text(item.get("keyword"))
+            }
+            for source_item in chunk:
+                keyword = normalize_text(source_item.get("keyword"))
+                response_item = response_by_keyword.get(keyword, {})
+                titles = response_item.get("titles") if isinstance(response_item, dict) else None
                 if not keyword or not _is_valid_title_bundle(titles):
+                    processed_count += 1
+                    _publish_title_progress(
+                        progress_callback,
+                        type="keyword_completed",
+                        phase="generate",
+                        processed_count=processed_count,
+                        total_count=total_count,
+                        current_keyword=keyword,
+                        progress_percent=_compute_weighted_progress(
+                            processed_count,
+                            total_count,
+                            cap=_INITIAL_GENERATION_PROGRESS_CAP,
+                        ),
+                        message=f"{processed_count} / {total_count}세트 생성",
+                    )
                     continue
-                source_item = input_items_by_keyword.get(keyword, {"keyword": keyword})
+                source_payload = input_items_by_keyword.get(keyword, {"keyword": keyword})
                 ai_results[keyword] = {
-                    **_strip_generated_fields(source_item),
+                    **_strip_generated_fields(source_payload),
                     "keyword": keyword,
                     "titles": {
                         "naver_home": list(titles["naver_home"]),
                         "blog": list(titles["blog"]),
                     },
                 }
+                processed_count += 1
+                _publish_title_progress(
+                    progress_callback,
+                    type="keyword_completed",
+                    phase="generate",
+                    processed_count=processed_count,
+                    total_count=total_count,
+                    current_keyword=keyword,
+                    progress_percent=_compute_weighted_progress(
+                        processed_count,
+                        total_count,
+                        cap=_INITIAL_GENERATION_PROGRESS_CAP,
+                    ),
+                    message=f"{processed_count} / {total_count}세트 생성",
+                )
     except TitleProviderError as exc:
         if not options.fallback_to_template:
             raise
+        template_results = _build_template_results(
+            normalized_items,
+            progress_callback=progress_callback,
+            total_count=total_count,
+            stop_event=stop_event,
+        )
         return _finalize_generated_results(
-            _build_template_results(normalized_items),
+            template_results,
             _build_meta(
                 requested_mode="ai",
                 used_mode="template_fallback",
@@ -161,6 +243,7 @@ def generate_titles(
                 issue_source_mode=options.issue_source_mode,
                 community_sources=list(options.community_sources),
             ),
+            progress_callback=progress_callback,
         )
 
     results: list[TitleOutputItem] = []
@@ -199,6 +282,7 @@ def generate_titles(
             ),
             options=options,
             allow_auto_retry=used_mode in {"ai", "ai_with_template_fallback"} and options.auto_retry_enabled,
+            progress_callback=progress_callback,
         )
 
 
@@ -219,8 +303,35 @@ def _normalize_input_items(items: list[dict[str, Any]]) -> list[dict[str, str]]:
     return normalized_items
 
 
-def _build_template_results(items: list[dict[str, Any]]) -> list[TitleOutputItem]:
-    return [_build_template_title_item(item) for item in items]
+def _build_template_results(
+    items: list[dict[str, Any]],
+    *,
+    progress_callback: TitleProgressCallback | None = None,
+    total_count: int | None = None,
+    stop_event: Event | None = None,
+) -> list[TitleOutputItem]:
+    resolved_total = total_count if isinstance(total_count, int) and total_count >= 0 else len(items)
+    results: list[TitleOutputItem] = []
+    for index, item in enumerate(items, start=1):
+        if stop_event is not None and stop_event.is_set():
+            break
+        built_item = _build_template_title_item(item)
+        results.append(built_item)
+        _publish_title_progress(
+            progress_callback,
+            type="keyword_completed",
+            phase="generate",
+            processed_count=index,
+            total_count=resolved_total,
+            current_keyword=normalize_text(built_item.get("keyword")),
+            progress_percent=_compute_weighted_progress(
+                index,
+                resolved_total,
+                cap=_INITIAL_GENERATION_PROGRESS_CAP,
+            ),
+            message=f"{index} / {resolved_total}세트 생성",
+        )
+    return results
 
 
 def _build_template_title_item(item: dict[str, Any] | str) -> TitleOutputItem:
@@ -273,7 +384,15 @@ def _finalize_generated_results(
     *,
     options: TitleGenerationOptions | None = None,
     allow_auto_retry: bool = False,
+    progress_callback: TitleProgressCallback | None = None,
 ) -> tuple[list[TitleOutputItem], dict[str, Any]]:
+    _publish_title_progress(
+        progress_callback,
+        type="phase",
+        phase="quality",
+        progress_percent=_QUALITY_PROGRESS_PERCENT,
+        message="품질 검사 중",
+    )
     enriched_results, quality_summary = enrich_title_results(results)
     auto_retry_meta = _build_auto_retry_meta()
     model_escalation_meta = _build_model_escalation_meta(
@@ -287,6 +406,7 @@ def _finalize_generated_results(
             results,
             enriched_results,
             options,
+            progress_callback=progress_callback,
         )
 
     meta["quality_summary"] = quality_summary
@@ -297,6 +417,13 @@ def _finalize_generated_results(
         if int(model_escalation_meta.get("accepted_count") or 0) > 0
         else meta.get("model")
     )
+    _publish_title_progress(
+        progress_callback,
+        type="phase",
+        phase="finalizing",
+        progress_percent=_FINALIZING_PROGRESS_PERCENT,
+        message="제목 결과 정리 중",
+    )
     return enriched_results, meta
 
 
@@ -304,6 +431,8 @@ def _auto_retry_low_quality_results(
     original_results: list[TitleOutputItem],
     enriched_results: list[TitleOutputItem],
     options: TitleGenerationOptions,
+    *,
+    progress_callback: TitleProgressCallback | None = None,
 ) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
     retry_threshold = _resolve_quality_retry_threshold(options.quality_retry_threshold)
     retry_keywords = [
@@ -320,6 +449,13 @@ def _auto_retry_low_quality_results(
         target_model=escalation_options.model if escalation_options else "",
     )
     if not retry_keywords:
+        _publish_title_progress(
+            progress_callback,
+            type="phase",
+            phase="quality_ready",
+            progress_percent=_QUALITY_PROGRESS_PERCENT + 2,
+            message="품질 검사 완료",
+        )
         quality_summary = _build_quality_summary_from_items(enriched_results)
         return (
             enriched_results,
@@ -347,6 +483,16 @@ def _auto_retry_low_quality_results(
         }
         for keyword in retry_keywords
     ]
+    _publish_title_progress(
+        progress_callback,
+        type="phase",
+        phase="auto_retry",
+        processed_count=0,
+        total_count=len(retry_keywords),
+        progress_percent=_AUTO_RETRY_PROGRESS_START,
+        message=f"기준 미달 제목 재작성 준비: {len(retry_keywords)}건",
+    )
+    retried_count = 0
 
     for chunk in _chunk_keywords(retry_input_items, retry_options.batch_size):
         try:
@@ -372,6 +518,21 @@ def _auto_retry_low_quality_results(
                     "blog": list(titles["blog"]),
                 },
             }
+        retried_count = min(len(retry_keywords), retried_count + len(chunk))
+        _publish_title_progress(
+            progress_callback,
+            type="phase",
+            phase="auto_retry",
+            processed_count=retried_count,
+            total_count=len(retry_keywords),
+            progress_percent=_compute_phase_progress(
+                retried_count,
+                len(retry_keywords),
+                start=_AUTO_RETRY_PROGRESS_START,
+                end=_AUTO_RETRY_PROGRESS_END,
+            ),
+            message=f"기준 미달 제목 재작성 중: {retried_count} / {len(retry_keywords)}건",
+        )
 
     retry_results, accepted_retry_keywords = _merge_retry_candidates(
         current_results=original_results,
@@ -403,11 +564,21 @@ def _auto_retry_low_quality_results(
     escalation_keywords = [keyword for keyword in escalation_keywords if keyword]
     if not escalation_keywords:
         return retry_enriched_results, quality_summary, auto_retry_meta, base_escalation_meta
+    _publish_title_progress(
+        progress_callback,
+        type="phase",
+        phase="model_escalation",
+        processed_count=0,
+        total_count=len(escalation_keywords),
+        progress_percent=_MODEL_ESCALATION_PROGRESS_START,
+        message=f"상위 모델 재시도 준비: {len(escalation_keywords)}건",
+    )
 
     escalated_candidates, escalation_error_messages = _request_retry_candidates(
         original_items_by_keyword,
         escalation_keywords,
         escalation_options,
+        progress_callback=progress_callback,
     )
     final_results, accepted_escalation_keywords = _merge_retry_candidates(
         current_results=retry_results,
@@ -464,6 +635,7 @@ def _build_quality_retry_prompt(existing_prompt: str, retry_threshold: int) -> s
         "Quality retry guidance:\n"
         "- Keep the exact keyword at the front of each title when natural.\n"
         "- Do not shorten the keyword phrase. If the keyword starts with descriptive words, keep them all.\n"
+        "- Prefer concise hook-first wording. One clear hook plus one concrete noun is better than a long abstract explanation.\n"
         "- Keep the home-feed pair issue-aware: usually make one title issue/update + comparison/debate and the other title issue/update + reversal/question.\n"
         "- Make the 2 naver_home titles clearly different from each other.\n"
         "- Make the 2 blog titles clearly different from each other.\n"
@@ -477,6 +649,9 @@ def _build_quality_retry_prompt(existing_prompt: str, retry_threshold: int) -> s
         "- For real-use keywords, prefer timeframe, user type, grip, weight, click feel, battery, workflow, or device-fit nouns.\n"
         "- For setup or problem keywords, prefer one symptom plus one cause, fix, result, or environment such as 맥북, 윈도우, 블루투스, 유니파잉, 연결 끊김, 더블클릭, or 인식 안됨.\n"
         "- Replace abstract meta words with concrete difference, use-case, fit, pain point, setup, price, or performance nouns.\n"
+        "- For finance keywords, avoid 느슨한 wrappers such as 투자 전략, 투자 가이드, 총정리, 체크리스트, or 지금 확인하세요 unless the keyword explicitly demands them.\n"
+        "- For naver_home titles, do not stop at bare labels like 환율 영향, 확인 포인트, 기준선, 조건 차이, 실시간 현황, or 국내외 차이. Turn the axis into a real question, contrast, implication, or decision point.\n"
+        "- For finance analysis titles, 2주 흐름, 2주간 추이, 3주 변동, or 1개월 비교 are acceptable when they clearly describe retrospective analysis instead of pretending to know a live move.\n"
         f"- Aim for a bundle quality score of at least {retry_threshold}."
     )
     base_prompt = str(existing_prompt or "").strip()
@@ -587,6 +762,16 @@ def _resolve_practical_rescue_suffixes(
     keyword_variant = _resolve_practical_rescue_variant(keyword_key, rescue_kind=rescue_kind)
     is_seed_anchor = normalize_key(source_selection_mode) == "seedanchor"
     is_single_target = normalize_key(target_mode) == "single"
+    finance_profile = _resolve_finance_rescue_profile(keyword, category=category)
+    if finance_profile:
+        finance_rescue = _resolve_finance_rescue_pair(
+            rescue_kind=rescue_kind,
+            finance_profile=finance_profile,
+            is_single_target=is_single_target,
+            seed=seed,
+        )
+        if finance_rescue:
+            return finance_rescue
     if rescue_kind == "preorder":
         if keyword_variant == "how_to":
             return _rotate_rescue_pair(
@@ -1020,6 +1205,92 @@ def _looks_product_like_keyword(keyword: str) -> bool:
     return any(pattern in keyword_key for pattern in _PRODUCT_RESCUE_KEY_PATTERNS)
 
 
+def _resolve_finance_rescue_profile(keyword: str, *, category: str) -> str:
+    if category != "finance":
+        return ""
+    keyword_key = normalize_key(keyword)
+    if any(token in keyword_key for token in ("지수", "선물", "시세", "금시세", "금값", "코스피", "etf", "리밸런싱")):
+        return "market"
+    return "account"
+
+
+def _resolve_finance_rescue_pair(
+    *,
+    rescue_kind: str,
+    finance_profile: str,
+    is_single_target: bool,
+    seed: int,
+) -> tuple[list[str], list[str]] | None:
+    if finance_profile == "market":
+        if rescue_kind in {"problem", "real_use"}:
+            return _rotate_rescue_pair(
+                [
+                    (
+                        ["왜 국내 시세와 다를까", "무엇을 같이 봐야 할까"],
+                        ["국내외 흐름이 다르게 보이는 이유 정리", "같이 봐야 할 변수와 확인 포인트 정리"],
+                    ),
+                    (
+                        ["어디서 반영 시차가 갈릴까", "환율이 먼저 흔드는 이유"],
+                        ["체크할 기준선과 반영 시차 정리", "환율과 선물 흐름을 같이 보는 기준 정리"],
+                    ),
+                    (
+                        ["표시 가격이 왜 다르게 보일까", "어느 지점이 확인 포인트일까"],
+                        ["표시 가격과 체감이 다른 이유 정리", "확인 포인트와 업데이트 시간 정리"],
+                    ),
+                ],
+                seed,
+            )
+        if rescue_kind == "single_policy" or is_single_target:
+            return _rotate_rescue_pair(
+                [
+                    (
+                        ["왜 국내 시세와 다를까", "무엇을 먼저 봐야 할까"],
+                        ["같이 봐야 할 기준선과 변수 정리", "국내외 흐름이 다르게 보이는 이유 정리"],
+                    ),
+                    (
+                        ["환율이 먼저 흔드는 이유", "어디서 체감이 달라질까"],
+                        ["확인 포인트와 반영 시차 정리", "환율과 선물 흐름을 같이 보는 기준 정리"],
+                    ),
+                ],
+                seed,
+            )
+        return None
+
+    if rescue_kind in {"problem", "real_use"}:
+        return _rotate_rescue_pair(
+            [
+                (
+                    ["막히는 단계", "지연되는 이유"],
+                    ["막히는 단계와 준비물 정리", "지연되는 이유와 확인할 조건 정리"],
+                ),
+                (
+                    ["준비물", "비대면 개설 순서"],
+                    ["준비물과 비대면 개설 순서 정리", "조건과 소요 시간 차이 정리"],
+                ),
+                (
+                    ["조건 차이", "소요 시간 차이"],
+                    ["조건 차이와 놓치기 쉬운 포인트 정리", "소요 시간과 지연 이유 정리"],
+                ),
+            ],
+            seed,
+        )
+    if rescue_kind == "single_policy" or is_single_target:
+        return _rotate_rescue_pair(
+            [
+                (
+                    ["개설 전 확인할 조건", "준비물과 소요 시간"],
+                    ["개설 전 확인할 조건과 준비물 정리", "비대면 개설 순서와 소요 시간 정리"],
+                ),
+                (
+                    ["혜택 차이", "지연되는 이유"],
+                    ["혜택 차이와 선택 기준 정리", "지연되는 이유와 놓치기 쉬운 조건 정리"],
+                ),
+            ],
+            seed,
+        )
+    return None
+
+
 def _build_quality_summary_from_items(items: list[TitleOutputItem]) -> dict[str, Any]:
     reports = [
         item.get("quality_report", {})
@@ -1138,9 +1409,12 @@ def _request_retry_candidates(
     original_items_by_keyword: dict[str, TitleOutputItem],
     retry_keywords: list[str],
     retry_options: TitleGenerationOptions,
+    *,
+    progress_callback: TitleProgressCallback | None = None,
 ) -> tuple[dict[str, TitleOutputItem], list[str]]:
     retried_by_keyword: dict[str, TitleOutputItem] = {}
     retry_error_messages: list[str] = []
+    processed_count = 0
     retry_input_items = [
         {
             **_strip_generated_fields(original_items_by_keyword.get(keyword, {"keyword": keyword})),
@@ -1173,6 +1447,21 @@ def _request_retry_candidates(
                     "blog": list(titles["blog"]),
                 },
             }
+        processed_count = min(len(retry_keywords), processed_count + len(chunk))
+        _publish_title_progress(
+            progress_callback,
+            type="phase",
+            phase="model_escalation",
+            processed_count=processed_count,
+            total_count=len(retry_keywords),
+            progress_percent=_compute_phase_progress(
+                processed_count,
+                len(retry_keywords),
+                start=_MODEL_ESCALATION_PROGRESS_START,
+                end=_MODEL_ESCALATION_PROGRESS_END,
+            ),
+            message=f"상위 모델 재시도 중: {processed_count} / {len(retry_keywords)}건",
+        )
 
     return retried_by_keyword, retry_error_messages
 
@@ -1205,6 +1494,25 @@ def _resolve_quality_retry_threshold(value: int | float | None) -> int:
     except (TypeError, ValueError):
         return TITLE_QUALITY_PASS_SCORE
     return max(70, min(100, number))
+
+
+def _compute_weighted_progress(processed_count: int, total_count: int, *, cap: int) -> int:
+    if total_count <= 0:
+        return 0
+    return min(cap, round((processed_count / total_count) * cap))
+
+
+def _compute_phase_progress(processed_count: int, total_count: int, *, start: int, end: int) -> int:
+    if total_count <= 0:
+        return end
+    width = max(0, end - start)
+    return min(end, start + round((processed_count / total_count) * width))
+
+
+def _publish_title_progress(progress_callback: TitleProgressCallback | None, **payload: Any) -> None:
+    if progress_callback is None:
+        return
+    progress_callback(payload)
 
 
 def _build_meta(

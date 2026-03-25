@@ -34,6 +34,169 @@ _GENERIC_TEMPLATE_TERMS = (
     "놓치면 손해",
     "비교 및 선택 기준 정리",
 )
+_NAVER_HOME_HOOK_TERMS = (
+    "왜",
+    "이유",
+    "의외",
+    "엇갈",
+    "달라",
+    "다를까",
+    "반전",
+    "갈리",
+    "흔들",
+    "먼저",
+    "놓치",
+    "보일까",
+    "어디서",
+    "무엇이",
+    "무엇을",
+)
+_NAVER_HOME_DRY_INFO_TERMS = (
+    "조건",
+    "절차",
+    "준비물",
+    "방법",
+    "가이드",
+    "정리",
+    "체크리스트",
+    "사용법",
+    "현황",
+)
+_NAVER_HOME_UNDERDEVELOPED_PATTERNS = tuple(
+    normalize_key(token)
+    for token in (
+        "환율 영향",
+        "확인 포인트",
+        "같이 봐야 할 기준선",
+        "같이 봐야 할 변수",
+        "체크할 기준선",
+        "국내외 차이",
+        "조건 차이",
+        "혜택 차이",
+        "반영 시차",
+        "실시간 현황",
+        "확인 시간",
+    )
+    if normalize_key(token)
+)
+_NAVER_HOME_UNDERDEVELOPED_ENDING_TOKENS = {
+    normalize_key(token)
+    for token in (
+        "영향",
+        "포인트",
+        "기준선",
+        "변수",
+        "차이",
+        "시차",
+        "현황",
+        "시간",
+        "조건",
+        "혜택",
+        "준비물",
+    )
+    if normalize_key(token)
+}
+_BLOG_INFO_TERMS = (
+    "방법",
+    "정리",
+    "비교",
+    "차이",
+    "이유",
+    "조건",
+    "절차",
+    "준비물",
+    "포인트",
+    "원인",
+    "해결",
+    "후기",
+    "일정",
+    "신청",
+    "설정",
+    "연결",
+    "증상",
+    "체크",
+    "영향",
+    "변수",
+    "대상",
+    "추천",
+    "사용법",
+    "소요 시간",
+    "주의점",
+    "가이드",
+)
+_BLOG_SEARCH_STRUCTURE_TERMS = (
+    "방법",
+    "정리",
+    "비교",
+    "차이",
+    "이유",
+    "조건",
+    "절차",
+    "준비물",
+    "포인트",
+    "원인",
+    "해결",
+    "후기",
+    "일정",
+    "신청",
+    "설정",
+    "연결",
+    "증상",
+    "체크",
+    "영향",
+    "변수",
+    "대상",
+    "추천",
+    "사용법",
+    "소요 시간",
+    "가이드",
+    "순서",
+    "비용",
+    "가격",
+    "유형",
+    "종류",
+    "유의사항",
+    "핵심",
+    "관점",
+    "보는 법",
+    "보는 기준",
+    "장단점",
+)
+_BLOG_VAGUE_SUFFIX_KEYS = {
+    normalize_key(token)
+    for token in (
+        "왜",
+        "다르게",
+        "보일까",
+        "어떨까",
+        "그럴까",
+        "맞을까",
+        "될까",
+        "의외",
+        "궁금",
+        "놀랍게도",
+        "달라졌나",
+        "달랐나",
+        "뭘",
+        "무엇",
+        "뭐가",
+    )
+    if normalize_key(token)
+}
+_BLOG_GENERIC_WRAPPER_KEYS = (
+    "최근동향",
+    "최근동향과전망",
+    "시장동향",
+    "시장동향과전망",
+    "동향과전망",
+    "영향분석",
+    "투자심리영향분석",
+    "투자시유의사항",
+    "비교분석",
+    "총정리",
+    "경험담공유",
+    "실제경험담공유",
+)
 _LOW_SIGNAL_SKELETON_KEYS = (
     "최신정보",
     "업데이트확인",
@@ -171,6 +334,31 @@ _PRACTICAL_KEYWORD_PATTERNS = (
 _PRACTICAL_KEYWORD_KEYS = tuple(
     normalize_key(pattern) for pattern in _PRACTICAL_KEYWORD_PATTERNS if normalize_key(pattern)
 )
+_FINANCE_MISMATCH_TITLE_PATTERNS = (
+    "실사용 차이",
+    "실사용",
+    "사용 후기",
+    "자주 생기는 문제",
+    "설정 팁",
+    "연결 문제",
+    "연결 방법",
+    "동선 체크",
+)
+_FINANCE_MISMATCH_TITLE_KEYS = tuple(
+    normalize_key(pattern) for pattern in _FINANCE_MISMATCH_TITLE_PATTERNS if normalize_key(pattern)
+)
+_FINANCE_STALE_TITLE_PATTERNS = (
+    "투자 전략",
+    "투자 가이드",
+    "투자 전략 가이드",
+    "총정리",
+    "체크리스트",
+    "지금 확인하세요",
+    "급등락",
+)
+_FINANCE_STALE_TITLE_KEYS = tuple(
+    normalize_key(pattern) for pattern in _FINANCE_STALE_TITLE_PATTERNS if normalize_key(pattern)
+)
 _GENERIC_OVERLAY_PATTERNS = (
     "최신 정보",
     "최신 비교",
@@ -251,6 +439,30 @@ _UNVERIFIED_FRESHNESS_PATTERNS = (
     "최저가",
     "가격변동",
 )
+_FINANCE_ANALYSIS_WINDOW_PATTERNS = (
+    "2주",
+    "2주간",
+    "2주차",
+    "3주",
+    "3주간",
+    "1개월",
+    "한달",
+)
+_STRICT_UNVERIFIED_FRESHNESS_PATTERNS = tuple(
+    pattern for pattern in _UNVERIFIED_FRESHNESS_PATTERNS if pattern not in _FINANCE_ANALYSIS_WINDOW_PATTERNS
+)
+_FINANCE_ANALYSIS_CONTEXT_KEYS = {
+    normalize_key(token)
+    for token in (
+        "추이",
+        "분석",
+        "흐름",
+        "변동",
+        "비교",
+        "정리",
+    )
+    if normalize_key(token)
+}
 _GENERIC_SINGLE_LOW_INFO_TOKENS = {
     normalize_key(token)
     for token in (
@@ -433,14 +645,27 @@ def assess_single_title(
     starts_with_keyword = _starts_with_keyword_phrase(keyword, normalized_title)
     length_ok = True
     duplicate_risk = bool(canonical_title and duplicate_counts.get(canonical_title, 0) > 1)
+    home_hook_signal = channel == "naver_home" and _has_naver_home_hook_signal(normalized_title)
+    underdeveloped_home_title = channel == "naver_home" and _has_underdeveloped_naver_home_title(
+        keyword,
+        normalized_title,
+    )
+    blog_info_signal = channel == "blog" and _has_blog_info_signal(normalized_title)
+    blog_search_structure = channel == "blog" and _has_blog_search_structure(
+        keyword,
+        normalized_title,
+        item_context=item_context or {},
+    )
+    blog_generic_wrapper = channel == "blog" and _has_generic_blog_search_wrapper(keyword, normalized_title)
 
     if not contains_keyword:
         issues.append("키워드 핵심 표현이 제목에 충분히 반영되지 않았습니다.")
         score -= 36
         critical = True
     elif not starts_with_keyword:
-        issues.append("키워드가 제목 앞부분에 오지 않습니다.")
-        score -= 10
+        if channel != "blog" or not blog_search_structure:
+            issues.append("키워드가 제목 앞부분에 오지 않습니다.")
+            score -= 12 if channel == "blog" else 8
 
     if channel == "naver_home" and len(normalized_title) > NAVER_HOME_MAX_LENGTH:
         issues.append(f"네이버 홈형은 {NAVER_HOME_MAX_LENGTH}자 이하여야 합니다.")
@@ -467,8 +692,36 @@ def assess_single_title(
         issues.append("제목에서 콜론 표기는 제거하는 편이 자연스럽습니다.")
         score -= 4
 
+    if channel == "naver_home" and not home_hook_signal and _looks_like_plain_naver_home_title(normalized_title):
+        issues.append("네이버홈형 제목인데 후킹 포인트가 약합니다.")
+        score -= 8
+    elif underdeveloped_home_title:
+        issues.append("네이버홈형 제목인데 축약형 라벨만 던지고 끝납니다.")
+        score -= 16
+
+    if channel == "blog" and not blog_search_structure:
+        issues.append("블로그형 제목인데 상위노출형 구조가 약합니다.")
+        score -= 10
+    elif channel == "blog" and blog_generic_wrapper:
+        issues.append("블로그형 제목인데 서브 키워드가 너무 일반적입니다.")
+        score -= 6
+
+    if channel == "blog" and not blog_info_signal and _looks_like_vague_blog_title(normalized_title):
+        issues.append("블로그형 제목인데 정보 의도가 바로 보이지 않습니다.")
+        score -= 8
+
     generic_overlay_on_practical = _has_generic_overlay_on_practical_keyword(keyword, normalized_title)
     generic_single_overlay = _has_generic_single_overlay(
+        keyword,
+        normalized_title,
+        item_context=item_context or {},
+    )
+    finance_domain_mismatch = _has_finance_domain_mismatch(
+        keyword,
+        normalized_title,
+        item_context=item_context or {},
+    )
+    finance_stale_wrapper = _has_finance_stale_wrapper(
         keyword,
         normalized_title,
         item_context=item_context or {},
@@ -482,6 +735,8 @@ def assess_single_title(
         _is_hard_reject_title_skeleton(keyword, normalized_title)
         or generic_overlay_on_practical
         or generic_single_overlay
+        or finance_domain_mismatch
+        or finance_stale_wrapper
         or unverified_freshness_claim
     )
     if generic_overlay_on_practical:
@@ -491,6 +746,14 @@ def assess_single_title(
     elif generic_single_overlay:
         issues.append("단일 키워드 제목이 의도 대비 너무 추상적이거나 낚시형입니다.")
         score -= 18
+        critical = True
+    elif finance_domain_mismatch:
+        issues.append("금융 카테고리와 맞지 않는 제목 프레임입니다.")
+        score -= 18
+        critical = True
+    elif finance_stale_wrapper:
+        issues.append("금융 키워드에 비해 제목이 너무 느슨한 투자형 템플릿입니다.")
+        score -= 16
         critical = True
     elif unverified_freshness_claim:
         issues.append("근거 없는 최신성·기간·가격 변화 표현이 포함돼 있습니다.")
@@ -524,9 +787,16 @@ def assess_single_title(
             "starts_with_keyword": starts_with_keyword,
             "length_ok": length_ok,
             "duplicate_risk": duplicate_risk,
+            "home_hook_signal": home_hook_signal,
+            "underdeveloped_home_title": underdeveloped_home_title,
+            "blog_info_signal": blog_info_signal,
+            "blog_search_structure": blog_search_structure,
+            "blog_generic_wrapper": blog_generic_wrapper,
             "hard_reject_skeleton": hard_reject_skeleton,
             "generic_overlay_on_practical_keyword": generic_overlay_on_practical,
             "generic_single_overlay": generic_single_overlay,
+            "finance_domain_mismatch": finance_domain_mismatch,
+            "finance_stale_wrapper": finance_stale_wrapper,
             "unverified_freshness_claim": unverified_freshness_claim,
             "forbidden_punctuation_used": forbidden_punctuation_used,
         },
@@ -751,6 +1021,98 @@ def _assess_channel_variation(
     return penalty, f"{label} 제목 2개가 너무 비슷합니다."
 
 
+def _has_naver_home_hook_signal(title: str) -> bool:
+    normalized_title = normalize_text(title)
+    if not normalized_title:
+        return False
+    if normalized_title.endswith("?"):
+        return True
+    return any(term in normalized_title for term in _NAVER_HOME_HOOK_TERMS)
+
+
+def _looks_like_plain_naver_home_title(title: str) -> bool:
+    return any(term in title for term in _NAVER_HOME_DRY_INFO_TERMS)
+
+
+def _has_underdeveloped_naver_home_title(keyword: str, title: str) -> bool:
+    stripped_title = normalize_text(_strip_keyword(title, keyword))
+    stripped_key = normalize_key(stripped_title)
+    if not stripped_key:
+        return True
+    if _has_naver_home_hook_signal(title):
+        return False
+    if any(pattern == stripped_key or pattern in stripped_key for pattern in _NAVER_HOME_UNDERDEVELOPED_PATTERNS):
+        return True
+
+    stripped_tokens = _normalize_tokens(stripped_title)
+    if not stripped_tokens:
+        return True
+    if len(stripped_tokens) <= 2 and stripped_tokens[-1] in _NAVER_HOME_UNDERDEVELOPED_ENDING_TOKENS:
+        return True
+    return False
+
+
+def _has_blog_info_signal(title: str) -> bool:
+    return any(term in title for term in _BLOG_INFO_TERMS)
+
+
+def _has_blog_search_structure(
+    keyword: str,
+    title: str,
+    *,
+    item_context: dict[str, Any] | None = None,
+) -> bool:
+    stripped_title = normalize_text(_strip_keyword(title, keyword))
+    if not stripped_title:
+        return False
+    if any(term in stripped_title for term in _BLOG_SEARCH_STRUCTURE_TERMS):
+        return True
+
+    stripped_tokens = _normalize_tokens(stripped_title)
+    if not stripped_tokens:
+        return False
+
+    concrete_tokens = [
+        token
+        for token in stripped_tokens
+        if token not in _BLOG_VAGUE_SUFFIX_KEYS and len(token) >= 2
+    ]
+    if len(concrete_tokens) >= 2:
+        return True
+
+    support_keyword_tokens = _extract_support_keyword_tokens(item_context or {})
+    if support_keyword_tokens and any(token in support_keyword_tokens for token in concrete_tokens):
+        return True
+
+    return False
+
+
+def _has_generic_blog_search_wrapper(keyword: str, title: str) -> bool:
+    stripped_title = normalize_text(_strip_keyword(title, keyword))
+    wrapper_key = normalize_key(stripped_title)
+    if not wrapper_key:
+        return False
+    return any(wrapper_key == pattern or pattern in wrapper_key for pattern in _BLOG_GENERIC_WRAPPER_KEYS)
+
+
+def _looks_like_vague_blog_title(title: str) -> bool:
+    if _has_blog_info_signal(title):
+        return False
+    return _has_naver_home_hook_signal(title) or title.endswith("?")
+
+
+def _extract_support_keyword_tokens(item_context: dict[str, Any]) -> set[str]:
+    tokens: set[str] = set()
+    raw_keywords = item_context.get("support_keywords")
+    if isinstance(raw_keywords, list):
+        for keyword in raw_keywords:
+            for token in tokenize_text(normalize_text(keyword)):
+                normalized_token = normalize_key(token)
+                if normalized_token:
+                    tokens.add(normalized_token)
+    return tokens
+
+
 def _strip_keyword(title: str, keyword: str) -> str:
     title_tokens = _normalize_tokens(title)
     keyword_tokens = _normalize_tokens(keyword)
@@ -895,6 +1257,35 @@ def _is_generic_low_info_single_skeleton(skeleton_key: str, skeleton_tokens: lis
     return False
 
 
+def _has_finance_domain_mismatch(
+    keyword: str,
+    title: str,
+    *,
+    item_context: dict[str, Any],
+) -> bool:
+    keyword_key = normalize_key(keyword)
+    title_key = normalize_key(title)
+    if not keyword_key or not title_key:
+        return False
+    if detect_category(keyword) != "finance":
+        return False
+    return any(pattern in title_key for pattern in _FINANCE_MISMATCH_TITLE_KEYS)
+
+
+def _has_finance_stale_wrapper(
+    keyword: str,
+    title: str,
+    *,
+    item_context: dict[str, Any],
+) -> bool:
+    title_key = normalize_key(title)
+    if not title_key:
+        return False
+    if detect_category(keyword) != "finance":
+        return False
+    return any(pattern in title_key for pattern in _FINANCE_STALE_TITLE_KEYS)
+
+
 def _has_unverified_freshness_claim(
     keyword: str,
     title: str,
@@ -905,12 +1296,32 @@ def _has_unverified_freshness_claim(
     if not title_key:
         return False
     keyword_key = normalize_key(keyword)
-    if any(pattern in keyword_key for pattern in _UNVERIFIED_FRESHNESS_PATTERNS):
+    matched_patterns = [pattern for pattern in _UNVERIFIED_FRESHNESS_PATTERNS if pattern in title_key]
+    if not matched_patterns:
         return False
-    if any(pattern in title_key for pattern in _UNVERIFIED_FRESHNESS_PATTERNS):
-        issue_context = item_context.get("issue_context")
-        return not isinstance(issue_context, dict)
-    return False
+    if any(pattern in keyword_key for pattern in matched_patterns):
+        return False
+    issue_context = item_context.get("issue_context")
+    if isinstance(issue_context, dict):
+        return False
+    if detect_category(keyword) == "finance" and _is_allowed_finance_analysis_window_title(
+        title_key,
+        matched_patterns=matched_patterns,
+    ):
+        return False
+    return True
+
+
+def _is_allowed_finance_analysis_window_title(
+    title_key: str,
+    *,
+    matched_patterns: list[str],
+) -> bool:
+    if any(pattern in matched_patterns for pattern in _STRICT_UNVERIFIED_FRESHNESS_PATTERNS):
+        return False
+    if not any(pattern in matched_patterns for pattern in _FINANCE_ANALYSIS_WINDOW_PATTERNS):
+        return False
+    return any(pattern in title_key for pattern in _FINANCE_ANALYSIS_CONTEXT_KEYS)
 
 
 def _infer_single_keyword_domain(keyword: str, item_context: dict[str, Any]) -> str:
