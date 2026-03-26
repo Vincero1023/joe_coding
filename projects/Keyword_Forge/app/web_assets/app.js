@@ -42,6 +42,7 @@ const DOWNSTREAM_STAGE_KEYS = {
 const TREND_SETTINGS_STORAGE_KEY = "keyword_forge_trend_settings";
 const TREND_SETTINGS_VERSION = 3;
 const TITLE_SETTINGS_STORAGE_KEY = "keyword_forge_title_settings";
+const TITLE_PROMPT_SETTINGS_ENDPOINT = "/settings/title-prompt";
 const TITLE_API_REGISTRY_STORAGE_KEY = "keyword_forge_title_api_registry_v1";
 const TITLE_API_REGISTRY_VERSION = 1;
 const KEYWORD_WORK_HISTORY_STORAGE_KEY = "keyword_forge_keyword_work_history_v1";
@@ -187,6 +188,9 @@ const TITLE_PRESET_LIBRARY = Array.isArray(window.KEYWORD_FORGE_TITLE_PRESETS)
     : [];
 const MANUAL_TITLE_PRESET_KEY = "manual";
 const DEFAULT_TITLE_PRESET_KEY = TITLE_PRESET_LIBRARY.find((preset) => preset?.is_default)?.key || "openai_balanced";
+const DEFAULT_TITLE_EVALUATION_PROMPT = String(window.KEYWORD_FORGE_TITLE_DEFAULT_EVALUATION_PROMPT || "")
+    .replace(/\r\n/g, "\n")
+    .trim();
 const TITLE_PRESET_MAP = TITLE_PRESET_LIBRARY.reduce((map, preset) => {
     const key = String(preset?.key || "").trim();
     if (key) {
@@ -282,6 +286,7 @@ const state = {
 
 const elements = {};
 let dashboardSessionSaveTimer = null;
+let titlePromptSettingsSyncSequence = 0;
 
 document.addEventListener("DOMContentLoaded", () => {
     bindElements();
@@ -296,6 +301,7 @@ document.addEventListener("DOMContentLoaded", () => {
     window.addEventListener("pagehide", persistDashboardSessionNow);
     window.addEventListener("storage", handleTitleSettingsStorageSync);
     document.addEventListener("visibilitychange", handleTitleSettingsVisibilitySync);
+    void refreshTitlePromptSettingsFromServer();
     startTicker();
     addLog("대시보드가 준비되었습니다. 단계별 실행과 디버그 정보를 바로 확인할 수 있습니다.", "success");
     if (restoredDashboard && elements.activityLog?.firstElementChild) {
@@ -344,6 +350,8 @@ function bindElements() {
     elements.statusList = document.getElementById("statusList");
     elements.resultsRailPanel = document.getElementById("resultsRailPanel");
     elements.resultsRail = document.getElementById("resultsRail");
+    elements.resultStageDock = document.getElementById("resultStageDock");
+    elements.resultsSection = document.getElementById("section-results");
     elements.resultsGrid = document.getElementById("resultsGrid");
     elements.activityLog = document.getElementById("activityLog");
     elements.pipelineStatus = document.getElementById("pipelineStatus");
@@ -1225,6 +1233,9 @@ function buildTitleOptions() {
     const provider = formState.provider;
     const model = formState.model;
     const apiKey = mode === "ai" ? formState.api_key : "";
+    const rewriteProvider = mode === "ai" ? formState.rewrite_provider : "";
+    const rewriteModel = mode === "ai" ? formState.rewrite_model : "";
+    const rewriteApiKey = mode === "ai" && rewriteProvider ? formState.rewrite_api_key : "";
 
     return {
         mode,
@@ -1240,9 +1251,15 @@ function buildTitleOptions() {
         provider,
         model,
         api_key: apiKey,
+        rewrite_provider: rewriteProvider,
+        rewrite_model: rewriteModel,
+        rewrite_api_key: rewriteApiKey,
         temperature: formState.temperature,
         fallback_to_template: formState.fallback_to_template,
         system_prompt: formState.system_prompt,
+        quality_system_prompt: formState.quality_system_prompt,
+        quality_prompt_profile_id: formState.active_evaluation_prompt_profile_id,
+        active_evaluation_prompt_profile_id: formState.active_evaluation_prompt_profile_id,
     };
 }
 
@@ -1604,6 +1621,7 @@ function handleTitleSettingsChange(event) {
 function persistTitleSettings() {
     try {
         const existingSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+        const existingPromptSettings = buildTitlePromptSettingsPayload(existingSettings);
         const formState = getTitleSettingsFormState();
         const nextSettings = {
             ...existingSettings,
@@ -1612,6 +1630,11 @@ function persistTitleSettings() {
         };
         const profiles = normalizeTitlePromptProfiles(nextSettings.prompt_profiles);
         const activeProfile = resolveTitlePromptProfile(profiles, nextSettings.active_prompt_profile_id);
+        const evaluationProfiles = normalizeTitleQualityPromptProfiles(nextSettings.evaluation_prompt_profiles);
+        const activeEvaluationProfile = resolveTitleQualityPromptProfile(
+            evaluationProfiles,
+            nextSettings.active_evaluation_prompt_profile_id,
+        );
 
         nextSettings.prompt_profiles = profiles;
         if (activeProfile) {
@@ -1621,11 +1644,31 @@ function persistTitleSettings() {
             nextSettings.direct_system_prompt = normalizeTitlePromptText(nextSettings.system_prompt);
             nextSettings.system_prompt = nextSettings.direct_system_prompt;
         }
+        nextSettings.evaluation_prompt_profiles = evaluationProfiles;
+        if (activeEvaluationProfile) {
+            nextSettings.evaluation_prompt = activeEvaluationProfile.prompt;
+        } else {
+            nextSettings.active_evaluation_prompt_profile_id = "";
+            nextSettings.evaluation_direct_prompt = normalizeTitleQualityPromptText(
+                nextSettings.quality_system_prompt || nextSettings.evaluation_prompt || DEFAULT_TITLE_EVALUATION_PROMPT,
+            );
+            nextSettings.evaluation_prompt = nextSettings.evaluation_direct_prompt;
+        }
+        const nextPromptSettings = buildTitlePromptSettingsPayload(nextSettings);
+        writeInjectedTitlePromptSettings(nextPromptSettings);
+        const normalizedSettings = {
+            ...nextSettings,
+            ...nextPromptSettings,
+            api_key: "",
+        };
 
         window.localStorage.setItem(
             TITLE_SETTINGS_STORAGE_KEY,
-            JSON.stringify(nextSettings),
+            JSON.stringify(normalizedSettings),
         );
+        if (!areTitlePromptSettingsEqual(existingPromptSettings, nextPromptSettings)) {
+            void syncTitlePromptSettingsToServerQuietly(normalizedSettings);
+        }
     } catch (error) {
         addLog("브라우저 저장소에 제목 생성 설정을 저장하지 못했습니다.", "error");
     }
@@ -1994,6 +2037,14 @@ function setQuickStartMode(mode) {
 
 function focusControlBlock(controlBlockKey) {
     const target = document.querySelector(`[data-control-block="${controlBlockKey}"]`);
+    if (!target) {
+        return;
+    }
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function focusResultsWorkbench() {
+    const target = elements.resultsSection || document.getElementById("section-results");
     if (!target) {
         return;
     }
@@ -4169,6 +4220,10 @@ function bindElements() {
     elements.titlePromptSummary = document.getElementById("titlePromptSummary");
     elements.openTitlePromptEditorButton = document.getElementById("openTitlePromptEditorButton");
     elements.clearTitlePromptButton = document.getElementById("clearTitlePromptButton");
+    elements.titleQualitySystemPrompt = document.getElementById("titleQualitySystemPrompt");
+    elements.titleQualityPromptSummary = document.getElementById("titleQualityPromptSummary");
+    elements.openTitleQualityPromptEditorButton = document.getElementById("openTitleQualityPromptEditorButton");
+    elements.clearTitleQualityPromptButton = document.getElementById("clearTitleQualityPromptButton");
     elements.titleModeBadge = document.getElementById("titleModeBadge");
     elements.operationMode = document.getElementById("operationMode");
     elements.operationRequestGap = document.getElementById("operationRequestGap");
@@ -5537,17 +5592,35 @@ function bindElements() {
     elements.titleCommunitySourceSummary = document.getElementById("titleCommunitySourceSummary");
     elements.titlePreset = document.getElementById("titlePreset");
     elements.titlePresetDescription = document.getElementById("titlePresetDescription");
+    elements.titleCustomPresetPicker = document.getElementById("titleCustomPresetPicker");
+    elements.titleCustomPresetSummary = document.getElementById("titleCustomPresetSummary");
+    elements.saveTitleCustomPresetButton = document.getElementById("saveTitleCustomPresetButton");
+    elements.deleteTitleCustomPresetButton = document.getElementById("deleteTitleCustomPresetButton");
     elements.titleProvider = document.getElementById("titleProvider");
     elements.titleProviderRegistryHint = document.getElementById("titleProviderRegistryHint");
     elements.openApiRegistrySettingsButton = document.getElementById("openApiRegistrySettingsButton");
     elements.titleModel = document.getElementById("titleModel");
     elements.titleTemperature = document.getElementById("titleTemperature");
     elements.titleTemperatureDescription = document.getElementById("titleTemperatureDescription");
+    elements.titleRewriteProvider = document.getElementById("titleRewriteProvider");
+    elements.titleRewriteModel = document.getElementById("titleRewriteModel");
+    elements.titleRewriteSummary = document.getElementById("titleRewriteSummary");
     elements.titleFallback = document.getElementById("titleFallback");
     elements.titleSystemPrompt = document.getElementById("titleSystemPrompt");
+    elements.titleQualitySystemPrompt = document.getElementById("titleQualitySystemPrompt");
+    elements.titlePromptProfilePicker = document.getElementById("titlePromptProfilePicker");
+    elements.titleQualityPromptProfilePicker = document.getElementById("titleQualityPromptProfilePicker");
     elements.titlePromptSummary = document.getElementById("titlePromptSummary");
+    elements.titleQualityPromptSummary = document.getElementById("titleQualityPromptSummary");
     elements.openTitlePromptEditorButton = document.getElementById("openTitlePromptEditorButton");
+    elements.openTitleQualityPromptEditorButton = document.getElementById("openTitleQualityPromptEditorButton");
     elements.clearTitlePromptButton = document.getElementById("clearTitlePromptButton");
+    elements.clearTitleQualityPromptButton = document.getElementById("clearTitleQualityPromptButton");
+    elements.titleQualitySystemPrompt = document.getElementById("titleQualitySystemPrompt");
+    elements.titleQualityPromptProfilePicker = document.getElementById("titleQualityPromptProfilePicker");
+    elements.titleQualityPromptSummary = document.getElementById("titleQualityPromptSummary");
+    elements.openTitleQualityPromptEditorButton = document.getElementById("openTitleQualityPromptEditorButton");
+    elements.clearTitleQualityPromptButton = document.getElementById("clearTitleQualityPromptButton");
     elements.titleModeBadge = document.getElementById("titleModeBadge");
     elements.titleModeRadios = Array.from(document.querySelectorAll("input[name='titleModeOption']"));
     elements.titleModeVisibilityBlocks = Array.from(document.querySelectorAll("[data-title-mode-visibility]"));
@@ -5649,6 +5722,7 @@ function bindEvents() {
     document.getElementById("resetButton").addEventListener("click", resetAll);
     document.getElementById("clearDebugButton").addEventListener("click", clearDiagnostics);
     elements.stopStreamButton?.addEventListener("click", cancelActiveStream);
+    elements.resultStageDock?.addEventListener("click", handleResultsGridClick);
     elements.resultsGrid.addEventListener("click", handleResultsGridClick);
     elements.resultsGrid.addEventListener("change", handleResultsGridChange);
     elements.expandManualInput.addEventListener("input", renderInputState);
@@ -5689,9 +5763,12 @@ function bindEvents() {
         elements.titleIssueSourceMode,
         elements.titleCommunityCustomDomains,
         elements.titlePreset,
+        elements.titleCustomPresetPicker,
         elements.titleProvider,
         elements.titleModel,
         elements.titleTemperature,
+        elements.titleRewriteProvider,
+        elements.titleRewriteModel,
         elements.titleFallback,
     ].forEach((element) => {
         element?.addEventListener("input", handleTitleSettingsChange);
@@ -5706,12 +5783,18 @@ function bindEvents() {
         input.addEventListener("input", handleTitleSettingsChange);
     });
     elements.openTitlePromptEditorButton?.addEventListener("click", openTitlePromptEditor);
+    elements.openTitleQualityPromptEditorButton?.addEventListener("click", openTitleQualityPromptEditor);
     elements.openApiRegistrySettingsButton?.addEventListener("click", () => {
         openUtilityDrawer("settings");
     });
     elements.titlePromptProfilePicker?.addEventListener("input", handleTitleSettingsChange);
     elements.titlePromptProfilePicker?.addEventListener("change", handleTitleSettingsChange);
+    elements.titleQualityPromptProfilePicker?.addEventListener("input", handleTitleSettingsChange);
+    elements.titleQualityPromptProfilePicker?.addEventListener("change", handleTitleSettingsChange);
     elements.clearTitlePromptButton?.addEventListener("click", clearTitleSystemPrompt);
+    elements.clearTitleQualityPromptButton?.addEventListener("click", clearTitleQualitySystemPrompt);
+    elements.saveTitleCustomPresetButton?.addEventListener("click", saveCurrentTitlePresetProfile);
+    elements.deleteTitleCustomPresetButton?.addEventListener("click", deleteSelectedTitlePresetProfile);
     elements.saveTitleApiRegistryButton?.addEventListener("click", saveTitleApiRegistry);
     elements.clearTitleApiRegistryButton?.addEventListener("click", clearTitleApiRegistry);
     [
@@ -7300,6 +7383,11 @@ function handleResultsGridClick(event) {
     if (resultTabTrigger) {
         setActiveResultView(resultTabTrigger.getAttribute("data-result-tab") || "");
         renderResults();
+        if (resultTabTrigger.closest("#resultStageDock, .workspace-nav-stage-dock")) {
+            window.requestAnimationFrame(() => {
+                focusResultsWorkbench();
+            });
+        }
         return;
     }
 
@@ -7351,13 +7439,18 @@ function handleResultsGridClick(event) {
     applyCollectedSelection(groupItems, action === "select_group");
 }
 
-function renderResultStageTabs(resultViews, activeViewKey) {
+function renderResultStageTabs(resultViews, activeViewKey, options = {}) {
+    const dockMode = Boolean(options.dockMode);
+    const switcherClassName = dockMode
+        ? "results-stage-switcher result-stage-dock-switcher"
+        : "results-stage-switcher";
+    const tabClassName = dockMode ? " result-stage-dock-tab" : "";
     return `
-        <div class="results-stage-switcher">
+        <div class="${switcherClassName}">
             ${resultViews.map((view) => `
                 <button
                     type="button"
-                    class="results-stage-tab ${escapeHtml(view.state || "pending")}${view.key === activeViewKey ? " active" : ""}"
+                    class="results-stage-tab${tabClassName} ${escapeHtml(view.state || "pending")}${view.key === activeViewKey ? " active" : ""}"
                     data-result-tab="${escapeHtml(view.key)}"
                     aria-pressed="${view.key === activeViewKey ? "true" : "false"}"
                 >
@@ -7541,6 +7634,11 @@ function renderResults() {
         : null;
 
     elements.layoutGrid?.classList.toggle("results-first", Boolean(activeView));
+    if (elements.resultStageDock) {
+        elements.resultStageDock.innerHTML = activeView
+            ? renderResultStageTabs(resultViews, activeViewKey, { dockMode: true })
+            : "";
+    }
     elements.resultsGrid.innerHTML = activeView
         ? `
             ${renderResultStageTabs(resultViews, activeViewKey)}
@@ -8419,6 +8517,11 @@ function handleResultsGridClick(event) {
     if (resultTabTrigger) {
         setActiveResultView(resultTabTrigger.getAttribute("data-result-tab") || "");
         renderResults();
+        if (resultTabTrigger.closest("#resultStageDock, .workspace-nav-stage-dock")) {
+            window.requestAnimationFrame(() => {
+                focusResultsWorkbench();
+            });
+        }
         return;
     }
 
@@ -8687,6 +8790,15 @@ function getTitleApiKeyForProvider(provider, registry = readTitleApiRegistry()) 
     return String(registry.providers?.[selectedProvider]?.api_key || "").trim();
 }
 
+function resolveOptionalRegisteredTitleProvider(provider, registry = readTitleApiRegistry()) {
+    const preferredProvider = String(provider || "").trim().toLowerCase();
+    const registeredProviders = getRegisteredTitleProviders(registry);
+    if (preferredProvider && registeredProviders.includes(preferredProvider)) {
+        return preferredProvider;
+    }
+    return "";
+}
+
 function getVisibleTitlePresets(registry = readTitleApiRegistry()) {
     const registeredProviders = new Set(getRegisteredTitleProviders(registry));
     return TITLE_PRESET_LIBRARY.filter((preset) => (
@@ -8730,6 +8842,72 @@ function setTitleProviderOptions(preferredProvider = "", registry = readTitleApi
         elements.titleProvider.value = registeredProviders[0] || "";
     }
     return String(elements.titleProvider.value || "").trim();
+}
+
+function setTitleProviderOptionsForElement(
+    selectElement,
+    preferredProvider = "",
+    registry = readTitleApiRegistry(),
+    options = {},
+) {
+    if (!selectElement) {
+        return "";
+    }
+
+    const registeredProviders = getRegisteredTitleProviders(registry);
+    const allowEmpty = Boolean(options.allowEmpty);
+    const emptyLabel = String(options.emptyLabel || "등록된 API 없음");
+    selectElement.innerHTML = "";
+
+    if (allowEmpty) {
+        const baseOption = document.createElement("option");
+        baseOption.value = "";
+        baseOption.textContent = emptyLabel;
+        selectElement.appendChild(baseOption);
+    }
+
+    if (!registeredProviders.length) {
+        if (!allowEmpty) {
+            const emptyOption = document.createElement("option");
+            emptyOption.value = "";
+            emptyOption.textContent = emptyLabel;
+            selectElement.appendChild(emptyOption);
+        }
+        selectElement.value = "";
+        return "";
+    }
+
+    registeredProviders.forEach((provider) => {
+        const option = document.createElement("option");
+        option.value = provider;
+        option.textContent = formatTitleProviderLabel(provider);
+        selectElement.appendChild(option);
+    });
+
+    const selectedProvider = allowEmpty
+        ? resolveOptionalRegisteredTitleProvider(preferredProvider, registry)
+        : ensureRegisteredTitleProvider(preferredProvider, registry);
+    selectElement.value = selectedProvider;
+    if (selectElement.value !== selectedProvider) {
+        selectElement.value = allowEmpty ? "" : (registeredProviders[0] || "");
+    }
+    return String(selectElement.value || "").trim();
+}
+
+function setTitleProviderOptions(preferredProvider = "", registry = readTitleApiRegistry()) {
+    return setTitleProviderOptionsForElement(elements.titleProvider, preferredProvider, registry);
+}
+
+function setTitleRewriteProviderOptions(preferredProvider = "", registry = readTitleApiRegistry()) {
+    return setTitleProviderOptionsForElement(
+        elements.titleRewriteProvider,
+        preferredProvider,
+        registry,
+        {
+            allowEmpty: true,
+            emptyLabel: "생성과 동일",
+        },
+    );
 }
 
 function setTitlePresetOptions(preferredPresetKey = MANUAL_TITLE_PRESET_KEY, registry = readTitleApiRegistry()) {
@@ -9232,6 +9410,57 @@ function setTitleModelOptions(provider, preferredValue = "") {
     }
 }
 
+function setTitleModelOptionsForElement(modelElement, provider, preferredValue = "", emptyLabel = "등록된 API 없음") {
+    if (!modelElement) {
+        return;
+    }
+
+    const rawProvider = String(provider || "").trim().toLowerCase();
+    if (!rawProvider) {
+        modelElement.innerHTML = "";
+        const emptyOption = document.createElement("option");
+        emptyOption.value = "";
+        emptyOption.textContent = emptyLabel;
+        modelElement.appendChild(emptyOption);
+        modelElement.value = "";
+        return;
+    }
+
+    const normalizedProvider = normalizeTitleProvider(provider);
+    const normalizedPreferredValue = String(preferredValue || "").trim();
+    const baseOptions = getTitleModelOptionsForProvider(normalizedProvider).map((option) => ({ ...option }));
+
+    if (normalizedPreferredValue && !baseOptions.some((option) => option.value === normalizedPreferredValue)) {
+        baseOptions.unshift({
+            value: normalizedPreferredValue,
+            label: `[기존 저장 모델] ${normalizedPreferredValue}`,
+        });
+    }
+
+    modelElement.innerHTML = "";
+    baseOptions.forEach((option) => {
+        const optionElement = document.createElement("option");
+        optionElement.value = option.value;
+        optionElement.textContent = option.label;
+        modelElement.appendChild(optionElement);
+    });
+
+    const fallbackValue = TITLE_PROVIDER_DEFAULT_MODELS[normalizedProvider] || baseOptions[0]?.value || "";
+    const targetValue = normalizedPreferredValue || fallbackValue;
+    modelElement.value = targetValue;
+    if (modelElement.value !== targetValue) {
+        modelElement.value = fallbackValue;
+    }
+}
+
+function setTitleModelOptions(provider, preferredValue = "") {
+    setTitleModelOptionsForElement(elements.titleModel, provider, preferredValue);
+}
+
+function setTitleRewriteModelOptions(provider, preferredValue = "") {
+    setTitleModelOptionsForElement(elements.titleRewriteModel, provider, preferredValue, "생성과 동일");
+}
+
 function applyTitlePresetSelection(presetKey) {
     const normalizedPresetKey = normalizeTitlePresetKey(presetKey);
     const preset = getTitlePresetConfig(normalizedPresetKey);
@@ -9270,6 +9499,17 @@ function setTitleSystemPromptValue(value) {
         return;
     }
     elements.titleSystemPrompt.value = String(value || "").replace(/\r\n/g, "\n").trim();
+}
+
+function getTitleQualitySystemPromptValue() {
+    return String(elements.titleQualitySystemPrompt?.value || "").replace(/\r\n/g, "\n").trim();
+}
+
+function setTitleQualitySystemPromptValue(value) {
+    if (!elements.titleQualitySystemPrompt) {
+        return;
+    }
+    elements.titleQualitySystemPrompt.value = String(value || "").replace(/\r\n/g, "\n").trim();
 }
 
 function normalizeTitlePromptText(value) {
@@ -9330,6 +9570,224 @@ function resolveStoredTitlePrompt(settings = {}, profiles = normalizeTitlePrompt
     return resolveDirectTitlePrompt(settings);
 }
 
+function normalizeTitleQualityPromptText(value) {
+    return String(value || "").replace(/\r\n/g, "\n").trim();
+}
+
+function normalizeTitleQualityPromptProfiles(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const seenIds = new Set();
+    return value.reduce((profiles, item, index) => {
+        if (!item || typeof item !== "object") {
+            return profiles;
+        }
+        const id = normalizeTitlePromptProfileId(item.id || `quality-profile-${index + 1}`);
+        const name = String(item.name || "").replace(/\s+/g, " ").trim() || `??? ${profiles.length + 1}`;
+        const prompt = normalizeTitleQualityPromptText(item.prompt);
+        if (!id || seenIds.has(id)) {
+            return profiles;
+        }
+        seenIds.add(id);
+        profiles.push({
+            id,
+            name,
+            prompt,
+            updated_at: String(item.updated_at || "").trim(),
+        });
+        return profiles;
+    }, []);
+}
+
+function resolveTitleQualityPromptProfile(profiles, profileId) {
+    const normalizedProfileId = normalizeTitlePromptProfileId(profileId);
+    if (!normalizedProfileId) {
+        return null;
+    }
+    return (Array.isArray(profiles) ? profiles : []).find((profile) => profile.id === normalizedProfileId) || null;
+}
+
+function resolveDirectTitleQualityPrompt(settings = {}) {
+    const directPrompt = normalizeTitleQualityPromptText(settings.evaluation_direct_prompt);
+    if (directPrompt) {
+        return directPrompt;
+    }
+    return normalizeTitleQualityPromptText(settings.evaluation_prompt);
+}
+
+function resolveStoredTitleQualityPrompt(
+    settings = {},
+    profiles = normalizeTitleQualityPromptProfiles(settings.evaluation_prompt_profiles),
+) {
+    const activeProfile = resolveTitleQualityPromptProfile(profiles, settings.active_evaluation_prompt_profile_id);
+    if (activeProfile) {
+        return activeProfile.prompt;
+    }
+    return resolveDirectTitleQualityPrompt(settings);
+}
+
+function normalizeTitlePresetProfiles(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const seenIds = new Set();
+    return value.reduce((profiles, item, index) => {
+        if (!item || typeof item !== "object") {
+            return profiles;
+        }
+        const id = normalizeTitlePromptProfileId(item.id || `preset-${index + 1}`);
+        const name = String(item.name || "").replace(/\s+/g, " ").trim() || `프리셋 ${profiles.length + 1}`;
+        if (!id || seenIds.has(id)) {
+            return profiles;
+        }
+        seenIds.add(id);
+        const promptProfileId = normalizeTitlePromptProfileId(item.prompt_profile_id || "");
+        const evaluationPromptProfileId = normalizeTitlePromptProfileId(item.evaluation_prompt_profile_id || "");
+        const rawProvider = String(item.provider || "").trim();
+        const rawRewriteProvider = String(item.rewrite_provider || "").trim();
+        profiles.push({
+            id,
+            name,
+            preset_key: normalizeTitlePresetKey(item.preset_key || ""),
+            provider: rawProvider ? normalizeTitleProvider(rawProvider) : "",
+            model: String(item.model || "").trim(),
+            temperature: Number(normalizeTitleTemperatureValue(item.temperature)),
+            fallback_to_template: Boolean(item.fallback_to_template ?? true),
+            auto_retry_enabled: Boolean(item.auto_retry_enabled ?? true),
+            quality_retry_threshold: normalizeTitleQualityRetryThreshold(item.quality_retry_threshold),
+            issue_context_enabled: Boolean(item.issue_context_enabled ?? true),
+            issue_context_limit: normalizeTitleIssueContextLimit(item.issue_context_limit),
+            issue_source_mode: normalizeTitleIssueSourceMode(item.issue_source_mode),
+            community_sources: normalizeTitleCommunitySourceKeys(item.community_sources),
+            community_custom_domains: normalizeTitleCommunityCustomDomains(item.community_custom_domains),
+            prompt_profile_id: promptProfileId,
+            direct_system_prompt: normalizeTitlePromptText(item.direct_system_prompt || item.system_prompt),
+            evaluation_prompt_profile_id: evaluationPromptProfileId,
+            evaluation_direct_prompt: normalizeTitleQualityPromptText(
+                item.evaluation_direct_prompt || item.evaluation_prompt,
+            ),
+            rewrite_provider: rawRewriteProvider ? normalizeTitleProvider(rawRewriteProvider) : "",
+            rewrite_model: String(item.rewrite_model || "").trim(),
+            updated_at: String(item.updated_at || "").trim(),
+        });
+        return profiles;
+    }, []);
+}
+
+function resolveTitlePresetProfile(profiles, profileId) {
+    const normalizedProfileId = normalizeTitlePromptProfileId(profileId);
+    if (!normalizedProfileId) {
+        return null;
+    }
+    return (Array.isArray(profiles) ? profiles : []).find((profile) => profile.id === normalizedProfileId) || null;
+}
+
+function buildTitlePromptSettingsPayload(settings = {}) {
+    const source = settings && typeof settings === "object" ? settings : {};
+    const profiles = normalizeTitlePromptProfiles(source.prompt_profiles);
+    const activeProfile = resolveTitlePromptProfile(profiles, source.active_prompt_profile_id);
+    const evaluationProfiles = normalizeTitleQualityPromptProfiles(source.evaluation_prompt_profiles);
+    const activeEvaluationProfile = resolveTitleQualityPromptProfile(
+        evaluationProfiles,
+        source.active_evaluation_prompt_profile_id,
+    );
+    const presetProfiles = normalizeTitlePresetProfiles(source.preset_profiles);
+    const activePresetProfile = resolveTitlePresetProfile(presetProfiles, source.active_preset_profile_id);
+    const directPrompt = normalizeTitlePromptText(
+        source.direct_system_prompt || (activeProfile ? "" : source.system_prompt),
+    );
+    const directEvaluationPrompt = normalizeTitleQualityPromptText(
+        source.evaluation_direct_prompt || (activeEvaluationProfile ? "" : source.evaluation_prompt),
+    );
+    return {
+        preset_key: normalizeTitlePresetKey(source.preset_key || ""),
+        direct_system_prompt: directPrompt,
+        system_prompt: activeProfile ? activeProfile.prompt : directPrompt,
+        prompt_profiles: profiles,
+        active_prompt_profile_id: activeProfile ? activeProfile.id : "",
+        evaluation_direct_prompt: directEvaluationPrompt,
+        evaluation_prompt: activeEvaluationProfile ? activeEvaluationProfile.prompt : directEvaluationPrompt,
+        evaluation_prompt_profiles: evaluationProfiles,
+        active_evaluation_prompt_profile_id: activeEvaluationProfile ? activeEvaluationProfile.id : "",
+        preset_profiles: presetProfiles,
+        active_preset_profile_id: activePresetProfile ? activePresetProfile.id : "",
+    };
+}
+
+function readInjectedTitlePromptSettings() {
+    return buildTitlePromptSettingsPayload(window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS || {});
+}
+
+function writeInjectedTitlePromptSettings(settings = {}) {
+    const normalized = buildTitlePromptSettingsPayload(settings);
+    window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS = normalized;
+    return normalized;
+}
+
+function isDefaultTitleEvaluationPrompt(prompt) {
+    const normalizedPrompt = normalizeTitleQualityPromptText(prompt);
+    return Boolean(normalizedPrompt) && normalizedPrompt === DEFAULT_TITLE_EVALUATION_PROMPT;
+}
+
+function hasMeaningfulTitlePromptSettings(settings = {}) {
+    const normalized = buildTitlePromptSettingsPayload(settings);
+    const hasCustomEvaluationPrompt = Boolean(
+        normalized.evaluation_prompt_profiles.length
+        || normalized.active_evaluation_prompt_profile_id
+        || (
+            normalized.evaluation_direct_prompt
+            && !isDefaultTitleEvaluationPrompt(normalized.evaluation_direct_prompt)
+        )
+    );
+    return Boolean(
+        normalized.preset_profiles.length
+        || normalized.active_preset_profile_id
+        || normalized.prompt_profiles.length
+        || normalized.active_prompt_profile_id
+        || hasCustomEvaluationPrompt
+        || normalized.direct_system_prompt
+        || (normalized.preset_key && normalized.preset_key !== DEFAULT_TITLE_PRESET_KEY)
+    );
+}
+
+function areTitlePromptSettingsEqual(left, right) {
+    return JSON.stringify(buildTitlePromptSettingsPayload(left)) === JSON.stringify(buildTitlePromptSettingsPayload(right));
+}
+
+async function syncTitlePromptSettingsToServer(settings = {}) {
+    const payload = buildTitlePromptSettingsPayload(settings);
+    writeInjectedTitlePromptSettings(payload);
+    const syncId = ++titlePromptSettingsSyncSequence;
+    const response = await fetch(TITLE_PROMPT_SETTINGS_ENDPOINT, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+        throw new Error(`title_prompt_sync_failed:${response.status}`);
+    }
+    const result = tryParseJson(await response.text()) || {};
+    const savedSettings = writeInjectedTitlePromptSettings(result.title_prompt_settings || payload);
+    if (syncId === titlePromptSettingsSyncSequence) {
+        const latestLocalSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+        window.localStorage.setItem(
+            TITLE_SETTINGS_STORAGE_KEY,
+            JSON.stringify({
+                ...latestLocalSettings,
+                ...savedSettings,
+            }),
+        );
+    }
+    return savedSettings;
+}
+
+function syncTitlePromptSettingsToServerQuietly(settings = {}) {
+    return syncTitlePromptSettingsToServer(settings).catch(() => null);
+}
+
 function renderTitlePromptProfilePicker(settings = {}) {
     if (!elements.titlePromptProfilePicker) {
         return;
@@ -9357,6 +9815,105 @@ function renderTitlePromptProfilePicker(settings = {}) {
     }
 }
 
+function renderTitleQualityPromptProfilePicker(settings = {}) {
+    if (!elements.titleQualityPromptProfilePicker) {
+        return;
+    }
+
+    const profiles = normalizeTitleQualityPromptProfiles(settings.evaluation_prompt_profiles);
+    const activeProfileId = normalizeTitlePromptProfileId(settings.active_evaluation_prompt_profile_id);
+    elements.titleQualityPromptProfilePicker.innerHTML = "";
+
+    const directOption = document.createElement("option");
+    directOption.value = "";
+    directOption.textContent = profiles.length ? "?? ??" : "?? ?? (??? ??)";
+    elements.titleQualityPromptProfilePicker.appendChild(directOption);
+
+    profiles.forEach((profile) => {
+        const option = document.createElement("option");
+        option.value = profile.id;
+        option.textContent = profile.name;
+        elements.titleQualityPromptProfilePicker.appendChild(option);
+    });
+
+    elements.titleQualityPromptProfilePicker.value = activeProfileId;
+    if (elements.titleQualityPromptProfilePicker.value !== activeProfileId) {
+        elements.titleQualityPromptProfilePicker.value = "";
+    }
+}
+
+function renderTitlePresetProfilePicker(settings = {}) {
+    if (!elements.titleCustomPresetPicker) {
+        return;
+    }
+
+    const presetProfiles = normalizeTitlePresetProfiles(settings.preset_profiles);
+    const activePresetProfileId = normalizeTitlePromptProfileId(settings.active_preset_profile_id);
+    elements.titleCustomPresetPicker.innerHTML = "";
+
+    const manualOption = document.createElement("option");
+    manualOption.value = "";
+    manualOption.textContent = presetProfiles.length ? "직접 설정" : "직접 설정 (저장본 없음)";
+    elements.titleCustomPresetPicker.appendChild(manualOption);
+
+    presetProfiles.forEach((profile) => {
+        const option = document.createElement("option");
+        option.value = profile.id;
+        option.textContent = profile.name;
+        elements.titleCustomPresetPicker.appendChild(option);
+    });
+
+    elements.titleCustomPresetPicker.value = activePresetProfileId;
+    if (elements.titleCustomPresetPicker.value !== activePresetProfileId) {
+        elements.titleCustomPresetPicker.value = "";
+    }
+}
+
+function buildTitlePresetProfileSummary(settings = {}) {
+    const presetProfiles = normalizeTitlePresetProfiles(settings.preset_profiles);
+    const activePresetProfile = resolveTitlePresetProfile(presetProfiles, settings.active_preset_profile_id);
+    if (activePresetProfile) {
+        const providerLabel = activePresetProfile.provider
+            ? formatTitleProviderLabel(activePresetProfile.provider)
+            : "AI 미지정";
+        const rewriteProviderLabel = activePresetProfile.rewrite_provider
+            ? formatTitleProviderLabel(activePresetProfile.rewrite_provider)
+            : "생성과 동일";
+        const rewriteModelLabel = activePresetProfile.rewrite_model || "생성과 동일";
+        return `${activePresetProfile.name} · ${providerLabel} · ${activePresetProfile.model || "모델 없음"} · 재작성 ${rewriteProviderLabel} / ${rewriteModelLabel}`;
+    }
+    return presetProfiles.length
+        ? `사용자 프리셋 ${presetProfiles.length}개`
+        : "저장된 사용자 프리셋 없음";
+}
+
+function updateTitlePresetProfileSummary() {
+    if (elements.titleCustomPresetSummary) {
+        elements.titleCustomPresetSummary.textContent = buildTitlePresetProfileSummary(getEffectiveTitlePromptSettings());
+    }
+    if (elements.deleteTitleCustomPresetButton) {
+        elements.deleteTitleCustomPresetButton.disabled = !normalizeTitlePromptProfileId(elements.titleCustomPresetPicker?.value || "");
+    }
+}
+
+function buildTitleRewriteSummary() {
+    if (!elements.titleRewriteSummary) {
+        return "";
+    }
+    const provider = String(elements.titleRewriteProvider?.value || "").trim();
+    const model = String(elements.titleRewriteModel?.value || "").trim();
+    if (!provider) {
+        return "재작성은 제목 생성 AI와 같은 provider/model을 그대로 사용합니다.";
+    }
+    return `재작성 전용 AI: ${formatTitleProviderLabel(provider)} / ${model || "기본 모델"}`;
+}
+
+function updateTitleRewriteSummary() {
+    if (elements.titleRewriteSummary) {
+        elements.titleRewriteSummary.textContent = buildTitleRewriteSummary();
+    }
+}
+
 function buildTitlePromptSummary(settings = {}) {
     const profiles = normalizeTitlePromptProfiles(settings.prompt_profiles);
     const activeProfile = resolveTitlePromptProfile(profiles, settings.active_prompt_profile_id);
@@ -9372,8 +9929,43 @@ function buildTitlePromptSummary(settings = {}) {
     return profiles.length ? `저장본 ${profiles.length}개 · 직접 입력 없음` : "추가 지침 없음";
 }
 
+function buildTitleQualityPromptSummary(settings = {}) {
+    const profiles = normalizeTitleQualityPromptProfiles(settings.evaluation_prompt_profiles);
+    const activeProfile = resolveTitleQualityPromptProfile(
+        profiles,
+        settings.active_evaluation_prompt_profile_id,
+    );
+    const normalizedPrompt = normalizeTitleQualityPromptText(
+        resolveStoredTitleQualityPrompt(settings, profiles) || DEFAULT_TITLE_EVALUATION_PROMPT,
+    ).replace(/\s+/g, " ").trim();
+    if (activeProfile) {
+        return normalizedPrompt
+            ? `저장본 ${activeProfile.name} / ${normalizedPrompt.length}자`
+            : `저장본 ${activeProfile.name} / 비어 있음`;
+    }
+    if (!normalizedPrompt || isDefaultTitleEvaluationPrompt(normalizedPrompt)) {
+        return profiles.length
+            ? `저장본 ${profiles.length}개 / 기본 홈판 평가 프롬프트 사용 중`
+            : "기본 홈판 평가 프롬프트 사용 중";
+    }
+    return `직접 입력 / ${normalizedPrompt.length}자`;
+}
+
+function getEffectiveTitlePromptSettings() {
+    const localSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+    const localPromptSettings = buildTitlePromptSettingsPayload(localSettings);
+    const serverPromptSettings = readInjectedTitlePromptSettings();
+    const effectivePromptSettings = hasMeaningfulTitlePromptSettings(serverPromptSettings)
+        ? serverPromptSettings
+        : localPromptSettings;
+    return {
+        ...localSettings,
+        ...effectivePromptSettings,
+    };
+}
+
 function updateTitlePromptSummary() {
-    const settings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+    const settings = getEffectiveTitlePromptSettings();
     if (elements.titlePromptSummary) {
         elements.titlePromptSummary.textContent = buildTitlePromptSummary(settings);
     }
@@ -9382,27 +9974,88 @@ function updateTitlePromptSummary() {
     }
 }
 
+function updateTitleQualityPromptSummary() {
+    const settings = getEffectiveTitlePromptSettings();
+    if (elements.titleQualityPromptSummary) {
+        elements.titleQualityPromptSummary.textContent = buildTitleQualityPromptSummary(settings);
+    }
+    if (elements.clearTitleQualityPromptButton) {
+        const currentPrompt = normalizeTitleQualityPromptText(
+            resolveStoredTitleQualityPrompt(settings) || DEFAULT_TITLE_EVALUATION_PROMPT,
+        );
+        elements.clearTitleQualityPromptButton.disabled = !currentPrompt || isDefaultTitleEvaluationPrompt(currentPrompt);
+    }
+}
+
 function syncTitlePromptFromStorage() {
-    const settings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+    const settings = getEffectiveTitlePromptSettings();
     const profiles = normalizeTitlePromptProfiles(settings.prompt_profiles);
+    const evaluationProfiles = normalizeTitleQualityPromptProfiles(settings.evaluation_prompt_profiles);
+    const presetProfiles = normalizeTitlePresetProfiles(settings.preset_profiles);
     renderTitlePromptProfilePicker({
         ...settings,
         prompt_profiles: profiles,
     });
+    renderTitleQualityPromptProfilePicker({
+        ...settings,
+        evaluation_prompt_profiles: evaluationProfiles,
+    });
+    renderTitlePresetProfilePicker({
+        ...settings,
+        prompt_profiles: profiles,
+        evaluation_prompt_profiles: evaluationProfiles,
+        preset_profiles: presetProfiles,
+    });
     setTitleSystemPromptValue(resolveStoredTitlePrompt(settings, profiles));
+    setTitleQualitySystemPromptValue(
+        resolveStoredTitleQualityPrompt(settings, evaluationProfiles) || DEFAULT_TITLE_EVALUATION_PROMPT,
+    );
     updateTitlePromptSummary();
+    updateTitleQualityPromptSummary();
+    updateTitlePresetProfileSummary();
+    updateTitleRewriteSummary();
+}
+
+async function refreshTitlePromptSettingsFromServer() {
+    try {
+        const response = await fetch(TITLE_PROMPT_SETTINGS_ENDPOINT, {
+            method: "GET",
+            headers: {
+                "Accept": "application/json",
+            },
+        });
+        if (!response.ok) {
+            return;
+        }
+        const payload = tryParseJson(await response.text()) || {};
+        const promptSettings = writeInjectedTitlePromptSettings(payload.title_prompt_settings || {});
+        const localSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+        const mergedSettings = hasMeaningfulTitlePromptSettings(promptSettings)
+            ? {
+                ...localSettings,
+                ...promptSettings,
+            }
+            : localSettings;
+        window.localStorage.setItem(
+            TITLE_SETTINGS_STORAGE_KEY,
+            JSON.stringify(mergedSettings),
+        );
+    } catch (error) {
+        return;
+    }
+    syncTitlePromptFromStorage();
 }
 
 function handleTitleSettingsStorageSync(event) {
     if (event.key && event.key !== TITLE_SETTINGS_STORAGE_KEY) {
         return;
     }
-    syncTitlePromptFromStorage();
+    void refreshTitlePromptSettingsFromServer();
 }
 
 function handleTitleSettingsVisibilitySync() {
     if (!document.hidden) {
-        syncTitlePromptFromStorage();
+        void refreshTitlePromptSettingsFromServer();
     }
 }
 
@@ -9413,7 +10066,18 @@ function openTitlePromptEditor() {
     }
 }
 
+function openTitleQualityPromptEditor() {
+    const openedWindow = window.open("/title-quality-prompt-editor", "keywordForgeTitleQualityPromptEditor");
+    if (!openedWindow) {
+        window.location.href = "/title-quality-prompt-editor";
+        return;
+    }
+}
+
 function clearTitleSystemPrompt() {
+    if (elements.titleCustomPresetPicker) {
+        elements.titleCustomPresetPicker.value = "";
+    }
     if (elements.titlePromptProfilePicker) {
         elements.titlePromptProfilePicker.value = "";
     }
@@ -9423,11 +10087,271 @@ function clearTitleSystemPrompt() {
     addLog("제목 생성용 추가 프롬프트를 비웠습니다.", "success");
 }
 
+function clearTitleQualitySystemPrompt() {
+    if (elements.titleCustomPresetPicker) {
+        elements.titleCustomPresetPicker.value = "";
+    }
+    if (elements.titleQualityPromptProfilePicker) {
+        elements.titleQualityPromptProfilePicker.value = "";
+    }
+    setTitleQualitySystemPromptValue(DEFAULT_TITLE_EVALUATION_PROMPT);
+    persistTitleSettings();
+    renderTitleSettingsState();
+    addLog('홈판 평가 프롬프트를 기본값으로 복원했습니다.', "success");
+}
+
+function createTitlePresetProfileId() {
+    return `preset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildCurrentTitlePresetProfile(existingProfile = {}) {
+    const formState = getTitleSettingsFormState();
+    const activePromptProfileId = normalizeTitlePromptProfileId(formState.active_prompt_profile_id || "");
+    const activeEvaluationPromptProfileId = normalizeTitlePromptProfileId(
+        formState.active_evaluation_prompt_profile_id || "",
+    );
+    return {
+        id: normalizeTitlePromptProfileId(existingProfile.id || createTitlePresetProfileId()),
+        name: String(existingProfile.name || "").replace(/\s+/g, " ").trim(),
+        preset_key: normalizeTitlePresetKey(formState.preset_key || ""),
+        provider: normalizeTitleProvider(formState.provider || ""),
+        model: String(formState.model || "").trim(),
+        temperature: Number(normalizeTitleTemperatureValue(formState.temperature)),
+        fallback_to_template: Boolean(formState.fallback_to_template),
+        auto_retry_enabled: Boolean(formState.auto_retry_enabled),
+        quality_retry_threshold: normalizeTitleQualityRetryThreshold(formState.quality_retry_threshold),
+        issue_context_enabled: Boolean(formState.issue_context_enabled),
+        issue_context_limit: normalizeTitleIssueContextLimit(formState.issue_context_limit),
+        issue_source_mode: normalizeTitleIssueSourceMode(formState.issue_source_mode),
+        community_sources: normalizeTitleCommunitySourceKeys(formState.community_sources),
+        community_custom_domains: normalizeTitleCommunityCustomDomains(formState.community_custom_domains),
+        prompt_profile_id: activePromptProfileId,
+        direct_system_prompt: activePromptProfileId ? "" : normalizeTitlePromptText(formState.system_prompt),
+        evaluation_prompt_profile_id: activeEvaluationPromptProfileId,
+        evaluation_direct_prompt: activeEvaluationPromptProfileId
+            ? ""
+            : normalizeTitleQualityPromptText(formState.quality_system_prompt),
+        rewrite_provider: resolveOptionalRegisteredTitleProvider(formState.rewrite_provider || ""),
+        rewrite_model: String(formState.rewrite_model || "").trim(),
+        updated_at: new Date().toISOString(),
+    };
+}
+
+function writeTitleSettingsDraft(settings = {}) {
+    window.localStorage.setItem(TITLE_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+}
+
+function saveCurrentTitlePresetProfile() {
+    const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+    const presetProfiles = normalizeTitlePresetProfiles(
+        storedSettings.preset_profiles || getEffectiveTitlePromptSettings().preset_profiles,
+    );
+    const selectedProfileId = normalizeTitlePromptProfileId(elements.titleCustomPresetPicker?.value || "");
+    const selectedProfile = resolveTitlePresetProfile(presetProfiles, selectedProfileId);
+    let profileName = String(selectedProfile?.name || "").trim();
+
+    if (!profileName) {
+        const suggestedName = `프리셋 ${presetProfiles.length + 1}`;
+        const inputName = window.prompt("저장할 프리셋 이름", suggestedName);
+        profileName = String(inputName || "").replace(/\s+/g, " ").trim();
+        if (!profileName) {
+            addLog("프리셋 이름이 비어 있어 저장을 취소했습니다.", "info");
+            return;
+        }
+    }
+
+    const nextProfile = {
+        ...buildCurrentTitlePresetProfile(selectedProfile || {}),
+        name: profileName,
+    };
+    const nextProfiles = selectedProfile
+        ? presetProfiles.map((profile) => (profile.id === selectedProfile.id ? nextProfile : profile))
+        : [...presetProfiles, nextProfile];
+    const nextSettings = {
+        ...storedSettings,
+        preset_profiles: nextProfiles,
+        active_preset_profile_id: nextProfile.id,
+    };
+
+    if (elements.titleCustomPresetPicker) {
+        elements.titleCustomPresetPicker.value = nextProfile.id;
+    }
+    writeTitleSettingsDraft(nextSettings);
+    syncTitlePromptFromStorage();
+    persistTitleSettings();
+    renderTitleSettingsState();
+    addLog(`사용자 프리셋 저장: ${profileName}`, "success");
+}
+
+function deleteSelectedTitlePresetProfile() {
+    const selectedProfileId = normalizeTitlePromptProfileId(elements.titleCustomPresetPicker?.value || "");
+    if (!selectedProfileId) {
+        addLog("삭제할 사용자 프리셋이 선택되지 않았습니다.", "error");
+        return;
+    }
+
+    const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+    const presetProfiles = normalizeTitlePresetProfiles(
+        storedSettings.preset_profiles || getEffectiveTitlePromptSettings().preset_profiles,
+    );
+    const selectedProfile = resolveTitlePresetProfile(presetProfiles, selectedProfileId);
+    const nextSettings = {
+        ...storedSettings,
+        preset_profiles: presetProfiles.filter((profile) => profile.id !== selectedProfileId),
+        active_preset_profile_id: "",
+    };
+
+    if (elements.titleCustomPresetPicker) {
+        elements.titleCustomPresetPicker.value = "";
+    }
+    writeTitleSettingsDraft(nextSettings);
+    syncTitlePromptFromStorage();
+    persistTitleSettings();
+    renderTitleSettingsState();
+    addLog(`사용자 프리셋 삭제: ${selectedProfile?.name || selectedProfileId}`, "success");
+}
+
+function applyTitlePresetProfileSelection(profileId) {
+    const settings = getEffectiveTitlePromptSettings();
+    const promptProfiles = normalizeTitlePromptProfiles(settings.prompt_profiles);
+    const evaluationPromptProfiles = normalizeTitleQualityPromptProfiles(settings.evaluation_prompt_profiles);
+    const presetProfiles = normalizeTitlePresetProfiles(settings.preset_profiles);
+    const profile = resolveTitlePresetProfile(presetProfiles, profileId);
+    const registry = readTitleApiRegistry();
+
+    renderTitlePresetProfilePicker({
+        ...settings,
+        preset_profiles: presetProfiles,
+        active_preset_profile_id: profile ? profile.id : "",
+    });
+
+    if (!profile) {
+        if (elements.titleCustomPresetPicker) {
+            elements.titleCustomPresetPicker.value = "";
+        }
+        updateTitlePresetProfileSummary();
+        return "";
+    }
+
+    const preferredBuiltInPresetKey = (
+        profile.preset_key
+        && profile.preset_key !== MANUAL_TITLE_PRESET_KEY
+        && isTitlePresetAvailable(profile.preset_key, registry)
+    )
+        ? profile.preset_key
+        : "";
+
+    if (preferredBuiltInPresetKey) {
+        setTitlePresetOptions(preferredBuiltInPresetKey, registry);
+        applyTitlePresetSelection(preferredBuiltInPresetKey);
+    } else {
+        const provider = ensureRegisteredTitleProvider(profile.provider, registry);
+        setTitleProviderOptions(provider, registry);
+        setTitleModelOptions(provider, profile.model);
+        if (elements.titleTemperature) {
+            elements.titleTemperature.value = normalizeTitleTemperatureValue(profile.temperature);
+        }
+        if (elements.titleIssueSourceMode) {
+            elements.titleIssueSourceMode.value = normalizeTitleIssueSourceMode(profile.issue_source_mode);
+        }
+        applyTitleCommunitySourceSelection(profile.community_sources, true);
+        if (elements.titleCommunityCustomDomains) {
+            elements.titleCommunityCustomDomains.value = normalizeTitleCommunityCustomDomains(
+                profile.community_custom_domains,
+            ).join(", ");
+        }
+        const matchingPresetKey = findMatchingTitlePresetKey({
+            provider,
+            model: profile.model,
+            temperature: profile.temperature,
+            issue_source_mode: profile.issue_source_mode,
+            community_sources: profile.community_sources,
+            community_custom_domains: profile.community_custom_domains,
+        });
+        setTitlePresetOptions(matchingPresetKey || MANUAL_TITLE_PRESET_KEY, registry);
+        if (elements.titlePreset) {
+            elements.titlePreset.value = matchingPresetKey || MANUAL_TITLE_PRESET_KEY;
+        }
+        updateTitlePresetDescription();
+    }
+
+    if (elements.titleFallback) {
+        elements.titleFallback.checked = Boolean(profile.fallback_to_template);
+    }
+    if (elements.titleAutoRetryEnabled) {
+        elements.titleAutoRetryEnabled.checked = Boolean(profile.auto_retry_enabled);
+    }
+    if (elements.titleAutoRetryThreshold) {
+        elements.titleAutoRetryThreshold.value = String(
+            normalizeTitleQualityRetryThreshold(profile.quality_retry_threshold),
+        );
+    }
+    if (elements.titleIssueContextEnabled) {
+        elements.titleIssueContextEnabled.checked = Boolean(profile.issue_context_enabled);
+    }
+    if (elements.titleIssueContextLimit) {
+        elements.titleIssueContextLimit.value = String(
+            normalizeTitleIssueContextLimit(profile.issue_context_limit),
+        );
+    }
+    if (elements.titleIssueSourceMode) {
+        elements.titleIssueSourceMode.value = normalizeTitleIssueSourceMode(profile.issue_source_mode);
+    }
+    applyTitleCommunitySourceSelection(profile.community_sources, true);
+    if (elements.titleCommunityCustomDomains) {
+        elements.titleCommunityCustomDomains.value = normalizeTitleCommunityCustomDomains(
+            profile.community_custom_domains,
+        ).join(", ");
+    }
+
+    renderTitlePromptProfilePicker({
+        ...settings,
+        prompt_profiles: promptProfiles,
+        active_prompt_profile_id: profile.prompt_profile_id,
+    });
+    renderTitleQualityPromptProfilePicker({
+        ...settings,
+        evaluation_prompt_profiles: evaluationPromptProfiles,
+        active_evaluation_prompt_profile_id: profile.evaluation_prompt_profile_id,
+    });
+    const promptProfile = resolveTitlePromptProfile(promptProfiles, profile.prompt_profile_id);
+    const evaluationPromptProfile = resolveTitleQualityPromptProfile(
+        evaluationPromptProfiles,
+        profile.evaluation_prompt_profile_id,
+    );
+    if (elements.titlePromptProfilePicker) {
+        elements.titlePromptProfilePicker.value = promptProfile ? promptProfile.id : "";
+    }
+    if (elements.titleQualityPromptProfilePicker) {
+        elements.titleQualityPromptProfilePicker.value = evaluationPromptProfile ? evaluationPromptProfile.id : "";
+    }
+    setTitleSystemPromptValue(promptProfile ? promptProfile.prompt : profile.direct_system_prompt);
+    setTitleQualitySystemPromptValue(
+        evaluationPromptProfile ? evaluationPromptProfile.prompt : (
+            normalizeTitleQualityPromptText(profile.evaluation_direct_prompt) || DEFAULT_TITLE_EVALUATION_PROMPT
+        ),
+    );
+
+    const selectedRewriteProvider = setTitleRewriteProviderOptions(profile.rewrite_provider, registry);
+    setTitleRewriteModelOptions(selectedRewriteProvider, profile.rewrite_model);
+
+    if (elements.titleCustomPresetPicker) {
+        elements.titleCustomPresetPicker.value = profile.id;
+    }
+    updateTitlePresetProfileSummary();
+    updateTitleRewriteSummary();
+    updateTitlePromptSummary();
+    updateTitleQualityPromptSummary();
+    return profile.id;
+}
+
 function saveTitleApiRegistry() {
     const registry = getTitleApiRegistryFormState();
     const preservedPresetKey = normalizeTitlePresetKey(elements.titlePreset?.value || "");
     const preservedProvider = String(elements.titleProvider?.value || "").trim();
     const preservedModel = String(elements.titleModel?.value || "").trim();
+    const preservedRewriteProvider = String(elements.titleRewriteProvider?.value || "").trim();
+    const preservedRewriteModel = String(elements.titleRewriteModel?.value || "").trim();
     const preservedTemperature = elements.titleTemperature?.value || TITLE_TEMPERATURE_DEFAULT;
 
     try {
@@ -9452,6 +10376,8 @@ function saveTitleApiRegistry() {
             }
             updateTitlePresetDescription();
         }
+        const selectedRewriteProvider = setTitleRewriteProviderOptions(preservedRewriteProvider, registry);
+        setTitleRewriteModelOptions(selectedRewriteProvider, preservedRewriteModel);
 
         persistTitleSettings();
         renderTitleSettingsState();
@@ -9492,6 +10418,14 @@ function loadTitleSettings() {
         system_prompt: "",
         prompt_profiles: [],
         active_prompt_profile_id: "",
+        evaluation_direct_prompt: DEFAULT_TITLE_EVALUATION_PROMPT,
+        evaluation_prompt: DEFAULT_TITLE_EVALUATION_PROMPT,
+        evaluation_prompt_profiles: [],
+        active_evaluation_prompt_profile_id: "",
+        preset_profiles: [],
+        active_preset_profile_id: "",
+        rewrite_provider: "",
+        rewrite_model: "",
     };
 
     let apiRegistry = loadTitleApiRegistry();
@@ -9500,13 +10434,35 @@ function loadTitleSettings() {
     const hasStoredCommunitySources = Boolean(
         hasStoredSettings && Object.prototype.hasOwnProperty.call(storedSettings, "community_sources"),
     );
-    const settings = { ...defaults, ...(hasStoredSettings ? storedSettings : {}) };
+    const localSettings = { ...defaults, ...(hasStoredSettings ? storedSettings : {}) };
+    const localPromptSettings = buildTitlePromptSettingsPayload(localSettings);
+    const serverPromptSettings = readInjectedTitlePromptSettings();
+    const shouldSeedServerPromptSettings = (
+        !hasMeaningfulTitlePromptSettings(serverPromptSettings)
+        && hasMeaningfulTitlePromptSettings(localPromptSettings)
+    );
+    const settings = {
+        ...localSettings,
+        ...(shouldSeedServerPromptSettings ? localPromptSettings : serverPromptSettings),
+    };
     apiRegistry = migrateLegacyTitleApiKey(settings, apiRegistry);
     applyTitleApiRegistryToForm(apiRegistry);
     renderTitleApiRegistryStatus(apiRegistry);
     const promptProfiles = normalizeTitlePromptProfiles(settings.prompt_profiles);
     settings.prompt_profiles = promptProfiles;
     settings.active_prompt_profile_id = resolveTitlePromptProfile(promptProfiles, settings.active_prompt_profile_id)?.id || "";
+    const evaluationPromptProfiles = normalizeTitleQualityPromptProfiles(settings.evaluation_prompt_profiles);
+    settings.evaluation_prompt_profiles = evaluationPromptProfiles;
+    settings.active_evaluation_prompt_profile_id = resolveTitleQualityPromptProfile(
+        evaluationPromptProfiles,
+        settings.active_evaluation_prompt_profile_id,
+    )?.id || "";
+    const presetProfiles = normalizeTitlePresetProfiles(settings.preset_profiles);
+    settings.preset_profiles = presetProfiles;
+    settings.active_preset_profile_id = resolveTitlePresetProfile(
+        presetProfiles,
+        settings.active_preset_profile_id,
+    )?.id || "";
     const resolvedPresetKey = hasStoredSettings
         ? (
             Object.prototype.hasOwnProperty.call(storedSettings, "preset_key")
@@ -9531,6 +10487,8 @@ function loadTitleSettings() {
         elements.titleTemperature.value = normalizeTitleTemperatureValue(settings.temperature);
         updateTitlePresetDescription();
     }
+    const selectedRewriteProvider = setTitleRewriteProviderOptions(settings.rewrite_provider, apiRegistry);
+    setTitleRewriteModelOptions(selectedRewriteProvider, settings.rewrite_model);
     elements.titleFallback.checked = Boolean(settings.fallback_to_template);
     if (elements.titleAutoRetryEnabled) {
         elements.titleAutoRetryEnabled.checked = Boolean(settings.auto_retry_enabled ?? true);
@@ -9558,8 +10516,25 @@ function loadTitleSettings() {
         ).join(", ");
     }
     renderTitlePromptProfilePicker(settings);
+    renderTitleQualityPromptProfilePicker(settings);
+    renderTitlePresetProfilePicker(settings);
     setTitleSystemPromptValue(resolveStoredTitlePrompt(settings, promptProfiles));
+    setTitleQualitySystemPromptValue(
+        resolveStoredTitleQualityPrompt(settings, evaluationPromptProfiles) || DEFAULT_TITLE_EVALUATION_PROMPT,
+    );
+    if (settings.active_preset_profile_id) {
+        applyTitlePresetProfileSelection(settings.active_preset_profile_id);
+        Object.assign(settings, getTitleSettingsFormState());
+    }
     applyTitleKeywordModes(settings.keyword_modes);
+    try {
+        window.localStorage.setItem(TITLE_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch (error) {
+        // Ignore storage failures and keep the UI usable.
+    }
+    if (shouldSeedServerPromptSettings) {
+        void syncTitlePromptSettingsToServerQuietly(settings);
+    }
 
     renderTitleSettingsState();
 }
@@ -9570,7 +10545,17 @@ function handleTitleSettingsChange(event) {
     }
 
     if (event?.target === elements.titlePreset) {
+        if (elements.titleCustomPresetPicker) {
+            elements.titleCustomPresetPicker.value = "";
+        }
         applyTitlePresetSelection(elements.titlePreset.value);
+        persistTitleSettings();
+        renderTitleSettingsState();
+        return;
+    }
+
+    if (event?.target === elements.titleCustomPresetPicker) {
+        applyTitlePresetProfileSelection(elements.titleCustomPresetPicker.value);
         persistTitleSettings();
         renderTitleSettingsState();
         return;
@@ -9583,6 +10568,29 @@ function handleTitleSettingsChange(event) {
         setTitleSystemPromptValue(
             selectedProfile ? selectedProfile.prompt : resolveDirectTitlePrompt(storedSettings),
         );
+        if (elements.titleCustomPresetPicker) {
+            elements.titleCustomPresetPicker.value = "";
+        }
+    }
+
+    if (event?.target === elements.titleQualityPromptProfilePicker) {
+        const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY) || {};
+        const profiles = normalizeTitleQualityPromptProfiles(storedSettings.evaluation_prompt_profiles);
+        const selectedProfile = resolveTitleQualityPromptProfile(
+            profiles,
+            elements.titleQualityPromptProfilePicker.value,
+        );
+        setTitleQualitySystemPromptValue(
+            selectedProfile
+                ? selectedProfile.prompt
+                : (
+                    resolveDirectTitleQualityPrompt(storedSettings)
+                    || DEFAULT_TITLE_EVALUATION_PROMPT
+                ),
+        );
+        if (elements.titleCustomPresetPicker) {
+            elements.titleCustomPresetPicker.value = "";
+        }
     }
 
     if (event?.target === elements.titleProvider) {
@@ -9599,17 +10607,43 @@ function handleTitleSettingsChange(event) {
         );
     }
 
+    if (event?.target === elements.titleRewriteProvider) {
+        const provider = resolveOptionalRegisteredTitleProvider(elements.titleRewriteProvider.value);
+        const currentModel = String(elements.titleRewriteModel?.value || "").trim();
+        const modelOptions = provider ? getTitleModelOptionsForProvider(provider) : [];
+        const shouldResetToDefault = !provider
+            || !currentModel
+            || modelOptions.some((option) => option.value === currentModel)
+            || currentModel.startsWith("[기존 저장 모델]");
+        setTitleRewriteModelOptions(
+            provider,
+            shouldResetToDefault ? (provider ? (TITLE_PROVIDER_DEFAULT_MODELS[provider] || "") : "") : currentModel,
+        );
+    }
+
     if (
         event?.target === elements.titleProvider
         || event?.target === elements.titleModel
         || event?.target === elements.titleTemperature
+        || event?.target === elements.titleFallback
+        || event?.target === elements.titleAutoRetryEnabled
+        || event?.target === elements.titleAutoRetryThreshold
+        || event?.target === elements.titleIssueContextEnabled
+        || event?.target === elements.titleIssueContextLimit
         || event?.target === elements.titleIssueSourceMode
         || event?.target === elements.titleCommunityCustomDomains
+        || event?.target === elements.titleRewriteProvider
+        || event?.target === elements.titleRewriteModel
+        || event?.target === elements.titlePromptProfilePicker
+        || event?.target === elements.titleQualityPromptProfilePicker
         || elements.titleCommunitySourceInputs?.includes?.(event?.target)
     ) {
         const matchingPresetKey = findMatchingTitlePresetKey(getTitleSettingsFormState());
         if (elements.titlePreset) {
             elements.titlePreset.value = matchingPresetKey || MANUAL_TITLE_PRESET_KEY;
+        }
+        if (elements.titleCustomPresetPicker) {
+            elements.titleCustomPresetPicker.value = "";
         }
     }
 
@@ -9659,9 +10693,21 @@ function renderTitleSettingsState() {
     if (elements.titlePreset) {
         elements.titlePreset.disabled = !isAiMode || !hasRegisteredProviders;
     }
+    if (elements.titleCustomPresetPicker) {
+        elements.titleCustomPresetPicker.disabled = !isAiMode;
+    }
+    if (elements.saveTitleCustomPresetButton) {
+        elements.saveTitleCustomPresetButton.disabled = !isAiMode || !hasRegisteredProviders;
+    }
     elements.titleProvider.disabled = !isAiMode || !hasRegisteredProviders;
     elements.titleModel.disabled = !isAiMode || !hasRegisteredProviders;
     elements.titleTemperature.disabled = !isAiMode || !hasRegisteredProviders;
+    if (elements.titleRewriteProvider) {
+        elements.titleRewriteProvider.disabled = !isAiMode || !hasRegisteredProviders;
+    }
+    if (elements.titleRewriteModel) {
+        elements.titleRewriteModel.disabled = !isAiMode || !String(elements.titleRewriteProvider?.value || "").trim();
+    }
     elements.titleFallback.disabled = !isAiMode;
     if (elements.titleAutoRetryEnabled) {
         elements.titleAutoRetryEnabled.disabled = !isAiMode;
@@ -9690,12 +10736,21 @@ function renderTitleSettingsState() {
     if (elements.titlePromptProfilePicker) {
         elements.titlePromptProfilePicker.disabled = !isAiMode;
     }
+    if (elements.openTitleQualityPromptEditorButton) {
+        elements.openTitleQualityPromptEditorButton.disabled = !isAiMode;
+    }
+    if (elements.titleQualityPromptProfilePicker) {
+        elements.titleQualityPromptProfilePicker.disabled = !isAiMode;
+    }
     updateTitleKeywordModeSummary();
     updateTitleAutoRetrySummary();
     updateTitleIssueContextSummary();
     updateTitlePresetDescription();
     updateTitleTemperatureDescription();
     updateTitlePromptSummary();
+    updateTitleQualityPromptSummary();
+    updateTitlePresetProfileSummary();
+    updateTitleRewriteSummary();
     elements.titleModeBadge.textContent = isAiMode
         ? (selectedProvider ? `AI:${selectedProvider}` : "AI:미등록")
         : "템플릿";
@@ -9708,6 +10763,10 @@ function getTitleSettingsFormState() {
     const provider = ensureRegisteredTitleProvider(elements.titleProvider?.value, apiRegistry);
     const model = provider
         ? (String(elements.titleModel?.value || "").trim() || TITLE_PROVIDER_DEFAULT_MODELS[provider] || "gpt-4o-mini")
+        : "";
+    const rewriteProvider = resolveOptionalRegisteredTitleProvider(elements.titleRewriteProvider?.value, apiRegistry);
+    const rewriteModel = rewriteProvider
+        ? (String(elements.titleRewriteModel?.value || "").trim() || TITLE_PROVIDER_DEFAULT_MODELS[rewriteProvider] || "")
         : "";
     return {
         mode,
@@ -9728,10 +10787,18 @@ function getTitleSettingsFormState() {
         provider,
         model,
         api_key: getTitleApiKeyForProvider(provider, apiRegistry),
+        rewrite_provider: rewriteProvider,
+        rewrite_model: rewriteModel,
+        rewrite_api_key: getTitleApiKeyForProvider(rewriteProvider, apiRegistry),
         temperature: normalizeTitleTemperatureValue(elements.titleTemperature?.value || TITLE_TEMPERATURE_DEFAULT),
         fallback_to_template: Boolean(elements.titleFallback?.checked),
+        active_preset_profile_id: normalizeTitlePromptProfileId(elements.titleCustomPresetPicker?.value || ""),
         active_prompt_profile_id: normalizeTitlePromptProfileId(elements.titlePromptProfilePicker?.value || ""),
+        active_evaluation_prompt_profile_id: normalizeTitlePromptProfileId(
+            elements.titleQualityPromptProfilePicker?.value || "",
+        ),
         system_prompt: getTitleSystemPromptValue(),
+        quality_system_prompt: getTitleQualitySystemPromptValue() || DEFAULT_TITLE_EVALUATION_PROMPT,
     };
 }
 
@@ -10515,11 +11582,22 @@ function buildTitleGenerationRetrySummary(meta, separator = " / ") {
         const attempted = Number(autoRetryMeta.attempted_count || 0);
         const accepted = Number(autoRetryMeta.accepted_count || 0);
         const remaining = Number(autoRetryMeta.remaining_retry_count || 0);
+        const retryProvider = String(autoRetryMeta.provider || meta.rewrite_provider || meta.provider || "").trim();
+        const retryModel = String(autoRetryMeta.model || meta.rewrite_model || meta.model || "").trim();
         let autoRetryLabel = attempted > 0
             ? `자동 재작성 ${attempted}회 · 채택 ${accepted}`
             : "자동 재작성 0회";
         if (remaining > 0) {
             autoRetryLabel += ` · 미해결 ${remaining}`;
+        }
+        if (
+            retryProvider
+            && (
+                retryProvider !== String(meta.provider || "").trim()
+                || retryModel !== String(meta.model || "").trim()
+            )
+        ) {
+            autoRetryLabel = `재작성 ${formatTitleProviderLabel(retryProvider)} ${retryModel}` + separator + autoRetryLabel;
         }
         parts.push(autoRetryLabel);
     }
@@ -10528,12 +11606,20 @@ function buildTitleGenerationRetrySummary(meta, separator = " / ") {
         const attempted = Number(escalationMeta.attempted_count || 0);
         const accepted = Number(escalationMeta.accepted_count || 0);
         const remaining = Number(escalationMeta.remaining_retry_count || 0);
+        const sourceProviderLabel = String(escalationMeta.source_provider || "").trim();
         const sourceModelLabel = String(escalationMeta.source_model || meta.model || "").trim();
+        const targetProviderLabel = String(escalationMeta.target_provider || "").trim();
         const targetModelLabel = String(escalationMeta.target_model || meta.final_model || "").trim();
 
         if (escalationMeta.triggered || attempted > 0) {
-            const modelPair = sourceModelLabel && targetModelLabel && sourceModelLabel !== targetModelLabel
-                ? `${sourceModelLabel} -> ${targetModelLabel}`
+            const sourceLabel = sourceProviderLabel
+                ? `${formatTitleProviderLabel(sourceProviderLabel)} ${sourceModelLabel}`.trim()
+                : sourceModelLabel;
+            const targetLabel = targetProviderLabel
+                ? `${formatTitleProviderLabel(targetProviderLabel)} ${targetModelLabel}`.trim()
+                : targetModelLabel;
+            const modelPair = sourceLabel && targetLabel && sourceLabel !== targetLabel
+                ? `${sourceLabel} -> ${targetLabel}`
                 : (targetModelLabel || sourceModelLabel || "상위 모델");
             let escalationLabel = `모델 승격 ${modelPair}`;
             if (attempted > 0 || accepted > 0) {
@@ -11131,17 +12217,17 @@ async function rerunFlaggedTitles() {
 async function rerunTitleTarget(targetIdentity) {
     const normalizedIdentity = String(targetIdentity || "").trim();
     if (!normalizedIdentity) {
-        throw new Error("?ㅼ떆 ?앹꽦????? target??李얠? 紐삵뻽?듬땲??");
+        throw new Error("다시 생성할 제목 대상을 찾지 못했습니다.");
     }
 
     const targetItem = findGeneratedTitleItem(normalizedIdentity);
     const titleTarget = buildTitleTargetPayload(targetItem);
     if (!titleTarget) {
-        throw new Error("?쒕ぉ ?ㅼ떆 ?앹꽦????? target payload瑜?留뚮뱾吏 紐삵뻽?듬땲??");
+        throw new Error("제목 다시 생성 대상 payload를 만들지 못했습니다.");
     }
 
     const titleOptions = buildTitleOptions();
-    addLog(`?쒕ぉ ?ㅼ떆 ?앹꽦 ?쒖옉: ${titleTarget.keyword}`);
+    addLog(`제목 다시 생성 시작: ${titleTarget.keyword}`);
 
     const result = await executeStage({
         stageKey: "titled",
@@ -11155,7 +12241,7 @@ async function rerunTitleTarget(targetIdentity) {
 
     const regeneratedItem = Array.isArray(result.generated_titles) ? result.generated_titles[0] : null;
     if (!regeneratedItem) {
-        throw new Error("?쒕ぉ ?ㅼ떆 ?앹꽦 寃곌낵媛 鍮꾩뼱 ?덉뒿?덈떎.");
+        throw new Error("제목 다시 생성 결과가 비어 있습니다.");
     }
 
     const mergedGenerationMeta = {
@@ -11168,7 +12254,7 @@ async function rerunTitleTarget(targetIdentity) {
         generation_meta: mergedGenerationMeta,
         generated_titles: mergeGeneratedTitleItems(state.results.titled?.generated_titles || [], regeneratedItem),
     };
-    addLog(`?쒕ぉ ?ㅼ떆 ?앹꽦 ?꾨즺: ${titleTarget.keyword}`, "success");
+    addLog(`제목 다시 생성 완료: ${titleTarget.keyword}`, "success");
     renderAll();
     return regeneratedItem;
 }
@@ -11177,7 +12263,7 @@ async function rerunFlaggedTitleTargets() {
     const flaggedItems = (state.results.titled?.generated_titles || [])
         .filter((item) => Boolean(getTitleQualityReport(item).retry_recommended));
     if (!flaggedItems.length) {
-        addLog("?ㅼ떆 ?앹꽦??湲곗? 誘몃떖 ?쒕ぉ???놁뒿?덈떎.");
+        addLog("다시 생성할 기준 미달 제목이 없습니다.");
         return state.results.titled;
     }
 
@@ -11185,11 +12271,11 @@ async function rerunFlaggedTitleTargets() {
         .map((item) => buildTitleTargetPayload(item))
         .filter(Boolean);
     if (!titleTargets.length) {
-        throw new Error("湲곗? 誘몃떖 ?쒕ぉ??target payload瑜?留뚮뱾吏 紐삵뻽?듬땲??");
+        throw new Error("기준 미달 제목 대상 payload를 만들지 못했습니다.");
     }
 
     const titleOptions = buildTitleOptions();
-    addLog(`湲곗? 誘몃떖 ?쒕ぉ ${titleTargets.length}嫄??ㅼ떆 ?앹꽦 ?쒖옉`);
+    addLog(`기준 미달 제목 ${titleTargets.length}건 다시 생성 시작`);
 
     const result = await executeStage({
         stageKey: "titled",
@@ -11203,7 +12289,7 @@ async function rerunFlaggedTitleTargets() {
 
     const regeneratedItems = Array.isArray(result.generated_titles) ? result.generated_titles : [];
     if (!regeneratedItems.length) {
-        throw new Error("湲곗? 誘몃떖 ?쒕ぉ ?ъ깮??寃곌낵媛 鍮꾩뼱 ?덉뒿?덈떎.");
+        throw new Error("기준 미달 제목 재생성 결과가 비어 있습니다.");
     }
 
     let mergedTitles = state.results.titled?.generated_titles || [];
@@ -11221,7 +12307,7 @@ async function rerunFlaggedTitleTargets() {
         generation_meta: mergedGenerationMeta,
         generated_titles: mergedTitles,
     };
-    addLog(`湲곗? 誘몃떖 ?쒕ぉ ?ㅼ떆 ?앹꽦 ?꾨즺: ${regeneratedItems.length}嫄?`, "success");
+    addLog(`기준 미달 제목 다시 생성 완료: ${regeneratedItems.length}건`, "success");
     renderAll();
     return state.results.titled;
 }

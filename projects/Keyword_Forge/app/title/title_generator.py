@@ -7,8 +7,9 @@ from typing import Any, Callable
 from app.expander.utils.tokenizer import normalize_key, normalize_text
 from app.title.ai_client import TitleGenerationOptions, TitleProviderError, request_ai_titles
 from app.title.category_detector import detect_category
-from app.title.quality import TITLE_QUALITY_PASS_SCORE, enrich_title_results
-from app.title.rules import NAVER_HOME_MAX_LENGTH
+from app.title.quality import enrich_title_results
+from app.title.quality_ai import TitleEvaluationOptions
+from app.title.rules import NAVER_HOME_MAX_LENGTH, TITLE_QUALITY_PASS_SCORE
 from app.title.templates import build_blog_titles, build_naver_home_titles
 from app.title.types import TitleOutputItem
 
@@ -83,11 +84,6 @@ def generate_titles(
 ) -> tuple[list[TitleOutputItem], dict[str, Any]]:
     normalized_items = _normalize_input_items(items)
     total_count = len(normalized_items)
-    input_items_by_keyword = {
-        normalize_text(item.get("keyword")): item
-        for item in normalized_items
-        if normalize_text(item.get("keyword"))
-    }
     _publish_title_progress(
         progress_callback,
         type="started",
@@ -111,6 +107,8 @@ def generate_titles(
                 used_mode="template",
                 provider=options.provider if options else None,
                 model=options.model if options else None,
+                rewrite_provider=options.rewrite_provider if options else "",
+                rewrite_model=options.rewrite_model if options else "",
                 temperature=options.temperature if options else None,
                 preset_key=options.preset_key if options else "",
                 preset_label=options.preset_label if options else "",
@@ -140,6 +138,8 @@ def generate_titles(
                 used_mode="template_fallback",
                 provider=options.provider,
                 model=options.model,
+                rewrite_provider=options.rewrite_provider,
+                rewrite_model=options.rewrite_model,
                 temperature=options.temperature,
                 preset_key=options.preset_key,
                 preset_label=options.preset_label,
@@ -154,26 +154,23 @@ def generate_titles(
             progress_callback=progress_callback,
         )
 
-    ai_results: dict[str, TitleOutputItem] = {}
+    ai_results: dict[int, TitleOutputItem] = {}
     fallback_keywords: list[str] = []
     processed_count = 0
 
     try:
-        for chunk in _chunk_keywords(normalized_items, options.batch_size):
+        for chunk_start in range(0, len(normalized_items), options.batch_size):
+            chunk = normalized_items[chunk_start:chunk_start + options.batch_size]
             if stop_event is not None and stop_event.is_set():
                 break
             response_items = request_ai_titles(
                 chunk,
                 options=options,
             )
-            response_by_keyword = {
-                normalize_text(item.get("keyword")): item
-                for item in response_items
-                if isinstance(item, dict) and normalize_text(item.get("keyword"))
-            }
-            for source_item in chunk:
+            aligned_response_items = _align_response_items_to_chunk(chunk, response_items)
+            for local_index, source_item in enumerate(chunk):
                 keyword = normalize_text(source_item.get("keyword"))
-                response_item = response_by_keyword.get(keyword, {})
+                response_item = aligned_response_items[local_index] if local_index < len(aligned_response_items) else {}
                 titles = response_item.get("titles") if isinstance(response_item, dict) else None
                 if not keyword or not _is_valid_title_bundle(titles):
                     processed_count += 1
@@ -192,8 +189,8 @@ def generate_titles(
                         message=f"{processed_count} / {total_count}세트 생성",
                     )
                     continue
-                source_payload = input_items_by_keyword.get(keyword, {"keyword": keyword})
-                ai_results[keyword] = {
+                source_payload = source_item
+                ai_results[chunk_start + local_index] = {
                     **_strip_generated_fields(source_payload),
                     "keyword": keyword,
                     "titles": {
@@ -232,6 +229,8 @@ def generate_titles(
                 used_mode="template_fallback",
                 provider=options.provider,
                 model=options.model,
+                rewrite_provider=options.rewrite_provider,
+                rewrite_model=options.rewrite_model,
                 temperature=options.temperature,
                 preset_key=options.preset_key,
                 preset_label=options.preset_label,
@@ -247,9 +246,9 @@ def generate_titles(
         )
 
     results: list[TitleOutputItem] = []
-    for item in normalized_items:
+    for index, item in enumerate(normalized_items):
         keyword = item["keyword"]
-        ai_item = ai_results.get(keyword)
+        ai_item = ai_results.get(index)
         if ai_item:
             results.append(ai_item)
             continue
@@ -268,6 +267,8 @@ def generate_titles(
                 used_mode=used_mode,
                 provider=options.provider,
                 model=options.model,
+                rewrite_provider=options.rewrite_provider,
+                rewrite_model=options.rewrite_model,
                 temperature=options.temperature,
                 preset_key=options.preset_key,
                 preset_label=options.preset_label,
@@ -356,6 +357,41 @@ def _chunk_keywords(items: list[dict[str, str]], size: int) -> list[list[dict[st
     return [items[index:index + size] for index in range(0, len(items), size)]
 
 
+def _align_response_items_to_chunk(
+    source_items: list[dict[str, Any]],
+    response_items: list[dict[str, Any]] | Any,
+) -> list[dict[str, Any]]:
+    normalized_response_items = [
+        item
+        for item in (response_items if isinstance(response_items, list) else [])
+        if isinstance(item, dict)
+    ]
+    if not source_items:
+        return []
+    if len(normalized_response_items) == len(source_items):
+        return normalized_response_items
+
+    remaining = list(normalized_response_items)
+    aligned_items: list[dict[str, Any]] = []
+    for source_item in source_items:
+        source_keyword = normalize_text(source_item.get("keyword"))
+        matched_index = next(
+            (
+                index
+                for index, candidate in enumerate(remaining)
+                if normalize_text(candidate.get("keyword")) == source_keyword
+            ),
+            -1,
+        )
+        if matched_index >= 0:
+            aligned_items.append(remaining.pop(matched_index))
+        elif remaining:
+            aligned_items.append(remaining.pop(0))
+        else:
+            aligned_items.append({})
+    return aligned_items
+
+
 def _strip_generated_fields(item: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -386,6 +422,7 @@ def _finalize_generated_results(
     allow_auto_retry: bool = False,
     progress_callback: TitleProgressCallback | None = None,
 ) -> tuple[list[TitleOutputItem], dict[str, Any]]:
+    evaluation_options = _build_title_evaluation_options(options)
     _publish_title_progress(
         progress_callback,
         type="phase",
@@ -393,12 +430,23 @@ def _finalize_generated_results(
         progress_percent=_QUALITY_PROGRESS_PERCENT,
         message="품질 검사 중",
     )
-    enriched_results, quality_summary = enrich_title_results(results)
-    auto_retry_meta = _build_auto_retry_meta()
+    enriched_results, quality_summary = enrich_title_results(
+        results,
+        evaluation_options=evaluation_options,
+    )
+    retry_provider = normalize_text(options.rewrite_provider) if options else ""
+    retry_model = normalize_text(options.rewrite_model) if options else ""
+    effective_retry_provider = retry_provider or (options.provider if options else "")
+    effective_retry_model = retry_model or (options.model if options else "")
+    auto_retry_meta = _build_auto_retry_meta(
+        provider=effective_retry_provider,
+        model=effective_retry_model,
+    )
     model_escalation_meta = _build_model_escalation_meta(
-        enabled=bool(options and _resolve_escalated_model(options.provider, options.model)),
+        enabled=bool(options and _resolve_escalated_model(effective_retry_provider, effective_retry_model)),
         trigger_failure_count=_MODEL_ESCALATION_TRIGGER_FAILURES,
-        source_model=options.model if options else "",
+        source_provider=effective_retry_provider,
+        source_model=effective_retry_model,
     )
 
     if allow_auto_retry and options is not None:
@@ -406,10 +454,14 @@ def _finalize_generated_results(
             results,
             enriched_results,
             options,
+            evaluation_options=evaluation_options,
             progress_callback=progress_callback,
         )
 
     meta["quality_summary"] = quality_summary
+    meta["quality_evaluation_provider"] = evaluation_options.provider if evaluation_options.enabled else ""
+    meta["quality_evaluation_model"] = evaluation_options.model if evaluation_options.enabled else ""
+    meta["quality_prompt_profile_id"] = options.quality_prompt_profile_id if options else ""
     meta["auto_retry"] = auto_retry_meta
     meta["model_escalation"] = model_escalation_meta
     meta["final_model"] = (
@@ -432,20 +484,28 @@ def _auto_retry_low_quality_results(
     enriched_results: list[TitleOutputItem],
     options: TitleGenerationOptions,
     *,
+    evaluation_options: TitleEvaluationOptions | None = None,
     progress_callback: TitleProgressCallback | None = None,
 ) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
     retry_threshold = _resolve_quality_retry_threshold(options.quality_retry_threshold)
+    retry_options = _build_retry_request_options(options, retry_threshold)
     retry_keywords = [
         normalize_text(item.get("keyword"))
         for item in enriched_results
         if _should_retry_for_quality(item.get("quality_report", {}), retry_threshold)
     ]
     retry_keywords = [keyword for keyword in retry_keywords if keyword]
-    escalation_options = _build_model_escalation_options(options, retry_threshold)
+    escalation_options = _build_model_escalation_options(
+        retry_options,
+        retry_threshold,
+        prompt_source=options.system_prompt,
+    )
     base_escalation_meta = _build_model_escalation_meta(
         enabled=bool(escalation_options),
         trigger_failure_count=_MODEL_ESCALATION_TRIGGER_FAILURES,
-        source_model=options.model,
+        source_provider=retry_options.provider,
+        source_model=retry_options.model,
+        target_provider=escalation_options.provider if escalation_options else "",
         target_model=escalation_options.model if escalation_options else "",
     )
     if not retry_keywords:
@@ -460,7 +520,11 @@ def _auto_retry_low_quality_results(
         return (
             enriched_results,
             quality_summary,
-            _build_auto_retry_meta(retry_threshold=retry_threshold),
+            _build_auto_retry_meta(
+                retry_threshold=retry_threshold,
+                provider=retry_options.provider,
+                model=retry_options.model,
+            ),
             base_escalation_meta,
         )
 
@@ -471,11 +535,6 @@ def _auto_retry_low_quality_results(
         for item in original_results
         if normalize_text(item.get("keyword"))
     }
-    retry_options = replace(
-        options,
-        batch_size=max(1, min(options.batch_size, 4)),
-        system_prompt=_build_quality_retry_prompt(options.system_prompt, retry_threshold),
-    )
     retry_input_items = [
         {
             **_strip_generated_fields(original_items_by_keyword.get(keyword, {"keyword": keyword})),
@@ -504,7 +563,8 @@ def _auto_retry_low_quality_results(
             retry_error_messages.append(str(exc))
             continue
 
-        for item in response_items:
+        aligned_response_items = _align_response_items_to_chunk(chunk, response_items)
+        for item in aligned_response_items:
             keyword = normalize_text(item.get("keyword"))
             titles = item.get("titles") if isinstance(item, dict) else None
             if not keyword or not _is_valid_title_bundle(titles):
@@ -538,13 +598,18 @@ def _auto_retry_low_quality_results(
         current_results=original_results,
         current_enriched_results=enriched_results,
         retry_candidates=retried_by_keyword,
+        evaluation_options=evaluation_options,
     )
-    retry_enriched_results, quality_summary = enrich_title_results(retry_results)
+    retry_enriched_results, quality_summary = enrich_title_results(
+        retry_results,
+        evaluation_options=evaluation_options,
+    )
     retry_results, retry_enriched_results, quality_summary, accepted_rescue_keywords = _apply_practical_rescue_candidates(
         current_results=retry_results,
         current_enriched_results=retry_enriched_results,
         original_items_by_keyword=original_items_by_keyword,
         retry_threshold=retry_threshold,
+        evaluation_options=evaluation_options,
     )
     auto_retry_meta = _build_auto_retry_meta(
         attempted_keywords=retry_keywords,
@@ -552,6 +617,8 @@ def _auto_retry_low_quality_results(
         remaining_retry_count=int(quality_summary.get("retry_count", 0)),
         error_messages=retry_error_messages,
         retry_threshold=retry_threshold,
+        provider=retry_options.provider,
+        model=retry_options.model,
     )
     if not escalation_options:
         return retry_enriched_results, quality_summary, auto_retry_meta, base_escalation_meta
@@ -584,13 +651,19 @@ def _auto_retry_low_quality_results(
         current_results=retry_results,
         current_enriched_results=retry_enriched_results,
         retry_candidates=escalated_candidates,
+        evaluation_options=evaluation_options,
     )
-    final_enriched_results, quality_summary = enrich_title_results(final_results)
+    final_enriched_results, quality_summary = enrich_title_results(
+        final_results,
+        evaluation_options=evaluation_options,
+    )
     escalation_meta = _build_model_escalation_meta(
         enabled=True,
         trigger_failure_count=_MODEL_ESCALATION_TRIGGER_FAILURES,
         triggered=True,
-        source_model=options.model,
+        source_provider=retry_options.provider,
+        source_model=retry_options.model,
+        target_provider=escalation_options.provider,
         target_model=escalation_options.model,
         attempted_keywords=escalation_keywords,
         accepted_keywords=accepted_escalation_keywords,
@@ -637,6 +710,12 @@ def _build_quality_retry_prompt(existing_prompt: str, retry_threshold: int) -> s
         "- Do not shorten the keyword phrase. If the keyword starts with descriptive words, keep them all.\n"
         "- Prefer concise hook-first wording. One clear hook plus one concrete noun is better than a long abstract explanation.\n"
         "- Keep the home-feed pair issue-aware: usually make one title issue/update + comparison/debate and the other title issue/update + reversal/question.\n"
+        "- For naver_home titles, evaluate CTR first, not SEO. Strong titles usually combine issue/context, curiosity, contrast/conflict, reversal/unexpected, emotional trigger, specificity, and readability.\n"
+        "- Do not penalize a naver_home title just because it is phrased as a question or leaves part of the meaning implied.\n"
+        "- Do not penalize repeated question patterns, partial abstraction, or curiosity-driven phrasing in naver_home titles. These can be positive CTR signals.\n"
+        "- Do penalize purely informational naver_home titles, no-curiosity headlines, flat explanatory tone, and filler endings such as 확인해보자 or 알아보자.\n"
+        "- Do not use SEO or blog criteria such as abstract, clickbait, templated, or lacking information as reasons to downscore naver_home titles.\n"
+        "- If a naver_home title is still weak, keep the keyword tokens and order, stay within 40 characters, and combine at least two of issue, contrast, reversal, and curiosity.\n"
         "- Make the 2 naver_home titles clearly different from each other.\n"
         "- Make the 2 blog titles clearly different from each other.\n"
         f"- Keep every naver_home title within {NAVER_HOME_MAX_LENGTH} characters.\n"
@@ -678,6 +757,7 @@ def _apply_practical_rescue_candidates(
     current_enriched_results: list[TitleOutputItem],
     original_items_by_keyword: dict[str, TitleOutputItem],
     retry_threshold: int,
+    evaluation_options: TitleEvaluationOptions | None = None,
 ) -> tuple[list[TitleOutputItem], list[TitleOutputItem], dict[str, Any], list[str]]:
     rescue_keywords = [
         normalize_text(item.get("keyword"))
@@ -704,8 +784,12 @@ def _apply_practical_rescue_candidates(
         current_results=current_results,
         current_enriched_results=current_enriched_results,
         retry_candidates=rescue_candidates,
+        evaluation_options=evaluation_options,
     )
-    rescued_enriched_results, quality_summary = enrich_title_results(rescued_results)
+    rescued_enriched_results, quality_summary = enrich_title_results(
+        rescued_results,
+        evaluation_options=evaluation_options,
+    )
     return rescued_results, rescued_enriched_results, quality_summary, accepted_rescue_keywords
 
 
@@ -1324,6 +1408,8 @@ def _build_auto_retry_meta(
     remaining_retry_count: int = 0,
     error_messages: list[str] | None = None,
     retry_threshold: int = TITLE_QUALITY_PASS_SCORE,
+    provider: str = "",
+    model: str = "",
 ) -> dict[str, Any]:
     attempted_keywords = attempted_keywords or []
     accepted_keywords = accepted_keywords or []
@@ -1336,6 +1422,8 @@ def _build_auto_retry_meta(
         "remaining_retry_count": remaining_retry_count,
         "error_messages": error_messages[:3],
         "retry_threshold": retry_threshold,
+        "provider": str(provider or "").strip(),
+        "model": str(model or "").strip(),
     }
 
 
@@ -1344,7 +1432,9 @@ def _build_model_escalation_meta(
     enabled: bool,
     trigger_failure_count: int,
     triggered: bool = False,
+    source_provider: str = "",
     source_model: str = "",
+    target_provider: str = "",
     target_model: str = "",
     attempted_keywords: list[str] | None = None,
     accepted_keywords: list[str] | None = None,
@@ -1358,7 +1448,9 @@ def _build_model_escalation_meta(
         "enabled": enabled,
         "trigger_failure_count": max(1, int(trigger_failure_count or _MODEL_ESCALATION_TRIGGER_FAILURES)),
         "triggered": triggered,
+        "source_provider": str(source_provider or "").strip(),
         "source_model": str(source_model or "").strip(),
+        "target_provider": str(target_provider or "").strip(),
         "target_model": str(target_model or "").strip(),
         "attempted_count": len(attempted_keywords),
         "attempted_keywords": attempted_keywords,
@@ -1374,6 +1466,7 @@ def _merge_retry_candidates(
     current_results: list[TitleOutputItem],
     current_enriched_results: list[TitleOutputItem],
     retry_candidates: dict[str, TitleOutputItem],
+    evaluation_options: TitleEvaluationOptions | None = None,
 ) -> tuple[list[TitleOutputItem], list[str]]:
     current_report_by_keyword = {
         normalize_text(item.get("keyword")): item.get("quality_report", {})
@@ -1383,6 +1476,22 @@ def _merge_retry_candidates(
 
     accepted_keywords: list[str] = []
     merged_results: list[TitleOutputItem] = []
+    retry_slots: list[tuple[str, TitleOutputItem]] = []
+
+    for item in current_results:
+        keyword = normalize_text(item.get("keyword"))
+        retry_item = retry_candidates.get(keyword)
+        if retry_item:
+            retry_slots.append((keyword, retry_item))
+
+    retry_reports_by_keyword: dict[str, dict[str, Any]] = {}
+    if retry_slots:
+        retried_enriched_items, _ = enrich_title_results(
+            [retry_item for _, retry_item in retry_slots],
+            evaluation_options=evaluation_options,
+        )
+        for (keyword, _), retried_candidate in zip(retry_slots, retried_enriched_items):
+            retry_reports_by_keyword[keyword] = retried_candidate.get("quality_report", {})
 
     for item in current_results:
         keyword = normalize_text(item.get("keyword"))
@@ -1391,10 +1500,8 @@ def _merge_retry_candidates(
             merged_results.append(item)
             continue
 
-        retried_enriched_items, _ = enrich_title_results([retry_item])
-        retried_candidate = retried_enriched_items[0]
         current_report = current_report_by_keyword.get(keyword, {})
-        retry_report = retried_candidate.get("quality_report", {})
+        retry_report = retry_reports_by_keyword.get(keyword, {})
 
         if _should_accept_retry(current_report, retry_report):
             accepted_keywords.append(keyword)
@@ -1433,7 +1540,8 @@ def _request_retry_candidates(
             retry_error_messages.append(str(exc))
             continue
 
-        for item in response_items:
+        aligned_response_items = _align_response_items_to_chunk(chunk, response_items)
+        for item in aligned_response_items:
             keyword = normalize_text(item.get("keyword"))
             titles = item.get("titles") if isinstance(item, dict) else None
             if not keyword or not _is_valid_title_bundle(titles):
@@ -1466,9 +1574,28 @@ def _request_retry_candidates(
     return retried_by_keyword, retry_error_messages
 
 
+def _build_retry_request_options(
+    options: TitleGenerationOptions,
+    retry_threshold: int,
+) -> TitleGenerationOptions:
+    retry_provider = normalize_text(options.rewrite_provider) or options.provider
+    retry_model = normalize_text(options.rewrite_model) or options.model
+    retry_api_key = options.rewrite_api_key or options.api_key
+    return replace(
+        options,
+        provider=retry_provider,
+        model=retry_model,
+        api_key=retry_api_key,
+        batch_size=max(1, min(options.batch_size, 20)),
+        system_prompt=_build_quality_retry_prompt(options.system_prompt, retry_threshold),
+    )
+
+
 def _build_model_escalation_options(
     options: TitleGenerationOptions,
     retry_threshold: int,
+    *,
+    prompt_source: str | None = None,
 ) -> TitleGenerationOptions | None:
     escalated_model = _resolve_escalated_model(options.provider, options.model)
     if not escalated_model:
@@ -1476,8 +1603,11 @@ def _build_model_escalation_options(
     return replace(
         options,
         model=escalated_model,
-        batch_size=max(1, min(options.batch_size, 4)),
-        system_prompt=_build_model_escalation_prompt(options.system_prompt, retry_threshold),
+        batch_size=max(1, min(options.batch_size, 20)),
+        system_prompt=_build_model_escalation_prompt(
+            options.system_prompt if prompt_source is None else prompt_source,
+            retry_threshold,
+        ),
     )
 
 
@@ -1494,6 +1624,24 @@ def _resolve_quality_retry_threshold(value: int | float | None) -> int:
     except (TypeError, ValueError):
         return TITLE_QUALITY_PASS_SCORE
     return max(70, min(100, number))
+
+
+def _build_title_evaluation_options(
+    options: TitleGenerationOptions | None,
+) -> TitleEvaluationOptions:
+    if options is None:
+        return TitleEvaluationOptions()
+
+    evaluation_provider = normalize_text(options.rewrite_provider) or options.provider
+    evaluation_model = normalize_text(options.rewrite_model) or options.model
+    evaluation_api_key = options.rewrite_api_key or options.api_key
+    return TitleEvaluationOptions(
+        provider=evaluation_provider,
+        model=evaluation_model,
+        api_key=evaluation_api_key,
+        system_prompt=normalize_text(options.quality_system_prompt),
+        batch_size=max(1, min(options.batch_size, 20)),
+    )
 
 
 def _compute_weighted_progress(processed_count: int, total_count: int, *, cap: int) -> int:
@@ -1521,6 +1669,8 @@ def _build_meta(
     used_mode: str,
     provider: str | None = None,
     model: str | None = None,
+    rewrite_provider: str | None = None,
+    rewrite_model: str | None = None,
     temperature: float | None = None,
     preset_key: str = "",
     preset_label: str = "",
@@ -1538,6 +1688,8 @@ def _build_meta(
         "used_mode": used_mode,
         "provider": provider,
         "model": model,
+        "rewrite_provider": rewrite_provider,
+        "rewrite_model": rewrite_model,
         "temperature": temperature,
         "preset_key": preset_key,
         "preset_label": preset_label,

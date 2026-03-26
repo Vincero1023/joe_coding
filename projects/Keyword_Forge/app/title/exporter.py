@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from openpyxl import Workbook
 
 from app.expander.utils.tokenizer import normalize_text
-from app.title.quality import TITLE_QUALITY_REVIEW_SCORE
+from app.title.rules import TITLE_QUALITY_REVIEW_SCORE
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]

@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
 from app.selector.serp_summary import build_search_url, fetch_naver_serp_html, parse_serp_titles
 from app.title.category_detector import detect_category
+from app.title.evaluation_prompt import DEFAULT_TITLE_EVALUATION_PROMPT
 from app.title.issue_sources import (
     DEFAULT_ISSUE_SOURCE_MODE,
     describe_community_domains,
@@ -20,9 +21,8 @@ from app.title.issue_sources import (
     normalize_issue_source_mode,
     resolve_community_source_domains,
 )
-from app.title.quality import TITLE_QUALITY_PASS_SCORE
 from app.title.presets import DEFAULT_TITLE_PRESET_KEY, get_title_preset
-from app.title.rules import NAVER_HOME_MAX_LENGTH
+from app.title.rules import NAVER_HOME_MAX_LENGTH, TITLE_QUALITY_PASS_SCORE
 
 
 _OPENAI_URL = "https://api.openai.com/v1/chat/completions"
@@ -283,11 +283,16 @@ class TitleGenerationOptions:
     provider: str = "openai"
     api_key: str | None = None
     model: str = _DEFAULT_MODELS["openai"]
+    rewrite_provider: str = ""
+    rewrite_api_key: str | None = None
+    rewrite_model: str = ""
     temperature: float = 0.7
     max_output_tokens: int = 1200
-    batch_size: int = 8
+    batch_size: int = 20
     fallback_to_template: bool = True
     system_prompt: str = ""
+    quality_system_prompt: str = DEFAULT_TITLE_EVALUATION_PROMPT
+    quality_prompt_profile_id: str = ""
     preset_key: str = ""
     preset_label: str = ""
     preset_prompt: str = ""
@@ -312,6 +317,14 @@ class TitleGenerationOptions:
         )
         provider = _normalize_provider(raw.get("provider") or (preset.provider if preset else None))
         model = normalize_text(raw.get("model")) or (preset.model if preset else _DEFAULT_MODELS[provider])
+        rewrite_provider = ""
+        if normalize_text(raw.get("rewrite_provider")):
+            rewrite_provider = _normalize_provider(raw.get("rewrite_provider"))
+        rewrite_model = (
+            normalize_text(raw.get("rewrite_model"))
+            if rewrite_provider
+            else ""
+        ) or (_DEFAULT_MODELS[rewrite_provider] if rewrite_provider else "")
         temperature = _coerce_float(
             raw.get("temperature"),
             default=float(preset.temperature if preset else 0.7),
@@ -319,7 +332,7 @@ class TitleGenerationOptions:
             maximum=1.5,
         )
         max_output_tokens = _coerce_int(raw.get("max_output_tokens"), default=1200, minimum=200, maximum=4000)
-        batch_size = _coerce_int(raw.get("batch_size"), default=8, minimum=1, maximum=20)
+        batch_size = _coerce_int(raw.get("batch_size"), default=20, minimum=1, maximum=20)
 
         has_explicit_community_sources = (
             "community_sources" in raw
@@ -342,11 +355,21 @@ class TitleGenerationOptions:
             provider=provider,
             api_key=normalize_text(raw.get("api_key")) or None,
             model=model,
+            rewrite_provider=rewrite_provider,
+            rewrite_api_key=normalize_text(raw.get("rewrite_api_key")) or None,
+            rewrite_model=rewrite_model,
             temperature=temperature,
             max_output_tokens=max_output_tokens,
             batch_size=batch_size,
             fallback_to_template=bool(raw.get("fallback_to_template", True)),
             system_prompt=normalize_text(raw.get("system_prompt")) or "",
+            quality_system_prompt=(
+                normalize_text(raw.get("quality_system_prompt") or raw.get("evaluation_prompt"))
+                or DEFAULT_TITLE_EVALUATION_PROMPT
+            ),
+            quality_prompt_profile_id=normalize_text(
+                raw.get("quality_prompt_profile_id") or raw.get("active_evaluation_prompt_profile_id")
+            ),
             preset_key=preset.key if preset else "",
             preset_label=preset.label if preset else "",
             preset_prompt=preset.prompt_guidance if preset else "",
@@ -402,6 +425,99 @@ def request_ai_titles(
         return _request_anthropic_titles(prompt, options)
 
     raise TitleProviderError(f"Unsupported provider: {options.provider}")
+
+
+def request_ai_json_object(
+    *,
+    provider: str,
+    api_key: str | None,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.2,
+    max_output_tokens: int = 1400,
+) -> dict[str, Any]:
+    normalized_provider = _normalize_provider(provider)
+    normalized_model = normalize_text(model) or _DEFAULT_MODELS[normalized_provider]
+    normalized_system_prompt = normalize_text(system_prompt)
+    normalized_user_prompt = normalize_text(user_prompt)
+    if not api_key:
+        raise TitleProviderError("AI mode requires an API key.")
+    if not normalized_user_prompt:
+        raise TitleProviderError("Evaluation prompt is empty.")
+
+    if normalized_provider == "openai":
+        payload = {
+            "model": normalized_model,
+            "messages": [
+                {"role": "system", "content": normalized_system_prompt},
+                {"role": "user", "content": normalized_user_prompt},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_output_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        response = _post_json(_OPENAI_URL, headers, payload)
+        content = (
+            response.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        return _parse_json_object_text(content)
+
+    if normalized_provider in {"gemini", "vertex"}:
+        payload = _build_gemini_like_json_payload(
+            system_prompt=normalized_system_prompt,
+            user_prompt=normalized_user_prompt,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+        )
+        if normalized_provider == "gemini":
+            headers = {
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key or "",
+            }
+            url = _GEMINI_URL_TEMPLATE.format(model=normalized_model)
+        else:
+            headers = {
+                "Content-Type": "application/json",
+            }
+            url = _VERTEX_EXPRESS_URL_TEMPLATE.format(model=normalized_model, api_key=quote(api_key or "", safe=""))
+        response = _post_json(url, headers, payload, max_retries=2)
+        return _parse_json_object_text(_extract_gemini_like_text(response))
+
+    if normalized_provider == "anthropic":
+        payload = {
+            "model": normalized_model,
+            "system": normalized_system_prompt,
+            "max_tokens": max_output_tokens,
+            "temperature": temperature,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": normalized_user_prompt,
+                }
+            ],
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": api_key or "",
+            "anthropic-version": "2023-06-01",
+        }
+        response = _post_json(_ANTHROPIC_URL, headers, payload)
+        content_items = response.get("content", [])
+        content = "\n".join(
+            normalize_text(item.get("text"))
+            for item in content_items
+            if isinstance(item, dict) and normalize_text(item.get("text"))
+        )
+        return _parse_json_object_text(content)
+
+    raise TitleProviderError(f"Unsupported provider: {normalized_provider}")
 
 
 def _request_openai_titles(prompt: str, options: TitleGenerationOptions) -> list[dict[str, Any]]:
@@ -555,6 +671,31 @@ def _build_gemini_like_payload(prompt: str, options: TitleGenerationOptions) -> 
     }
 
 
+def _build_gemini_like_json_payload(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float,
+    max_output_tokens: int,
+) -> dict[str, Any]:
+    return {
+        "systemInstruction": {
+            "parts": [{"text": system_prompt}],
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": user_prompt}],
+            }
+        ],
+        "generationConfig": {
+            "temperature": temperature,
+            "responseMimeType": "application/json",
+            "maxOutputTokens": max_output_tokens,
+        },
+    }
+
+
 def _extract_gemini_like_text(response: dict[str, Any]) -> str:
     parts = (
         response.get("candidates", [{}])[0]
@@ -566,6 +707,30 @@ def _extract_gemini_like_text(response: dict[str, Any]) -> str:
         for part in parts
         if isinstance(part, dict) and normalize_text(part.get("text"))
     )
+
+
+def _parse_json_object_text(raw_text: str) -> dict[str, Any]:
+    normalized_text = normalize_text(raw_text)
+    if not normalized_text:
+        raise TitleProviderError("Provider returned empty JSON content.")
+
+    candidates = [normalized_text]
+    start = normalized_text.find("{")
+    end = normalized_text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        sliced = normalized_text[start:end + 1]
+        if sliced not in candidates:
+            candidates.append(sliced)
+
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+
+    raise TitleProviderError("Provider returned invalid JSON content.")
 
 
 def _build_user_prompt(keywords: list[str]) -> str:
@@ -631,6 +796,8 @@ def _build_user_prompt_from_items(input_items: list[Any]) -> str:
         "- Pay extra attention to the last keyword token when it carries intent, such as 체크리스트, 후기, 비교, 가격, 일정, 신청방법, 원인, 부작용, 추천, or 가이드.\n"
         "- Write all titles in Korean.\n"
         "- Treat every input item independently on a 1:1 basis.\n"
+        "- Return exactly one output item for every input item.\n"
+        "- Preserve the input item order exactly. Output items[i] must correspond to input items[i].\n"
         "- naver_home and blog must each contain exactly 2 items.\n"
         "- Prefer concise hook-first wording: one clear hook plus one concrete noun is better than a long abstract explanation.\n"
         "- Apply only one category overlay per keyword.\n"

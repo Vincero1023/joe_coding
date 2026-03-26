@@ -34,6 +34,7 @@ class TitleCheckItem(TypedDict, total=False):
     status: str
     critical: bool
     issues: list[str]
+    score_breakdown: dict[str, int]
     checks: dict[str, bool]
 
 

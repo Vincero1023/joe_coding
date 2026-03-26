@@ -17,7 +17,9 @@ from app.collector.categories import (
     TREND_SERVICE_CHOICES,
 )
 from app.expander.utils.tokenizer import normalize_key
+from app.core.title_prompt_settings import get_title_prompt_settings
 from app.title.ai_client import get_default_system_prompt
+from app.title.evaluation_prompt import DEFAULT_TITLE_EVALUATION_PROMPT
 from app.title.issue_sources import (
     DEFAULT_COMMUNITY_SOURCE_KEYS,
     build_community_source_payload,
@@ -27,7 +29,7 @@ from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_paylo
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260325-selected-export-v67"
+_ASSET_VERSION = "20260326-home-eval-prompt-v73"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -349,7 +351,12 @@ def _render_title_prompt_editor() -> str:
     title_presets = build_title_preset_payload()
     title_preset_payload = json.dumps(title_presets, ensure_ascii=False).replace("</", "<\\/")
     default_system_prompt_payload = json.dumps(get_default_system_prompt(), ensure_ascii=False).replace("</", "<\\/")
+    default_evaluation_prompt_payload = json.dumps(
+        DEFAULT_TITLE_EVALUATION_PROMPT,
+        ensure_ascii=False,
+    ).replace("</", "<\\/")
     default_preset_key_payload = json.dumps(DEFAULT_TITLE_PRESET_KEY, ensure_ascii=False)
+    title_prompt_settings_payload = json.dumps(get_title_prompt_settings(), ensure_ascii=False).replace("</", "<\\/")
     body = f"""
     <div class="bg-orb bg-orb-a"></div>
     <div class="bg-orb bg-orb-b"></div>
@@ -357,7 +364,9 @@ def _render_title_prompt_editor() -> str:
     <script>
         window.KEYWORD_FORGE_TITLE_PRESETS = {title_preset_payload};
         window.KEYWORD_FORGE_TITLE_DEFAULT_SYSTEM_PROMPT = {default_system_prompt_payload};
+        window.KEYWORD_FORGE_TITLE_DEFAULT_EVALUATION_PROMPT = {default_evaluation_prompt_payload};
         window.KEYWORD_FORGE_TITLE_DEFAULT_PRESET_KEY = {default_preset_key_payload};
+        window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS = {title_prompt_settings_payload};
     </script>
     <main class="doc-shell title-prompt-shell">
         <div class="doc-stack">
@@ -473,6 +482,7 @@ def _render_title_prompt_editor() -> str:
     <script>
         (function() {{
             const STORAGE_KEY = "keyword_forge_title_settings";
+            const PROMPT_SETTINGS_ENDPOINT = "/settings/title-prompt";
             const presets = Array.isArray(window.KEYWORD_FORGE_TITLE_PRESETS) ? window.KEYWORD_FORGE_TITLE_PRESETS : [];
             const presetMap = presets.reduce((map, item) => {{
                 const key = String(item && item.key || "").trim();
@@ -497,17 +507,15 @@ def _render_title_prompt_editor() -> str:
             const deleteButton = document.getElementById("deleteTitlePromptButton");
             const clearButton = document.getElementById("clearTitlePromptEditorButton");
             const closeButton = document.getElementById("closeTitlePromptEditorButton");
+            let serverPromptSettings = {{}};
+            let promptSettingsSyncSequence = 0;
 
-            function readSettings() {{
+            function readStoredSettings() {{
                 try {{
                     return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{{}}");
                 }} catch (error) {{
                     return {{}};
                 }}
-            }}
-
-            function writeSettings(settings) {{
-                window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
             }}
 
             function normalizePrompt(value) {{
@@ -555,6 +563,86 @@ def _render_title_prompt_editor() -> str:
                     }});
                 }});
                 return output;
+            }}
+
+            function normalizePromptSettings(settings) {{
+                const source = settings && typeof settings === "object" ? settings : {{}};
+                const profiles = normalizePromptProfiles(source.prompt_profiles);
+                const activeProfile = resolveActiveProfile(source, profiles);
+                const directPrompt = normalizePrompt(
+                    source.direct_system_prompt || (activeProfile ? "" : source.system_prompt),
+                );
+                return {{
+                    preset_key: String(source.preset_key || "").trim().toLowerCase(),
+                    direct_system_prompt: directPrompt,
+                    system_prompt: activeProfile ? activeProfile.prompt : directPrompt,
+                    prompt_profiles: profiles,
+                    active_prompt_profile_id: activeProfile ? activeProfile.id : "",
+                }};
+            }}
+
+            function hasMeaningfulPromptSettings(settings = {{}}) {{
+                const normalized = normalizePromptSettings(settings);
+                return Boolean(
+                    normalized.prompt_profiles.length
+                    || normalized.active_prompt_profile_id
+                    || normalized.direct_system_prompt
+                    || (normalized.preset_key && normalized.preset_key !== defaultPresetKey)
+                );
+            }}
+
+            function readSettings() {{
+                const storedSettings = readStoredSettings();
+                const localPromptSettings = normalizePromptSettings(storedSettings);
+                const effectivePromptSettings = hasMeaningfulPromptSettings(serverPromptSettings)
+                    ? serverPromptSettings
+                    : localPromptSettings;
+                return {{
+                    ...storedSettings,
+                    ...effectivePromptSettings,
+                }};
+            }}
+
+            async function writeSettings(settings) {{
+                const nextSettings = settings && typeof settings === "object" ? {{ ...settings }} : {{}};
+                const normalizedPromptSettings = normalizePromptSettings(nextSettings);
+                const mergedSettings = {{
+                    ...nextSettings,
+                    ...normalizedPromptSettings,
+                }};
+                window.localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedSettings));
+
+                serverPromptSettings = normalizedPromptSettings;
+                window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS = normalizedPromptSettings;
+
+                const syncId = ++promptSettingsSyncSequence;
+                const response = await fetch(PROMPT_SETTINGS_ENDPOINT, {{
+                    method: "POST",
+                    headers: {{
+                        "Content-Type": "application/json",
+                    }},
+                    body: JSON.stringify(normalizedPromptSettings),
+                }});
+                if (!response.ok) {{
+                    throw new Error(`title_prompt_sync_failed:${{response.status}}`);
+                }}
+                const payload = await response.json();
+                const savedPromptSettings = normalizePromptSettings(
+                    payload && payload.title_prompt_settings ? payload.title_prompt_settings : normalizedPromptSettings,
+                );
+                serverPromptSettings = savedPromptSettings;
+                window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS = savedPromptSettings;
+                if (syncId === promptSettingsSyncSequence) {{
+                    const latestLocalSettings = readStoredSettings();
+                    window.localStorage.setItem(
+                        STORAGE_KEY,
+                        JSON.stringify({{
+                            ...latestLocalSettings,
+                            ...savedPromptSettings,
+                        }}),
+                    );
+                }}
+                return savedPromptSettings;
             }}
 
             function createProfileId() {{
@@ -682,7 +770,7 @@ def _render_title_prompt_editor() -> str:
                 );
             }}
 
-            function saveCurrentPrompt() {{
+            async function saveCurrentPrompt() {{
                 const settings = readSettings();
                 const profiles = normalizePromptProfiles(settings.prompt_profiles);
                 const selectedProfileId = normalizeProfileId(profileSelect.value);
@@ -700,31 +788,45 @@ def _render_title_prompt_editor() -> str:
                             }}
                             : profile
                     ));
-                    writeSettings({{
-                        ...settings,
-                        prompt_profiles: nextProfiles,
-                        active_prompt_profile_id: selectedProfileId,
-                        direct_system_prompt: resolveDirectPrompt(settings),
-                        system_prompt: prompt,
-                    }});
+                    try {{
+                        await writeSettings({{
+                            ...settings,
+                            prompt_profiles: nextProfiles,
+                            active_prompt_profile_id: selectedProfileId,
+                            direct_system_prompt: resolveDirectPrompt(settings),
+                            system_prompt: prompt,
+                        }});
+                    }} catch (error) {{
+                        loadEditorState(selectedProfileId);
+                        updateStatus("브라우저 저장됨 · repo 저장 실패", "error");
+                        updateProfileStatus("공유 프롬프트 파일 저장 실패", "error");
+                        return;
+                    }}
                     loadEditorState(selectedProfileId);
                     updateStatus(`저장됨 · ${{prompt.length}}자`, "success");
                     updateProfileStatus(`저장본 업데이트: ${{name || "이름 없음"}}`, "success");
                     return;
                 }}
 
-                writeSettings({{
-                    ...settings,
-                    active_prompt_profile_id: "",
-                    direct_system_prompt: prompt,
-                    system_prompt: prompt,
-                }});
+                try {{
+                    await writeSettings({{
+                        ...settings,
+                        active_prompt_profile_id: "",
+                        direct_system_prompt: prompt,
+                        system_prompt: prompt,
+                    }});
+                }} catch (error) {{
+                    loadEditorState("");
+                    updateStatus("브라우저 저장됨 · repo 저장 실패", "error");
+                    updateProfileStatus("공유 프롬프트 파일 저장 실패", "error");
+                    return;
+                }}
                 loadEditorState("");
                 updateStatus(prompt ? `직접 입력 저장됨 · ${{prompt.length}}자` : "기본 시스템 프롬프트만 사용 중", "success");
                 updateProfileStatus("직접 입력 적용", "success");
             }}
 
-            function saveAsNewProfile() {{
+            async function saveAsNewProfile() {{
                 const settings = readSettings();
                 const profiles = normalizePromptProfiles(settings.prompt_profiles);
                 const prompt = normalizePrompt(input.value);
@@ -740,19 +842,26 @@ def _render_title_prompt_editor() -> str:
                     }},
                 ];
 
-                writeSettings({{
-                    ...settings,
-                    prompt_profiles: nextProfiles,
-                    active_prompt_profile_id: newProfileId,
-                    direct_system_prompt: resolveDirectPrompt(settings),
-                    system_prompt: prompt,
-                }});
+                try {{
+                    await writeSettings({{
+                        ...settings,
+                        prompt_profiles: nextProfiles,
+                        active_prompt_profile_id: newProfileId,
+                        direct_system_prompt: resolveDirectPrompt(settings),
+                        system_prompt: prompt,
+                    }});
+                }} catch (error) {{
+                    loadEditorState(newProfileId);
+                    updateStatus("브라우저 저장됨 · repo 저장 실패", "error");
+                    updateProfileStatus("공유 프롬프트 파일 저장 실패", "error");
+                    return;
+                }}
                 loadEditorState(newProfileId);
                 updateStatus(`새 저장본 저장됨 · ${{prompt.length}}자`, "success");
                 updateProfileStatus(`저장본 생성: ${{name}}`, "success");
             }}
 
-            function deleteSelectedProfile() {{
+            async function deleteSelectedProfile() {{
                 const settings = readSettings();
                 const profiles = normalizePromptProfiles(settings.prompt_profiles);
                 const selectedProfileId = normalizeProfileId(profileSelect.value);
@@ -763,13 +872,20 @@ def _render_title_prompt_editor() -> str:
 
                 const nextProfiles = profiles.filter((profile) => profile.id !== selectedProfileId);
                 const directPrompt = resolveDirectPrompt(settings);
-                writeSettings({{
-                    ...settings,
-                    prompt_profiles: nextProfiles,
-                    active_prompt_profile_id: "",
-                    direct_system_prompt: directPrompt,
-                    system_prompt: directPrompt,
-                }});
+                try {{
+                    await writeSettings({{
+                        ...settings,
+                        prompt_profiles: nextProfiles,
+                        active_prompt_profile_id: "",
+                        direct_system_prompt: directPrompt,
+                        system_prompt: directPrompt,
+                    }});
+                }} catch (error) {{
+                    loadEditorState("");
+                    updateStatus("브라우저 저장됨 · repo 저장 실패", "error");
+                    updateProfileStatus("공유 프롬프트 파일 저장 실패", "error");
+                    return;
+                }}
                 loadEditorState("");
                 updateStatus(
                     directPrompt
@@ -786,9 +902,17 @@ def _render_title_prompt_editor() -> str:
                 updateStatus("현재 입력 비움");
             }}
 
-            saveButton.addEventListener("click", saveCurrentPrompt);
-            saveAsButton.addEventListener("click", saveAsNewProfile);
-            deleteButton.addEventListener("click", deleteSelectedProfile);
+            serverPromptSettings = normalizePromptSettings(window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS || {{}});
+
+            saveButton.addEventListener("click", () => {{
+                void saveCurrentPrompt();
+            }});
+            saveAsButton.addEventListener("click", () => {{
+                void saveAsNewProfile();
+            }});
+            deleteButton.addEventListener("click", () => {{
+                void deleteSelectedProfile();
+            }});
             clearButton.addEventListener("click", () => {{
                 clearCurrentPrompt();
             }});
@@ -809,7 +933,539 @@ def _render_title_prompt_editor() -> str:
             input.addEventListener("keydown", (event) => {{
                 if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {{
                     event.preventDefault();
-                    saveCurrentPrompt();
+                    void saveCurrentPrompt();
+                }}
+            }});
+
+            loadEditorState();
+            if (!hasMeaningfulPromptSettings(serverPromptSettings)) {{
+                const initialSettings = readSettings();
+                if (hasMeaningfulPromptSettings(initialSettings)) {{
+                    void writeSettings(initialSettings).catch(() => {{}});
+                }}
+            }}
+        }})();
+    </script>
+    """
+    return _render_static_shell(
+        title="제목 프롬프트 편집",
+        description="AI 제목 생성용 추가 시스템 프롬프트를 수정합니다.",
+        body=body,
+    )
+
+
+def _render_title_quality_prompt_editor() -> str:
+    default_evaluation_prompt_payload = json.dumps(
+        DEFAULT_TITLE_EVALUATION_PROMPT,
+        ensure_ascii=False,
+    ).replace("</", "<\\/")
+    title_prompt_settings_payload = json.dumps(get_title_prompt_settings(), ensure_ascii=False).replace("</", "<\\/")
+    body = f"""
+    <script>
+        window.KEYWORD_FORGE_TITLE_DEFAULT_EVALUATION_PROMPT = {default_evaluation_prompt_payload};
+        window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS = {title_prompt_settings_payload};
+    </script>
+    <main class="doc-shell title-prompt-shell">
+        <div class="doc-stack">
+            <section class="doc-hero doc-hero-compact">
+                <div class="doc-breadcrumbs">
+                    <a href="/">키워드 작업대</a>
+                    <span>/</span>
+                    <span>홈판 평가 프롬프트</span>
+                </div>
+                <div class="doc-hero-copy">
+                    <p class="panel-kicker">홈판 평가</p>
+                    <h1>홈판 제목 평가 프롬프트 관리</h1>
+                    <p>
+                        네이버 홈판 제목 평가 규칙만 따로 관리합니다.
+                        저장본을 만들면 홈 화면의 평가 프롬프트 선택기에서 바로 고를 수 있고,
+                        저장 후 제목 평가에 즉시 반영됩니다.
+                    </p>
+                </div>
+                <div class="title-prompt-guide">
+                    <div class="title-prompt-guide-card">
+                        <strong>적용 범위</strong>
+                        <p>홈판 CTR 평가에만 적용됩니다. 워드프레스형 블로그 평가는 기존 규칙을 그대로 사용합니다.</p>
+                    </div>
+                    <div class="title-prompt-guide-card">
+                        <strong>권장 사용법</strong>
+                        <p>새 규칙은 먼저 직접 입력으로 시험하고, 안정화되면 저장본으로 이름을 붙여 관리하세요.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="panel-kicker">미리보기</p>
+                        <h2>현재 적용 평가 프롬프트</h2>
+                    </div>
+                    <span class="status-pill" id="titleQualityPromptEditorStatus">불러오는 중</span>
+                </div>
+                <div class="form-grid">
+                    <div class="field-block">
+                        <span class="field-label">현재 적용 저장본</span>
+                        <div id="titleQualityPromptAppliedProfile" class="title-prompt-summary">불러오는 중</div>
+                    </div>
+                    <label class="field-block field-block-wide">
+                        <span class="field-label">현재 적용 프롬프트</span>
+                        <textarea
+                            id="titleQualityPromptPreview"
+                            class="title-prompt-textarea"
+                            rows="18"
+                            readonly
+                        ></textarea>
+                    </label>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <div>
+                        <p class="panel-kicker">저장본</p>
+                        <h2>홈판 평가 프롬프트 편집</h2>
+                    </div>
+                    <span class="status-pill" id="titleQualityPromptProfileStatus">저장본 불러오는 중</span>
+                </div>
+                <div class="form-grid">
+                    <label class="field-block">
+                        <span class="field-label">저장본 선택</span>
+                        <select id="titleQualityPromptProfileSelect"></select>
+                    </label>
+                    <label class="field-block">
+                        <span class="field-label">저장본 이름</span>
+                        <input
+                            id="titleQualityPromptProfileName"
+                            type="text"
+                            maxlength="40"
+                            placeholder="예: 홈판 CTR v2"
+                        />
+                    </label>
+                </div>
+                <label class="field-block field-block-wide">
+                    <span class="field-label">평가 프롬프트 편집</span>
+                    <textarea
+                        id="titleQualityPromptEditorInput"
+                        class="title-prompt-textarea"
+                        rows="18"
+                        placeholder="홈판 제목 평가 규칙을 입력하세요."
+                    ></textarea>
+                </label>
+                <p class="input-help compact-help">
+                    저장본을 고른 상태에서 저장하면 해당 저장본이 수정되고,
+                    저장본을 고르지 않으면 현재 입력값이 직접 입력 프롬프트로 적용됩니다.
+                </p>
+                <div class="doc-actions title-prompt-actions">
+                    <button type="button" class="subtle-btn" id="saveTitleQualityPromptButton">현재 적용 저장</button>
+                    <button type="button" class="ghost-btn" id="saveAsTitleQualityPromptButton">새 저장본</button>
+                    <button type="button" class="ghost-btn" id="deleteTitleQualityPromptButton">저장본 삭제</button>
+                    <button type="button" class="ghost-btn" id="resetTitleQualityPromptEditorButton">기본값 복원</button>
+                    <button type="button" class="ghost-chip" id="closeTitleQualityPromptEditorButton">창 닫기</button>
+                </div>
+            </section>
+        </div>
+    </main>
+    <script>
+        (function() {{
+            const STORAGE_KEY = "keyword_forge_title_settings";
+            const PROMPT_SETTINGS_ENDPOINT = "/settings/title-prompt";
+            const DEFAULT_PROMPT = String(window.KEYWORD_FORGE_TITLE_DEFAULT_EVALUATION_PROMPT || "")
+                .replace(/\\r\\n/g, "\\n")
+                .trim();
+            const input = document.getElementById("titleQualityPromptEditorInput");
+            const status = document.getElementById("titleQualityPromptEditorStatus");
+            const profileStatus = document.getElementById("titleQualityPromptProfileStatus");
+            const profileSelect = document.getElementById("titleQualityPromptProfileSelect");
+            const profileNameInput = document.getElementById("titleQualityPromptProfileName");
+            const appliedProfile = document.getElementById("titleQualityPromptAppliedProfile");
+            const preview = document.getElementById("titleQualityPromptPreview");
+            const saveButton = document.getElementById("saveTitleQualityPromptButton");
+            const saveAsButton = document.getElementById("saveAsTitleQualityPromptButton");
+            const deleteButton = document.getElementById("deleteTitleQualityPromptButton");
+            const resetButton = document.getElementById("resetTitleQualityPromptEditorButton");
+            const closeButton = document.getElementById("closeTitleQualityPromptEditorButton");
+            let serverPromptSettings = {{}};
+            let promptSettingsSyncSequence = 0;
+
+            function readStoredSettings() {{
+                try {{
+                    return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{{}}");
+                }} catch (error) {{
+                    return {{}};
+                }}
+            }}
+
+            function normalizePrompt(value) {{
+                return String(value || "").replace(/\\r\\n/g, "\\n").trim();
+            }}
+
+            function normalizeProfileId(value) {{
+                return String(value || "").trim();
+            }}
+
+            function normalizeProfileName(value) {{
+                return String(value || "").replace(/\\s+/g, " ").trim();
+            }}
+
+            function normalizeProfiles(value) {{
+                if (!Array.isArray(value)) {{
+                    return [];
+                }}
+                const seenIds = new Set();
+                const output = [];
+                value.forEach((item, index) => {{
+                    if (!item || typeof item !== "object") {{
+                        return;
+                    }}
+                    const id = normalizeProfileId(item.id || `quality-profile-${{index + 1}}`);
+                    if (!id || seenIds.has(id)) {{
+                        return;
+                    }}
+                    seenIds.add(id);
+                    output.push({{
+                        id,
+                        name: normalizeProfileName(item.name || `저장본 ${{output.length + 1}}`),
+                        prompt: normalizePrompt(item.prompt),
+                        updated_at: String(item.updated_at || "").trim(),
+                    }});
+                }});
+                return output;
+            }}
+
+            function resolveActiveProfile(settings, profiles = normalizeProfiles(settings.evaluation_prompt_profiles)) {{
+                const activeProfileId = normalizeProfileId(settings.active_evaluation_prompt_profile_id);
+                return profiles.find((profile) => profile.id === activeProfileId) || null;
+            }}
+
+            function resolveDirectPrompt(settings) {{
+                const directPrompt = normalizePrompt(settings.evaluation_direct_prompt);
+                if (directPrompt) {{
+                    return directPrompt;
+                }}
+                return normalizePrompt(settings.evaluation_prompt) || DEFAULT_PROMPT;
+            }}
+
+            function normalizePromptSettings(settings) {{
+                const source = settings && typeof settings === "object" ? settings : {{}};
+                const profiles = normalizeProfiles(source.evaluation_prompt_profiles);
+                const activeProfile = resolveActiveProfile(source, profiles);
+                const directPrompt = normalizePrompt(
+                    source.evaluation_direct_prompt || (activeProfile ? "" : source.evaluation_prompt),
+                ) || DEFAULT_PROMPT;
+                return {{
+                    evaluation_direct_prompt: activeProfile ? "" : directPrompt,
+                    evaluation_prompt: activeProfile ? activeProfile.prompt : directPrompt,
+                    evaluation_prompt_profiles: profiles,
+                    active_evaluation_prompt_profile_id: activeProfile ? activeProfile.id : "",
+                }};
+            }}
+
+            function readSettings() {{
+                const storedSettings = readStoredSettings();
+                const localPromptSettings = normalizePromptSettings(storedSettings);
+                const effectivePromptSettings = {{
+                    ...localPromptSettings,
+                    ...normalizePromptSettings(serverPromptSettings),
+                }};
+                return {{
+                    ...storedSettings,
+                    ...effectivePromptSettings,
+                }};
+            }}
+
+            async function writeSettings(settings) {{
+                const nextSettings = settings && typeof settings === "object" ? {{ ...settings }} : {{}};
+                const normalizedPromptSettings = normalizePromptSettings(nextSettings);
+                const mergedSettings = {{
+                    ...nextSettings,
+                    ...normalizedPromptSettings,
+                }};
+                window.localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedSettings));
+
+                serverPromptSettings = normalizedPromptSettings;
+                window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS = {{
+                    ...(window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS || {{}}),
+                    ...normalizedPromptSettings,
+                }};
+
+                const syncId = ++promptSettingsSyncSequence;
+                const response = await fetch(PROMPT_SETTINGS_ENDPOINT, {{
+                    method: "POST",
+                    headers: {{
+                        "Content-Type": "application/json",
+                    }},
+                    body: JSON.stringify(normalizedPromptSettings),
+                }});
+                if (!response.ok) {{
+                    throw new Error(`title_quality_prompt_sync_failed:${{response.status}}`);
+                }}
+                const payload = await response.json();
+                const savedPromptSettings = normalizePromptSettings(
+                    payload && payload.title_prompt_settings ? payload.title_prompt_settings : normalizedPromptSettings,
+                );
+                serverPromptSettings = savedPromptSettings;
+                window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS = {{
+                    ...(window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS || {{}}),
+                    ...savedPromptSettings,
+                }};
+                if (syncId === promptSettingsSyncSequence) {{
+                    const latestLocalSettings = readStoredSettings();
+                    window.localStorage.setItem(
+                        STORAGE_KEY,
+                        JSON.stringify({{
+                            ...latestLocalSettings,
+                            ...savedPromptSettings,
+                        }}),
+                    );
+                }}
+                return savedPromptSettings;
+            }}
+
+            function createProfileId() {{
+                return `quality-profile-${{Date.now()}}-${{Math.random().toString(36).slice(2, 8)}}`;
+            }}
+
+            function updateStatus(message, kind) {{
+                status.textContent = message;
+                status.classList.remove("success", "error");
+                if (kind) {{
+                    status.classList.add(kind);
+                }}
+            }}
+
+            function updateProfileStatus(message, kind) {{
+                profileStatus.textContent = message;
+                profileStatus.classList.remove("success", "error");
+                if (kind) {{
+                    profileStatus.classList.add(kind);
+                }}
+            }}
+
+            function renderProfileOptions(settings, selectedProfileId = "") {{
+                const profiles = normalizeProfiles(settings.evaluation_prompt_profiles);
+                const activeProfileId = normalizeProfileId(
+                    selectedProfileId || settings.active_evaluation_prompt_profile_id,
+                );
+                profileSelect.innerHTML = "";
+
+                const directOption = document.createElement("option");
+                directOption.value = "";
+                directOption.textContent = profiles.length ? "직접 입력" : "직접 입력 (저장본 없음)";
+                profileSelect.appendChild(directOption);
+
+                profiles.forEach((profile) => {{
+                    const option = document.createElement("option");
+                    option.value = profile.id;
+                    option.textContent = profile.name;
+                    profileSelect.appendChild(option);
+                }});
+
+                profileSelect.value = activeProfileId;
+                if (profileSelect.value !== activeProfileId) {{
+                    profileSelect.value = "";
+                }}
+            }}
+
+            function updatePreview(settings) {{
+                const profiles = normalizeProfiles(settings.evaluation_prompt_profiles);
+                const selectedProfile = profiles.find((profile) => profile.id === normalizeProfileId(profileSelect.value)) || null;
+                const promptValue = normalizePrompt(input.value) || DEFAULT_PROMPT;
+                appliedProfile.textContent = selectedProfile
+                    ? `저장본 적용 중: ${{selectedProfile.name}}`
+                    : "직접 입력 적용 중";
+                preview.value = promptValue;
+                deleteButton.disabled = !selectedProfile;
+            }}
+
+            function loadEditorState(selectedProfileId = "") {{
+                const settings = readSettings();
+                const profiles = normalizeProfiles(settings.evaluation_prompt_profiles);
+                const activeProfile = resolveActiveProfile(settings, profiles);
+                renderProfileOptions(settings, selectedProfileId || (activeProfile && activeProfile.id) || "");
+
+                const selectedProfile = profiles.find((profile) => profile.id === normalizeProfileId(profileSelect.value)) || null;
+                if (selectedProfile) {{
+                    profileNameInput.value = selectedProfile.name;
+                    input.value = selectedProfile.prompt;
+                }} else {{
+                    profileNameInput.value = "";
+                    input.value = resolveDirectPrompt(settings);
+                }}
+
+                updatePreview(settings);
+                updateStatus(
+                    input.value
+                        ? `현재 평가 프롬프트 ${{normalizePrompt(input.value).length}}자`
+                        : "기본 홈판 평가 프롬프트 사용 중",
+                );
+                updateProfileStatus(
+                    selectedProfile
+                        ? `선택 저장본: ${{selectedProfile.name}}`
+                        : `저장본 ${{profiles.length}}개 / 직접 입력`,
+                );
+            }}
+
+            async function saveCurrentPrompt() {{
+                const settings = readSettings();
+                const profiles = normalizeProfiles(settings.evaluation_prompt_profiles);
+                const selectedProfileId = normalizeProfileId(profileSelect.value);
+                const prompt = normalizePrompt(input.value) || DEFAULT_PROMPT;
+                const name = normalizeProfileName(profileNameInput.value);
+
+                if (selectedProfileId) {{
+                    const nextProfiles = profiles.map((profile) => (
+                        profile.id === selectedProfileId
+                            ? {{
+                                ...profile,
+                                name: name || profile.name,
+                                prompt,
+                                updated_at: new Date().toISOString(),
+                            }}
+                            : profile
+                    ));
+                    try {{
+                        await writeSettings({{
+                            ...settings,
+                            evaluation_prompt_profiles: nextProfiles,
+                            active_evaluation_prompt_profile_id: selectedProfileId,
+                            evaluation_direct_prompt: "",
+                            evaluation_prompt: prompt,
+                        }});
+                    }} catch (error) {{
+                        loadEditorState(selectedProfileId);
+                        updateStatus("브라우저/서버 저장에 실패했습니다.", "error");
+                        updateProfileStatus("공유 설정 저장 실패", "error");
+                        return;
+                    }}
+                    loadEditorState(selectedProfileId);
+                    updateStatus(`저장 완료 / ${{prompt.length}}자`, "success");
+                    updateProfileStatus(`저장본 업데이트: ${{name || "이름 없음"}}`, "success");
+                    return;
+                }}
+
+                try {{
+                    await writeSettings({{
+                        ...settings,
+                        active_evaluation_prompt_profile_id: "",
+                        evaluation_direct_prompt: prompt,
+                        evaluation_prompt: prompt,
+                    }});
+                }} catch (error) {{
+                    loadEditorState("");
+                    updateStatus("브라우저/서버 저장에 실패했습니다.", "error");
+                    updateProfileStatus("공유 설정 저장 실패", "error");
+                    return;
+                }}
+                loadEditorState("");
+                updateStatus(
+                    prompt === DEFAULT_PROMPT
+                        ? "기본 홈판 평가 프롬프트로 적용했습니다."
+                        : `직접 입력 저장 완료 / ${{prompt.length}}자`,
+                    "success",
+                );
+                updateProfileStatus("직접 입력 적용", "success");
+            }}
+
+            async function saveAsNewProfile() {{
+                const settings = readSettings();
+                const profiles = normalizeProfiles(settings.evaluation_prompt_profiles);
+                const prompt = normalizePrompt(input.value) || DEFAULT_PROMPT;
+                const name = normalizeProfileName(profileNameInput.value) || `저장본 ${{profiles.length + 1}}`;
+                const newProfileId = createProfileId();
+                const nextProfiles = [
+                    ...profiles,
+                    {{
+                        id: newProfileId,
+                        name,
+                        prompt,
+                        updated_at: new Date().toISOString(),
+                    }},
+                ];
+
+                try {{
+                    await writeSettings({{
+                        ...settings,
+                        evaluation_prompt_profiles: nextProfiles,
+                        active_evaluation_prompt_profile_id: newProfileId,
+                        evaluation_direct_prompt: "",
+                        evaluation_prompt: prompt,
+                    }});
+                }} catch (error) {{
+                    loadEditorState(newProfileId);
+                    updateStatus("브라우저/서버 저장에 실패했습니다.", "error");
+                    updateProfileStatus("공유 설정 저장 실패", "error");
+                    return;
+                }}
+                loadEditorState(newProfileId);
+                updateStatus(`새 저장본 저장 완료 / ${{prompt.length}}자`, "success");
+                updateProfileStatus(`저장본 생성: ${{name}}`, "success");
+            }}
+
+            async function deleteSelectedProfile() {{
+                const settings = readSettings();
+                const profiles = normalizeProfiles(settings.evaluation_prompt_profiles);
+                const selectedProfileId = normalizeProfileId(profileSelect.value);
+                if (!selectedProfileId) {{
+                    updateProfileStatus("삭제할 저장본이 없습니다.", "error");
+                    return;
+                }}
+
+                const nextProfiles = profiles.filter((profile) => profile.id !== selectedProfileId);
+                try {{
+                    await writeSettings({{
+                        ...settings,
+                        evaluation_prompt_profiles: nextProfiles,
+                        active_evaluation_prompt_profile_id: "",
+                        evaluation_direct_prompt: DEFAULT_PROMPT,
+                        evaluation_prompt: DEFAULT_PROMPT,
+                    }});
+                }} catch (error) {{
+                    loadEditorState("");
+                    updateStatus("브라우저/서버 저장에 실패했습니다.", "error");
+                    updateProfileStatus("공유 설정 저장 실패", "error");
+                    return;
+                }}
+                loadEditorState("");
+                updateStatus("기본 홈판 평가 프롬프트로 되돌렸습니다.", "success");
+                updateProfileStatus("저장본 삭제 완료", "success");
+            }}
+
+            function resetToDefaultPrompt() {{
+                profileSelect.value = "";
+                profileNameInput.value = "";
+                input.value = DEFAULT_PROMPT;
+                updatePreview(readSettings());
+                updateStatus("기본 홈판 평가 프롬프트로 되돌렸습니다.");
+            }}
+
+            serverPromptSettings = normalizePromptSettings(window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS || {{}});
+
+            saveButton.addEventListener("click", () => {{
+                void saveCurrentPrompt();
+            }});
+            saveAsButton.addEventListener("click", () => {{
+                void saveAsNewProfile();
+            }});
+            deleteButton.addEventListener("click", () => {{
+                void deleteSelectedProfile();
+            }});
+            resetButton.addEventListener("click", () => {{
+                resetToDefaultPrompt();
+            }});
+            closeButton.addEventListener("click", () => {{
+                window.close();
+            }});
+            profileSelect.addEventListener("change", () => {{
+                loadEditorState(profileSelect.value);
+            }});
+            input.addEventListener("input", () => {{
+                updatePreview(readSettings());
+                updateStatus(`현재 평가 프롬프트 ${{normalizePrompt(input.value).length}}자`);
+            }});
+            input.addEventListener("keydown", (event) => {{
+                if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {{
+                    event.preventDefault();
+                    void saveCurrentPrompt();
                 }}
             }});
 
@@ -818,8 +1474,8 @@ def _render_title_prompt_editor() -> str:
     </script>
     """
     return _render_static_shell(
-        title="제목 프롬프트 편집",
-        description="AI 제목 생성용 추가 시스템 프롬프트를 수정합니다.",
+        title="홈판 평가 프롬프트 편집",
+        description="네이버 홈판 제목 평가 프롬프트를 저장본으로 관리합니다.",
         body=body,
     )
 
@@ -1148,6 +1804,11 @@ def _render_home() -> str:
     title_preset_payload = json.dumps(title_presets, ensure_ascii=False).replace("</", "<\\/")
     title_issue_source_payload = json.dumps(title_issue_source_modes, ensure_ascii=False).replace("</", "<\\/")
     title_community_source_payload = json.dumps(title_community_sources, ensure_ascii=False).replace("</", "<\\/")
+    title_prompt_settings_payload = json.dumps(get_title_prompt_settings(), ensure_ascii=False).replace("</", "<\\/")
+    default_evaluation_prompt_payload = json.dumps(
+        DEFAULT_TITLE_EVALUATION_PROMPT,
+        ensure_ascii=False,
+    ).replace("</", "<\\/")
     title_mode_help = _render_help_tooltip(
         "template는 규칙 기반으로 바로 생성합니다.\n"
         "AI는 provider/model을 사용해 더 유연하게 생성하고, 저점수 자동 재작성도 함께 쓸 수 있습니다.\n"
@@ -1176,6 +1837,11 @@ def _render_home() -> str:
     title_prompt_help = _render_help_tooltip(
         "새 탭에서 제목 생성용 추가 지침을 수정합니다. 저장하면 현재 작업대에 바로 반영됩니다."
     )
+    title_quality_prompt_help = _render_help_tooltip(
+        '홈판 제목 평가 기준을 직접 수정합니다.' + "\n"
+        '저장본으로 관리하면 테스트마다 빠르게 바꿔가며 비교할 수 있습니다.' + "\n"
+        '이 프롬프트는 홈판 평가에만 적용되고 워드프레스형 블로그 평가는 그대로 유지됩니다.'
+    )
     creator_login_help = _render_help_tooltip(
         "전용 프로필에서 로그인하면 세션을 저장해 다음 수집에 바로 사용합니다."
     )
@@ -1194,6 +1860,8 @@ def _render_home() -> str:
         window.KEYWORD_FORGE_TITLE_PRESETS = {title_preset_payload};
         window.KEYWORD_FORGE_TITLE_ISSUE_SOURCE_MODES = {title_issue_source_payload};
         window.KEYWORD_FORGE_TITLE_COMMUNITY_SOURCES = {title_community_source_payload};
+        window.KEYWORD_FORGE_TITLE_PROMPT_SETTINGS = {title_prompt_settings_payload};
+        window.KEYWORD_FORGE_TITLE_DEFAULT_EVALUATION_PROMPT = {default_evaluation_prompt_payload};
     </script>
     <link rel="stylesheet" href="/assets/app.css?v={_ASSET_VERSION}" />
     <script src="/assets/app.js?v={_ASSET_VERSION}" defer></script>
@@ -1760,21 +2428,77 @@ def _render_home() -> str:
                             </select>
                         </label>
 
-                        <label class="field-block" data-title-mode-visibility="ai" hidden>
-                            <span class="field-label field-label-row">
-                                <span>AI 연결</span>
-                                <button type="button" class="ghost-chip inline-cta-chip" id="openApiRegistrySettingsButton">API 등록</button>
-                            </span>
-                            <select id="titleProvider"></select>
-                            <p id="titleProviderRegistryHint" class="input-help compact-help">
-                                운영 설정에서 등록한 API만 여기 표시됩니다.
-                            </p>
-                        </label>
+                        <div class="field-block field-block-wide title-prompt-block" data-title-mode-visibility="ai" hidden>
+                            <div class="title-prompt-head">
+                                <div>
+                                    <span class="field-label">사용자 프리셋</span>
+                                </div>
+                                <div class="title-prompt-actions">
+                                    <button type="button" class="ghost-chip" id="saveTitleCustomPresetButton">현재 설정 저장</button>
+                                    <button type="button" class="ghost-chip" id="deleteTitleCustomPresetButton">삭제</button>
+                                </div>
+                            </div>
+                            <label class="field-block">
+                                <span class="field-label">저장본 선택</span>
+                                <select id="titleCustomPresetPicker">
+                                    <option value="">직접 설정</option>
+                                </select>
+                            </label>
+                            <p id="titleCustomPresetSummary" class="input-help compact-help">저장된 사용자 프리셋 없음</p>
+                        </div>
 
-                        <label class="field-block" data-title-mode-visibility="ai" hidden>
-                            <span class="field-label">모델</span>
-                            <select id="titleModel"></select>
-                        </label>
+                        <div class="field-block field-block-wide title-ai-layout" data-title-mode-visibility="ai" hidden>
+                            <article class="title-ai-card title-ai-card-primary">
+                                <div class="title-ai-card-head">
+                                    <div>
+                                        <span class="field-label field-label-row">
+                                            <span>제목 작성 AI</span>
+                                            <button type="button" class="ghost-chip inline-cta-chip" id="openApiRegistrySettingsButton">API 등록</button>
+                                        </span>
+                                        <p class="title-ai-card-copy">제목 최초 생성에 사용할 provider/model입니다.</p>
+                                    </div>
+                                </div>
+                                <div class="title-ai-card-grid">
+                                    <label class="field-block">
+                                        <span class="field-label">AI 연결</span>
+                                        <select id="titleProvider"></select>
+                                        <p id="titleProviderRegistryHint" class="input-help compact-help">
+                                            운영 설정에서 등록한 API만 여기 표시됩니다.
+                                        </p>
+                                    </label>
+                                    <label class="field-block">
+                                        <span class="field-label">모델</span>
+                                        <select id="titleModel"></select>
+                                    </label>
+                                </div>
+                            </article>
+
+                            <article class="title-ai-card title-ai-card-secondary">
+                                <div class="title-ai-card-head">
+                                    <div>
+                                        <span class="field-label">제목 재작성 AI</span>
+                                        <p class="title-ai-card-copy">저점수 자동 재작성과 모델 승격에 사용할 전용 AI입니다.</p>
+                                    </div>
+                                </div>
+                                <div class="title-ai-card-grid">
+                                    <label class="field-block">
+                                        <span class="field-label">AI 연결</span>
+                                        <select id="titleRewriteProvider">
+                                            <option value="">생성과 동일</option>
+                                        </select>
+                                    </label>
+                                    <label class="field-block">
+                                        <span class="field-label">모델</span>
+                                        <select id="titleRewriteModel">
+                                            <option value="">생성과 동일</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <p id="titleRewriteSummary" class="input-help compact-help">
+                                    재작성은 제목 생성 AI와 같은 provider/model을 그대로 사용합니다.
+                                </p>
+                            </article>
+                        </div>
 
                         <div class="field-block" data-title-mode-visibility="ai" hidden>
                             <span class="field-label field-label-row">
@@ -1818,6 +2542,29 @@ def _render_home() -> str:
                             </label>
                             <div id="titlePromptSummary" class="title-prompt-summary">추가 지침 없음</div>
                             <input id="titleSystemPrompt" type="hidden" value="" />
+                        </div>
+
+                        <div class="field-block field-block-wide title-prompt-block" data-title-mode-visibility="ai" hidden>
+                            <div class="title-prompt-head">
+                                <div>
+                                    <span class="field-label field-label-row">
+                                        <span>홈판 평가 프롬프트</span>
+                                        {title_quality_prompt_help}
+                                    </span>
+                                </div>
+                                <div class="title-prompt-actions">
+                                    <button type="button" class="ghost-chip" id="openTitleQualityPromptEditorButton">프롬프트 편집</button>
+                                    <button type="button" class="ghost-chip" id="clearTitleQualityPromptButton">기본값 복원</button>
+                                </div>
+                            </div>
+                            <label class="field-block">
+                                <span class="field-label">저장본 선택</span>
+                                <select id="titleQualityPromptProfilePicker">
+                                    <option value="">직접 입력</option>
+                                </select>
+                            </label>
+                            <div id="titleQualityPromptSummary" class="title-prompt-summary">기본 홈판 평가 프롬프트를 사용 중입니다.</div>
+                            <input id="titleQualitySystemPrompt" type="hidden" value="" />
                         </div>
                         </div>
                     </div>
@@ -2371,3 +3118,8 @@ def recommended_usage() -> HTMLResponse:
 @router.get("/title-prompt-editor", response_class=HTMLResponse, include_in_schema=False)
 def title_prompt_editor() -> HTMLResponse:
     return HTMLResponse(_render_title_prompt_editor())
+
+
+@router.get("/title-quality-prompt-editor", response_class=HTMLResponse, include_in_schema=False)
+def title_quality_prompt_editor() -> HTMLResponse:
+    return HTMLResponse(_render_title_quality_prompt_editor())

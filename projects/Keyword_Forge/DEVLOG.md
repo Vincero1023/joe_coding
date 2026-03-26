@@ -5,6 +5,63 @@
 2. 증상-원인-해결-검증 순서로만 기록한다.
 3. 추측은 가정으로 표시하고, 확인 후 즉시 갱신한다.
 
+## Update
+- 2026-03-26 09:05 (KST)
+- 제목 생성 기본 batch 크기를 20으로 올리고, 홈판 평가는 키워드 20개 단위 batch 호출로 전환했다.
+- retry candidate 평가는 1건씩 재평가하지 않고 batch로 묶었고, auto-retry / model-escalation batch 제한 4도 제거했다.
+- 검증: `python -m py_compile app/title/ai_client.py app/title/quality_ai.py app/title/quality.py app/title/title_generator.py tests/test_title.py`, `pytest -q tests/test_title.py`, `pytest -q tests/test_pipeline.py -k "pipeline_run_returns_all_stage_outputs"`
+
+## Date
+- 2026-03-26 01:22 (KST)
+
+## What changed (변경점)
+- 홈판 제목 평가 프롬프트를 설정 UI에서 직접 입력/저장본 선택/저장본 삭제까지 끝까지 연결했다.
+- 홈 화면에 `titleQualityPromptProfilePicker`, 전용 편집기 route `/title-quality-prompt-editor`, 제목 실행 payload의 `quality_system_prompt` 연결을 추가했다.
+- 사용자 프리셋에도 홈판 평가 프롬프트 선택값이 같이 저장/복원되도록 연결했다.
+
+## Why (원인/배경)
+- 홈판 제목 평가는 로직이 자주 바뀌어서 코드 수정 대신 프롬프트 수정만으로 기준을 바꿀 수 있어야 했다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/web.py app/title/ai_client.py app/title/quality.py app/title/quality_ai.py app/title/title_generator.py app/core/title_prompt_settings.py app/api/routes/settings.py`
+- [x] `node --check app/web_assets/app.js`
+- [x] `pytest -q tests/test_web_routes.py tests/test_runtime_settings_api.py tests/test_title.py`
+- [x] `pytest -q tests/test_pipeline.py -k "pipeline_run_returns_all_stage_outputs"`
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 홈판 평가 프롬프트 블록은 있었지만 저장본 선택/편집기/open/save/payload 연결이 끊겨 있었다.
+- 원인: 서버 설정 구조와 UI state는 먼저 들어갔지만, 홈 화면 JS와 전용 편집기 route가 미완성이었다.
+- 해결: repo-backed 평가 프롬프트 편집기 route를 추가하고, 홈 화면 picker/summary/clear/button/user preset/title_options까지 전부 연결했다.
+
+## Next (다음 작업)
+- 새 status html로 실제 UI 레이아웃과 홈판 평가 결과가 원하는 방향으로 바뀌었는지 확인
+- 필요하면 홈판 평가 기본 프롬프트 문구만 조정
+
+## Date
+- 2026-03-26 01:35 (KST)
+
+## What changed (변경점)
+- 이동용 체크포인트 문서 [HANDOFF_2026-03-26.md](F:/joe_coding/projects/keyword_forge/HANDOFF_2026-03-26.md)를 추가했다.
+- 이번 세션의 완료 항목(프롬프트 공유, 재작성 AI 분리, 사용자 프리셋, 홈판 CTR 평가, 레이아웃 정리)과 진행 중 항목(홈판 평가 프롬프트화 WIP)을 분리 정리했다.
+
+## Why (원인/배경)
+- 작업 장소를 옮겨도 지금 상태를 그대로 이어갈 수 있게, 완료/미완료 경계를 명확히 남길 필요가 있었다.
+
+## How verified (검증 방법/체크리스트)
+- [x] 현재 `git status --short` 기준 변경 파일 목록 기록
+- [x] 현재 `git diff --stat` 기준 변경 규모 기록
+- [x] 최신 status html 해석 결과와 WIP 범위 기록
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 홈판 평가 프롬프트화 작업이 서버/JS/UI 중간 단계라 바로 이어받기 어려운 상태였다.
+- 원인: 평가 프롬프트 저장 구조, AI 평가 호출, 홈 UI 연결이 한 번에 진행돼 체크포인트가 분산돼 있었다.
+- 해결: `HANDOFF_2026-03-26.md`에 완료 항목, 현재 WIP, 다음 우선순위, 핵심 파일을 한 문서로 묶었다.
+
+## Next (다음 작업)
+- `app/web_assets/app.js` 평가 프롬프트 picker/저장/요약 연결 마무리
+- `app/web.py` 평가 프롬프트 편집기 route 추가
+- `tests/test_runtime_settings_api.py`, `tests/test_web_routes.py`, `tests/test_title.py`로 회귀 검증
+
 ## Date
 - 2026-03-25 21:15 (KST)
 
