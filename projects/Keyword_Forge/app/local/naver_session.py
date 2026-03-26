@@ -174,7 +174,7 @@ def _classify_cookie_error(exc: Exception) -> tuple[str, str | None]:
     if "requires admin" in normalized or "permission denied" in normalized:
         return (
             message,
-            "브라우저 창을 모두 완전히 종료한 뒤 다시 시도하거나, 필요하면 이 앱을 관리자 권한으로 실행해 보세요.",
+            "브라우저가 열려 있으면 쿠키 DB 잠금 때문에 실패할 수 있습니다. 브라우저를 모두 닫고 다시 시도하거나, 더 안전하게는 전용 로그인 브라우저를 사용해 보세요.",
         )
     if "could not find firefox profile directory" in normalized:
         return (
@@ -191,8 +191,8 @@ def _classify_cookie_error(exc: Exception) -> tuple[str, str | None]:
 
 
 def _build_global_hint(attempts: list[BrowserAttempt]) -> str:
-    if any(attempt.hint and "관리자" in attempt.hint for attempt in attempts):
-        return "현재는 브라우저 쿠키 DB 접근 권한 때문에 막히고 있습니다. Edge/Chrome 창을 모두 끈 뒤 다시 시도해 보세요."
+    if any(attempt.hint and "전용 로그인 브라우저" in attempt.hint for attempt in attempts):
+        return "현재는 브라우저 쿠키 DB 접근 권한 또는 잠금 때문에 막히고 있습니다. Edge/Chrome 창을 모두 닫고 다시 시도하거나, 더 안전하게는 전용 로그인 브라우저를 사용해 보세요."
     if any(attempt.browser in {"edge", "chrome"} for attempt in attempts):
-        return "네이버 로그인은 되어 있어도 브라우저 쿠키 파일이 잠겨 있으면 읽을 수 없습니다. 브라우저 완전 종료 후 다시 시도해 보세요."
+        return "네이버 로그인은 되어 있어도 브라우저 쿠키 파일이 잠겨 있으면 읽을 수 없습니다. 브라우저를 완전히 종료한 뒤 다시 시도해 보세요."
     return "브라우저 로그인 상태와 Creator Advisor 접속 여부를 다시 확인해 주세요."

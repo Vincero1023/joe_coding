@@ -16,7 +16,7 @@ _PROFILE_NAME_SPACE_PATTERN = re.compile(r"\s+")
 _LOCK = RLock()
 _PATH_OVERRIDE: Path | None = None
 _DEFAULT_PRESET_TEMPERATURE = 0.7
-_DEFAULT_QUALITY_RETRY_THRESHOLD = 84
+_DEFAULT_QUALITY_RETRY_THRESHOLD = 75
 _DEFAULT_ISSUE_CONTEXT_LIMIT = 3
 
 
@@ -282,7 +282,7 @@ def _normalize_preset_profiles(value: Any) -> list[dict[str, Any]]:
                     maximum=1.5,
                 ),
                 "fallback_to_template": _coerce_bool(item.get("fallback_to_template"), default=True),
-                "auto_retry_enabled": _coerce_bool(item.get("auto_retry_enabled"), default=True),
+                "auto_retry_enabled": _coerce_bool(item.get("auto_retry_enabled"), default=False),
                 "quality_retry_threshold": _coerce_int(
                     item.get("quality_retry_threshold"),
                     default=_DEFAULT_QUALITY_RETRY_THRESHOLD,

@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.runtime_settings import reset_runtime_operation_settings_for_tests
+from app.core.runtime_settings import report_naver_auth_error, reset_runtime_operation_settings_for_tests
 from app.core.title_prompt_settings import (
     reset_title_prompt_settings_for_tests,
     set_title_prompt_settings_path_for_tests,
@@ -70,6 +70,19 @@ def test_daily_operation_limit_guard_returns_429() -> None:
     assert first.status_code == 200
     assert second.status_code == 429
     assert second.json()["error"]["code"] == "daily_operation_limit_reached"
+
+
+def test_auth_guard_locked_returns_clear_423_message() -> None:
+    report_naver_auth_error("Unauthorized: no user logged in")
+
+    response = client.post("/collect", json={"input_data": {"mode": "category", "category": "상품리뷰"}})
+
+    assert response.status_code == 423
+    payload = response.json()["error"]
+    assert payload["code"] == "auth_guard_locked"
+    assert "보호 잠금" in payload["message"]
+    assert payload["detail"]["auth_lock_active"] is True
+    assert payload["detail"]["auth_lock_message"] == "Unauthorized: no user logged in"
 
 
 def test_title_prompt_settings_endpoint_reads_and_writes_repo_backed_settings(tmp_path) -> None:

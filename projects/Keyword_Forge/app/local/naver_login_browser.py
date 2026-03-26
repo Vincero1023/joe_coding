@@ -337,6 +337,41 @@ def read_cached_session_summary(session_cache_file: Path | None = None) -> dict[
     }
 
 
+def load_cached_session_payload(session_cache_file: Path | None = None) -> dict[str, Any]:
+    target_file = session_cache_file or _SESSION_CACHE_FILE
+    summary = read_cached_session_summary(target_file)
+    if not summary.get("available"):
+        raise LocalLoginBrowserError(
+            "저장된 전용 로그인 세션을 찾지 못했습니다.",
+            hint="전용 로그인 브라우저를 열어 네이버 로그인과 Creator Advisor 접속을 먼저 완료해 주세요.",
+        )
+
+    try:
+        payload = json.loads(target_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LocalLoginBrowserError(
+            "저장된 전용 로그인 세션 파일을 읽지 못했습니다.",
+            hint="전용 로그인 브라우저를 다시 열어 세션을 새로 저장해 주세요.",
+        ) from exc
+
+    cookie_header = str(payload.get("cookie_header") or "").strip()
+    if not cookie_header:
+        raise LocalLoginBrowserError(
+            "저장된 전용 로그인 세션에 쿠키가 없습니다.",
+            hint="전용 로그인 브라우저를 다시 열어 네이버 로그인 후 세션을 새로 저장해 주세요.",
+        )
+
+    return {
+        "browser": summary.get("browser", ""),
+        "cookie_header": cookie_header,
+        "cookie_names": list(summary.get("cookie_names", [])),
+        "cookie_count": int(summary.get("cookie_count") or 0),
+        "saved_at": int(summary.get("saved_at") or 0),
+        "target_url": summary.get("target_url", ""),
+        "profile_dir": summary.get("profile_dir", ""),
+    }
+
+
 def _profile_dir_for_channel(channel: str) -> Path:
     return _SESSION_DIR / channel.replace("-", "_")
 

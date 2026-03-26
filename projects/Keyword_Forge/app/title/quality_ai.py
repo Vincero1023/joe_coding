@@ -4,8 +4,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.expander.utils.tokenizer import normalize_text
-from app.title.ai_client import TitleProviderError, request_ai_json_object
+from app.title.ai_client import request_ai_json_object
 from app.title.evaluation_prompt import DEFAULT_TITLE_EVALUATION_PROMPT
+from app.title.rules import NAVER_HOME_AI_REWRITE_SCORE_THRESHOLD
+
+_DEFAULT_REQUEST_BATCH_SIZE = 6
+_DEFAULT_REQUEST_TIMEOUT_SECONDS = 20.0
+_MIN_SUCCESSFUL_EVALUATION_COUNT = 1
+_SINGLE_ENTRY_RESCUE_LIMIT = 3
 
 
 @dataclass(frozen=True)
@@ -17,6 +23,11 @@ class TitleEvaluationOptions:
     temperature: float = 0.1
     max_output_tokens: int = 1400
     batch_size: int = 20
+    request_batch_size: int = _DEFAULT_REQUEST_BATCH_SIZE
+    request_timeout_seconds: float = _DEFAULT_REQUEST_TIMEOUT_SECONDS
+    max_retries: int = 0
+    sample_ratio: float = 1.0
+    max_sampled_items: int = 20
 
     @property
     def enabled(self) -> bool:
@@ -75,21 +86,53 @@ def request_naver_home_title_evaluations_batch(
         return {}
 
     evaluations_by_index: dict[int, dict[str, Any]] = {}
-    payload = request_ai_json_object(
-        provider=options.provider,
-        api_key=options.api_key,
-        model=options.model,
-        system_prompt=normalize_text(options.system_prompt),
-        user_prompt=_build_naver_home_batch_evaluation_user_prompt(normalized_entries),
-        temperature=options.temperature,
-        max_output_tokens=options.max_output_tokens,
-    )
-    raw_items = payload.get("items") if isinstance(payload.get("items"), list) else []
-    parsed_items = [_normalize_batch_evaluation_item(item) for item in raw_items]
-    parsed_items = [item for item in parsed_items if item]
-    evaluations_by_index.update(_match_batch_evaluation_items(normalized_entries, parsed_items))
+    request_batch_size = max(1, min(int(options.request_batch_size or _DEFAULT_REQUEST_BATCH_SIZE), 20))
+
+    for chunk_start in range(0, len(normalized_entries), request_batch_size):
+        chunk = normalized_entries[chunk_start:chunk_start + request_batch_size]
+        parsed_items = _request_naver_home_batch_evaluation_chunk(chunk, options)
+        if not parsed_items:
+            continue
+        evaluations_by_index.update(_match_batch_evaluation_items(chunk, parsed_items))
+
+    if len(evaluations_by_index) < _MIN_SUCCESSFUL_EVALUATION_COUNT:
+        rescue_entries = normalized_entries[: min(_SINGLE_ENTRY_RESCUE_LIMIT, len(normalized_entries))]
+        for entry in rescue_entries:
+            entry_index = int(entry["index"])
+            if entry_index in evaluations_by_index:
+                continue
+            parsed_items = _request_naver_home_batch_evaluation_chunk([entry], options)
+            if not parsed_items:
+                continue
+            evaluations_by_index.update(_match_batch_evaluation_items([entry], parsed_items))
+            if len(evaluations_by_index) >= _MIN_SUCCESSFUL_EVALUATION_COUNT:
+                break
 
     return evaluations_by_index
+
+
+def _request_naver_home_batch_evaluation_chunk(
+    entries: list[dict[str, Any]],
+    options: TitleEvaluationOptions,
+) -> list[dict[str, Any]]:
+    try:
+        payload = request_ai_json_object(
+            provider=options.provider,
+            api_key=options.api_key,
+            model=options.model,
+            system_prompt=normalize_text(options.system_prompt),
+            user_prompt=_build_naver_home_batch_evaluation_user_prompt(entries),
+            temperature=options.temperature,
+            max_output_tokens=options.max_output_tokens,
+            request_timeout_seconds=options.request_timeout_seconds,
+            max_retries=options.max_retries,
+        )
+    except Exception:
+        return []
+
+    raw_items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    parsed_items = [_normalize_batch_evaluation_item(item) for item in raw_items]
+    return [item for item in parsed_items if item]
 
 
 def _build_naver_home_evaluation_user_prompt(keyword: str, titles: list[str]) -> str:
@@ -193,9 +236,7 @@ def _normalize_evaluation_item(item: Any) -> dict[str, Any]:
         total = max(0, min(100, computed_total))
         score_breakdown["total"] = total
 
-    verdict = str(item.get("verdict") or "").strip().lower()
-    if verdict not in {"keep", "rewrite"}:
-        verdict = "keep" if total >= 85 else "rewrite"
+    verdict = "keep" if total >= NAVER_HOME_AI_REWRITE_SCORE_THRESHOLD else "rewrite"
 
     return {
         "title": normalize_text(item.get("title")),

@@ -29,7 +29,7 @@ from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_paylo
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260326-home-eval-prompt-v73"
+_ASSET_VERSION = "20260326-retry-off-threshold-75-v77"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -1843,7 +1843,8 @@ def _render_home() -> str:
         '이 프롬프트는 홈판 평가에만 적용되고 워드프레스형 블로그 평가는 그대로 유지됩니다.'
     )
     creator_login_help = _render_help_tooltip(
-        "전용 프로필에서 로그인하면 세션을 저장해 다음 수집에 바로 사용합니다."
+        "먼저 이 페이지를 연 브라우저에서 네이버 로그인 후 세션을 불러오세요." + "\n"
+        "같은 브라우저에서 바로 가져오는 방식이 우선이며, 그게 막힐 때만 전용 로그인 브라우저를 여는 흐름을 권장합니다."
     )
 
     return f"""<!DOCTYPE html>
@@ -2005,9 +2006,9 @@ def _render_home() -> str:
                         </label>
 
                         <label class="field-block category-setting-card">
-                            <span class="field-label">로컬 브라우저</span>
+                            <span class="field-label">로그인한 브라우저</span>
                             <select id="trendBrowserInput">
-                                <option value="auto">자동 감지</option>
+                                <option value="auto">현재 접속 브라우저 자동 감지</option>
                                 <option value="edge">Microsoft Edge</option>
                                 <option value="chrome">Google Chrome</option>
                                 <option value="firefox">Mozilla Firefox</option>
@@ -2024,9 +2025,12 @@ def _render_home() -> str:
                                 type="hidden"
                                 value=""
                             />
-                            <button type="button" class="primary-btn session-helper-btn" id="launchLoginBrowserButton">로그인</button>
+                            <div class="session-helper-actions">
+                                <button type="button" class="primary-btn session-helper-btn" id="loadLocalCookieButton">현재 브라우저에서 가져오기</button>
+                                <button type="button" class="ghost-chip session-helper-btn" id="launchLoginBrowserButton">전용 로그인 브라우저 열기</button>
+                            </div>
                             <p class="input-help session-helper-status" id="localCookieStatus">
-                                저장된 전용 로그인 세션을 확인하는 중입니다.
+                                현재 브라우저 로그인 세션과 저장된 전용 세션을 확인하는 중입니다.
                             </p>
                         </div>
                     </div>
@@ -2087,7 +2091,8 @@ def _render_home() -> str:
 
                 <p class="input-help" id="trendSourceHelp" data-mode-visibility="category">
                     카테고리 모드에서 네이버 트렌드를 고르면 Creator Advisor 주제 기반 인기 키워드를 먼저 조회합니다.
-                    입력 칸이 비어 있어도 저장된 전용 로그인 세션이 있으면 자동으로 사용하고, 세션이 없거나 실패하면 아래 fallback 설정에 따라 검색 preset으로 전환합니다.
+                    먼저 현재 브라우저에서 로그인한 세션을 불러와 쓰고, 저장된 세션이 있으면 자동으로 이어서 사용합니다.
+                    세션이 없거나 실패하면 아래 fallback 설정에 따라 검색 preset으로 전환합니다.
                 </p>
 
                 </section>

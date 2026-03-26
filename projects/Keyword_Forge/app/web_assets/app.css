@@ -353,6 +353,12 @@ button:disabled {
     background: rgba(247, 243, 234, 0.5);
     border: 1px solid rgba(20, 32, 51, 0.08);
 }
+.session-helper-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    width: 100%;
+}
 .session-helper-btn {
     width: auto;
     min-height: 36px;
@@ -4606,6 +4612,12 @@ body.utility-drawer-open {
     .queue-form-actions .ghost-btn,
     .queue-item-actions .ghost-chip,
     .queue-item-actions .ghost-btn {
+        width: 100%;
+    }
+
+    .session-helper-actions,
+    .session-helper-actions .primary-btn,
+    .session-helper-actions .ghost-chip {
         width: 100%;
     }
 

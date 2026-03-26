@@ -5,11 +5,11 @@ from threading import Event
 from typing import Any, Callable
 
 from app.expander.utils.tokenizer import normalize_key, normalize_text
-from app.title.ai_client import TitleGenerationOptions, TitleProviderError, request_ai_titles
+from app.title.ai_client import TitleGenerationOptions, TitleProviderError, request_ai_slot_rewrites, request_ai_titles
 from app.title.category_detector import detect_category
-from app.title.quality import enrich_title_results
+from app.title.quality import _build_bundle_report, enrich_title_results, refresh_title_results_for_changed_slots
 from app.title.quality_ai import TitleEvaluationOptions
-from app.title.rules import NAVER_HOME_MAX_LENGTH, TITLE_QUALITY_PASS_SCORE
+from app.title.rules import NAVER_HOME_MAX_LENGTH, TITLE_QUALITY_REVIEW_SCORE
 from app.title.templates import build_blog_titles, build_naver_home_titles
 from app.title.types import TitleOutputItem
 
@@ -71,6 +71,22 @@ _AUTO_RETRY_PROGRESS_END = 90
 _MODEL_ESCALATION_PROGRESS_START = 92
 _MODEL_ESCALATION_PROGRESS_END = 96
 _FINALIZING_PROGRESS_PERCENT = 97
+_MAX_RETRY_KEYWORDS_PER_PASS = 5
+_MAX_SLOT_REWRITE_ATTEMPTS = 2
+_SAME_KEYWORD_PEER_TITLE_LIMIT = 3
+_CROSS_KEYWORD_PEER_TITLE_LIMIT = 4
+_DEFAULT_PEER_TITLE_BATCH_WINDOW = 20
+_RETRY_LIMIT_DOWNGRADE_ISSUE = "재작성 2회 후에도 기준 미달이라 수동 검토로 전환했습니다."
+_DEFAULT_HOME_AI_EVALUATION_SAMPLE_RATIO = 0.15
+_DEFAULT_HOME_AI_EVALUATION_MAX_ITEMS = 2
+_DEFAULT_QUALITY_RETRY_THRESHOLD = TITLE_QUALITY_REVIEW_SCORE
+_STRICT_RETRY_SCORE_CUTOFF = 70
+_HOME_RETRY_KEEP_SCORE_CUTOFF = 75
+_HOME_SHORT_TITLE_MAX_LENGTH = 20
+_HOME_CORE_ISSUE_MIN_SCORE = 10
+_HOME_CORE_CURIOSITY_MIN_SCORE = 12
+_HOME_CORE_CONTRAST_MIN_SCORE = 10
+_HOME_EMOTIONAL_HOOK_MIN_SCORE = 10
 
 TitleProgressCallback = Callable[[dict[str, Any]], None]
 
@@ -113,7 +129,7 @@ def generate_titles(
                 preset_key=options.preset_key if options else "",
                 preset_label=options.preset_label if options else "",
                 auto_retry_enabled=options.auto_retry_enabled if options else False,
-                quality_retry_threshold=options.quality_retry_threshold if options else TITLE_QUALITY_PASS_SCORE,
+                quality_retry_threshold=options.quality_retry_threshold if options else _DEFAULT_QUALITY_RETRY_THRESHOLD,
                 issue_context_enabled=options.issue_context_enabled if options else False,
                 issue_context_limit=options.issue_context_limit if options else 0,
                 issue_source_mode=options.issue_source_mode if options else "",
@@ -163,7 +179,7 @@ def generate_titles(
             chunk = normalized_items[chunk_start:chunk_start + options.batch_size]
             if stop_event is not None and stop_event.is_set():
                 break
-            response_items = request_ai_titles(
+            response_items = _request_ai_titles_with_chunk_retry(
                 chunk,
                 options=options,
             )
@@ -357,6 +373,45 @@ def _chunk_keywords(items: list[dict[str, str]], size: int) -> list[list[dict[st
     return [items[index:index + size] for index in range(0, len(items), size)]
 
 
+def _request_ai_titles_with_chunk_retry(
+    chunk: list[dict[str, Any]],
+    *,
+    options: TitleGenerationOptions,
+) -> list[dict[str, Any]]:
+    try:
+        return request_ai_titles(
+            chunk,
+            options=options,
+        )
+    except TitleProviderError as exc:
+        if len(chunk) <= 1 or not _is_chunk_retryable_title_error(exc):
+            raise
+
+        midpoint = len(chunk) // 2
+        if midpoint <= 0 or midpoint >= len(chunk):
+            raise
+
+        return [
+            *_request_ai_titles_with_chunk_retry(chunk[:midpoint], options=options),
+            *_request_ai_titles_with_chunk_retry(chunk[midpoint:], options=options),
+        ]
+
+
+def _is_chunk_retryable_title_error(exc: TitleProviderError) -> bool:
+    message = normalize_text(str(exc)).lower()
+    if not message:
+        return False
+    return any(
+        token in message
+        for token in (
+            "invalid json",
+            "did not contain json",
+            "empty json content",
+            "empty content",
+        )
+    )
+
+
 def _align_response_items_to_chunk(
     source_items: list[dict[str, Any]],
     response_items: list[dict[str, Any]] | Any,
@@ -400,6 +455,26 @@ def _strip_generated_fields(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _strip_internal_quality_fields(items: list[TitleOutputItem]) -> list[TitleOutputItem]:
+    cleaned_items: list[TitleOutputItem] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        quality_report = item.get("quality_report") if isinstance(item.get("quality_report"), dict) else {}
+        cleaned_quality_report = {
+            key: value
+            for key, value in quality_report.items()
+            if not str(key or "").startswith("_")
+        }
+        cleaned_items.append(
+            {
+                **item,
+                "quality_report": cleaned_quality_report,
+            }
+        )
+    return cleaned_items
+
+
 def _is_valid_title_bundle(titles: Any) -> bool:
     if not isinstance(titles, dict):
         return False
@@ -438,7 +513,11 @@ def _finalize_generated_results(
     retry_model = normalize_text(options.rewrite_model) if options else ""
     effective_retry_provider = retry_provider or (options.provider if options else "")
     effective_retry_model = retry_model or (options.model if options else "")
+    resolved_retry_threshold = _resolve_quality_retry_threshold(
+        options.quality_retry_threshold if options is not None else _DEFAULT_QUALITY_RETRY_THRESHOLD
+    )
     auto_retry_meta = _build_auto_retry_meta(
+        retry_threshold=resolved_retry_threshold,
         provider=effective_retry_provider,
         model=effective_retry_model,
     )
@@ -476,7 +555,7 @@ def _finalize_generated_results(
         progress_percent=_FINALIZING_PROGRESS_PERCENT,
         message="제목 결과 정리 중",
     )
-    return enriched_results, meta
+    return _strip_internal_quality_fields(enriched_results), meta
 
 
 def _auto_retry_low_quality_results(
@@ -487,14 +566,184 @@ def _auto_retry_low_quality_results(
     evaluation_options: TitleEvaluationOptions | None = None,
     progress_callback: TitleProgressCallback | None = None,
 ) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return _run_partial_slot_retry_pipeline(
+        original_results,
+        enriched_results,
+        options,
+        evaluation_options=evaluation_options,
+        progress_callback=progress_callback,
+    )
+
+
+def _auto_retry_low_quality_results_with_slots(
+    original_results: list[TitleOutputItem],
+    enriched_results: list[TitleOutputItem],
+    options: TitleGenerationOptions,
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+    progress_callback: TitleProgressCallback | None = None,
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return _run_slot_auto_retry_flow(
+        original_results,
+        enriched_results,
+        options,
+        evaluation_options=evaluation_options,
+        progress_callback=progress_callback,
+    )
+
+
+def _run_slot_auto_retry_flow(
+    original_results: list[TitleOutputItem],
+    enriched_results: list[TitleOutputItem],
+    options: TitleGenerationOptions,
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+    progress_callback: TitleProgressCallback | None = None,
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return _execute_slot_auto_retry_flow(
+        original_results,
+        enriched_results,
+        options,
+        evaluation_options=evaluation_options,
+        progress_callback=progress_callback,
+    )
+
+
+def _execute_slot_auto_retry_flow(
+    original_results: list[TitleOutputItem],
+    enriched_results: list[TitleOutputItem],
+    options: TitleGenerationOptions,
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+    progress_callback: TitleProgressCallback | None = None,
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return _execute_slot_auto_retry_flow_impl(
+        original_results,
+        enriched_results,
+        options,
+        evaluation_options=evaluation_options,
+        progress_callback=progress_callback,
+    )
+
+
+def _execute_slot_auto_retry_flow_impl(
+    original_results: list[TitleOutputItem],
+    enriched_results: list[TitleOutputItem],
+    options: TitleGenerationOptions,
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+    progress_callback: TitleProgressCallback | None = None,
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return _slot_auto_retry_flow_core(
+        original_results,
+        enriched_results,
+        options,
+        evaluation_options=evaluation_options,
+        progress_callback=progress_callback,
+    )
+
+
+def _slot_auto_retry_flow_core(
+    original_results: list[TitleOutputItem],
+    enriched_results: list[TitleOutputItem],
+    options: TitleGenerationOptions,
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+    progress_callback: TitleProgressCallback | None = None,
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return _slot_auto_retry_flow_actual(
+        original_results,
+        enriched_results,
+        options,
+        evaluation_options=evaluation_options,
+        progress_callback=progress_callback,
+    )
+
+
+def _slot_auto_retry_flow_actual(
+    original_results: list[TitleOutputItem],
+    enriched_results: list[TitleOutputItem],
+    options: TitleGenerationOptions,
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+    progress_callback: TitleProgressCallback | None = None,
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return _slot_auto_retry_flow_final(
+        original_results,
+        enriched_results,
+        options,
+        evaluation_options=evaluation_options,
+        progress_callback=progress_callback,
+    )
+
+
+def _slot_auto_retry_flow_final(
+    original_results: list[TitleOutputItem],
+    enriched_results: list[TitleOutputItem],
+    options: TitleGenerationOptions,
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+    progress_callback: TitleProgressCallback | None = None,
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return _slot_auto_retry_flow_final_impl(
+        original_results,
+        enriched_results,
+        options,
+        evaluation_options=evaluation_options,
+        progress_callback=progress_callback,
+    )
+
+
+def _slot_auto_retry_flow_final_impl(
+    original_results: list[TitleOutputItem],
+    enriched_results: list[TitleOutputItem],
+    options: TitleGenerationOptions,
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+    progress_callback: TitleProgressCallback | None = None,
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return _slot_auto_retry_flow_live(
+        original_results,
+        enriched_results,
+        options,
+        evaluation_options=evaluation_options,
+        progress_callback=progress_callback,
+    )
+
+
+def _slot_auto_retry_flow_live(
+    original_results: list[TitleOutputItem],
+    enriched_results: list[TitleOutputItem],
+    options: TitleGenerationOptions,
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+    progress_callback: TitleProgressCallback | None = None,
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return _slot_auto_retry_flow_impl_v2(
+        original_results,
+        enriched_results,
+        options,
+        evaluation_options=evaluation_options,
+        progress_callback=progress_callback,
+    )
+
+
+def _slot_auto_retry_flow_impl_v2(
+    original_results: list[TitleOutputItem],
+    enriched_results: list[TitleOutputItem],
+    options: TitleGenerationOptions,
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+    progress_callback: TitleProgressCallback | None = None,
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
     retry_threshold = _resolve_quality_retry_threshold(options.quality_retry_threshold)
     retry_options = _build_retry_request_options(options, retry_threshold)
-    retry_keywords = [
-        normalize_text(item.get("keyword"))
-        for item in enriched_results
-        if _should_retry_for_quality(item.get("quality_report", {}), retry_threshold)
-    ]
-    retry_keywords = [keyword for keyword in retry_keywords if keyword]
+    retry_candidate_count = _count_retry_candidates(enriched_results, retry_threshold)
+    retry_keywords = _select_retry_keywords_for_pass(
+        enriched_results,
+        retry_threshold,
+        limit=_MAX_RETRY_KEYWORDS_PER_PASS,
+    )
     escalation_options = _build_model_escalation_options(
         retry_options,
         retry_threshold,
@@ -549,13 +798,17 @@ def _auto_retry_low_quality_results(
         processed_count=0,
         total_count=len(retry_keywords),
         progress_percent=_AUTO_RETRY_PROGRESS_START,
-        message=f"기준 미달 제목 재작성 준비: {len(retry_keywords)}건",
+        message=_build_retry_progress_message(
+            "기준 미달 제목 재작성 준비",
+            selected_count=len(retry_keywords),
+            total_candidates=retry_candidate_count,
+        ),
     )
     retried_count = 0
 
     for chunk in _chunk_keywords(retry_input_items, retry_options.batch_size):
         try:
-            response_items = request_ai_titles(
+            response_items = _request_ai_titles_with_chunk_retry(
                 chunk,
                 options=retry_options,
             )
@@ -591,7 +844,12 @@ def _auto_retry_low_quality_results(
                 start=_AUTO_RETRY_PROGRESS_START,
                 end=_AUTO_RETRY_PROGRESS_END,
             ),
-            message=f"기준 미달 제목 재작성 중: {retried_count} / {len(retry_keywords)}건",
+            message=_build_retry_progress_message(
+                "기준 미달 제목 재작성 중",
+                selected_count=retried_count,
+                total_candidates=retry_candidate_count,
+                include_ratio=True,
+            ),
         )
 
     retry_results, accepted_retry_keywords = _merge_retry_candidates(
@@ -623,12 +881,12 @@ def _auto_retry_low_quality_results(
     if not escalation_options:
         return retry_enriched_results, quality_summary, auto_retry_meta, base_escalation_meta
 
-    escalation_keywords = [
-        normalize_text(item.get("keyword"))
-        for item in retry_enriched_results
-        if _should_retry_for_quality(item.get("quality_report", {}), retry_threshold)
-    ]
-    escalation_keywords = [keyword for keyword in escalation_keywords if keyword]
+    escalation_candidate_count = _count_retry_candidates(retry_enriched_results, retry_threshold)
+    escalation_keywords = _select_retry_keywords_for_pass(
+        retry_enriched_results,
+        retry_threshold,
+        limit=_MAX_RETRY_KEYWORDS_PER_PASS,
+    )
     if not escalation_keywords:
         return retry_enriched_results, quality_summary, auto_retry_meta, base_escalation_meta
     _publish_title_progress(
@@ -638,7 +896,11 @@ def _auto_retry_low_quality_results(
         processed_count=0,
         total_count=len(escalation_keywords),
         progress_percent=_MODEL_ESCALATION_PROGRESS_START,
-        message=f"상위 모델 재시도 준비: {len(escalation_keywords)}건",
+        message=_build_retry_progress_message(
+            "상위 모델 재시도 준비",
+            selected_count=len(escalation_keywords),
+            total_candidates=escalation_candidate_count,
+        ),
     )
 
     escalated_candidates, escalation_error_messages = _request_retry_candidates(
@@ -672,15 +934,917 @@ def _auto_retry_low_quality_results(
     )
     return final_enriched_results, quality_summary, auto_retry_meta, escalation_meta
 
+def _run_partial_slot_retry_pipeline(
+    original_results: list[TitleOutputItem],
+    enriched_results: list[TitleOutputItem],
+    options: TitleGenerationOptions,
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+    progress_callback: TitleProgressCallback | None = None,
+) -> tuple[list[TitleOutputItem], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    retry_threshold = _resolve_quality_retry_threshold(options.quality_retry_threshold)
+    retry_options = _build_retry_request_options(options, retry_threshold)
+    slot_retry_attempt_counts: dict[str, int] = {}
+    retry_slot_candidates = _collect_retry_slot_candidates(
+        original_results,
+        enriched_results,
+        retry_threshold,
+        recent_batch_size=options.batch_size,
+    )
+    retry_slot_candidates, _ = _filter_slot_candidates_by_retry_attempts(
+        retry_slot_candidates,
+        slot_retry_attempt_counts,
+        max_attempts=_MAX_SLOT_REWRITE_ATTEMPTS,
+    )
+    escalation_options = _build_model_escalation_options(
+        retry_options,
+        retry_threshold,
+        prompt_source=options.system_prompt,
+    )
+    base_escalation_meta = _build_model_escalation_meta(
+        enabled=bool(escalation_options),
+        trigger_failure_count=_MODEL_ESCALATION_TRIGGER_FAILURES,
+        source_provider=retry_options.provider,
+        source_model=retry_options.model,
+        target_provider=escalation_options.provider if escalation_options else "",
+        target_model=escalation_options.model if escalation_options else "",
+    )
+    if not retry_slot_candidates:
+        _publish_title_progress(
+            progress_callback,
+            type="phase",
+            phase="quality_ready",
+            progress_percent=_QUALITY_PROGRESS_PERCENT + 2,
+            message="?덉쭏 寃???꾨즺",
+        )
+        quality_summary = _build_quality_summary_from_items(enriched_results)
+        return (
+            enriched_results,
+            quality_summary,
+            _build_auto_retry_meta(
+                retry_threshold=retry_threshold,
+                provider=retry_options.provider,
+                model=retry_options.model,
+            ),
+            base_escalation_meta,
+        )
+
+    original_items_by_keyword = {
+        normalize_text(item.get("keyword")): item
+        for item in original_results
+        if normalize_text(item.get("keyword"))
+    }
+    _publish_title_progress(
+        progress_callback,
+        type="phase",
+        phase="auto_retry",
+        processed_count=0,
+        total_count=len(retry_slot_candidates),
+        progress_percent=_AUTO_RETRY_PROGRESS_START,
+        message=_build_retry_progress_message(
+            "문제 slot 재작성 준비 중",
+            selected_count=len(retry_slot_candidates),
+            total_candidates=len(retry_slot_candidates),
+        ),
+    )
+    retried_titles_by_slot_id, retry_error_messages, retry_batch_sizes = _request_slot_retry_candidates(
+        retry_slot_candidates,
+        retry_options,
+        phase="auto_retry",
+        progress_callback=progress_callback,
+        total_candidates=len(retry_slot_candidates),
+    )
+    retry_results, retry_enriched_results, accepted_retry_slot_ids = _merge_slot_retry_candidates(
+        current_results=original_results,
+        current_enriched_results=enriched_results,
+        slot_candidates=retry_slot_candidates,
+        rewritten_titles_by_slot_id=retried_titles_by_slot_id,
+        evaluation_options=evaluation_options,
+    )
+    quality_summary = _build_quality_summary_from_items(retry_enriched_results)
+    _record_failed_slot_retry_attempts(
+        slot_retry_attempt_counts,
+        retry_slot_candidates,
+        accepted_retry_slot_ids,
+    )
+    retry_results, retry_enriched_results, quality_summary, accepted_rescue_keywords = _apply_practical_rescue_candidates(
+        current_results=retry_results,
+        current_enriched_results=retry_enriched_results,
+        original_items_by_keyword=original_items_by_keyword,
+        retry_threshold=retry_threshold,
+        evaluation_options=evaluation_options,
+        retry_attempt_counts=slot_retry_attempt_counts,
+        recent_batch_size=options.batch_size,
+        max_slot_rewrite_attempts=_MAX_SLOT_REWRITE_ATTEMPTS,
+    )
+    auto_retry_meta = _build_auto_retry_meta(
+        attempted_keywords=_collect_slot_candidate_keywords(retry_slot_candidates),
+        accepted_keywords=_dedupe_texts(
+            _collect_slot_candidate_keywords(retry_slot_candidates, accepted_retry_slot_ids) + accepted_rescue_keywords
+        ),
+        remaining_retry_count=int(quality_summary.get("retry_count") or 0),
+        error_messages=retry_error_messages,
+        retry_threshold=retry_threshold,
+        provider=retry_options.provider,
+        model=retry_options.model,
+        attempted_slot_count=len(retry_slot_candidates),
+        accepted_slot_count=len(accepted_retry_slot_ids),
+        rewrite_call_count=len(retry_batch_sizes),
+        rewrite_batch_sizes=retry_batch_sizes,
+    )
+    if not escalation_options:
+        return retry_enriched_results, quality_summary, auto_retry_meta, base_escalation_meta
+
+    escalation_slot_candidates = _collect_retry_slot_candidates(
+        retry_results,
+        retry_enriched_results,
+        retry_threshold,
+        recent_batch_size=options.batch_size,
+    )
+    escalation_slot_candidates, _ = _filter_slot_candidates_by_retry_attempts(
+        escalation_slot_candidates,
+        slot_retry_attempt_counts,
+        max_attempts=_MAX_SLOT_REWRITE_ATTEMPTS,
+    )
+    if not escalation_slot_candidates:
+        return retry_enriched_results, quality_summary, auto_retry_meta, base_escalation_meta
+
+    _publish_title_progress(
+        progress_callback,
+        type="phase",
+        phase="model_escalation",
+        processed_count=0,
+        total_count=len(escalation_slot_candidates),
+        progress_percent=_MODEL_ESCALATION_PROGRESS_START,
+        message=_build_retry_progress_message(
+            "상위 모델 slot 재작성 준비 중",
+            selected_count=len(escalation_slot_candidates),
+            total_candidates=len(escalation_slot_candidates),
+        ),
+    )
+    escalated_titles_by_slot_id, escalation_error_messages, escalation_batch_sizes = _request_slot_retry_candidates(
+        escalation_slot_candidates,
+        escalation_options,
+        phase="model_escalation",
+        progress_callback=progress_callback,
+        total_candidates=len(escalation_slot_candidates),
+    )
+    final_results, final_enriched_results, accepted_escalation_slot_ids = _merge_slot_retry_candidates(
+        current_results=retry_results,
+        current_enriched_results=retry_enriched_results,
+        slot_candidates=escalation_slot_candidates,
+        rewritten_titles_by_slot_id=escalated_titles_by_slot_id,
+        evaluation_options=evaluation_options,
+    )
+    failed_escalation_slot_ids = _record_failed_slot_retry_attempts(
+        slot_retry_attempt_counts,
+        escalation_slot_candidates,
+        accepted_escalation_slot_ids,
+    )
+    exhausted_slot_ids = [
+        slot_id
+        for slot_id in failed_escalation_slot_ids
+        if int(slot_retry_attempt_counts.get(slot_id) or 0) >= _MAX_SLOT_REWRITE_ATTEMPTS
+    ]
+    if exhausted_slot_ids:
+        final_enriched_results, downgraded_slot_ids = _downgrade_exhausted_retry_slots(
+            final_results,
+            final_enriched_results,
+            exhausted_slot_ids,
+        )
+    else:
+        downgraded_slot_ids = []
+    quality_summary = _build_quality_summary_from_items(final_enriched_results)
+    escalation_meta = _build_model_escalation_meta(
+        enabled=True,
+        trigger_failure_count=_MODEL_ESCALATION_TRIGGER_FAILURES,
+        triggered=True,
+        source_provider=retry_options.provider,
+        source_model=retry_options.model,
+        target_provider=escalation_options.provider,
+        target_model=escalation_options.model,
+        attempted_keywords=_collect_slot_candidate_keywords(escalation_slot_candidates),
+        accepted_keywords=_collect_slot_candidate_keywords(escalation_slot_candidates, accepted_escalation_slot_ids),
+        remaining_retry_count=int(quality_summary.get("retry_count") or 0),
+        error_messages=escalation_error_messages,
+        attempted_slot_count=len(escalation_slot_candidates),
+        accepted_slot_count=len(accepted_escalation_slot_ids),
+        rewrite_call_count=len(escalation_batch_sizes),
+        rewrite_batch_sizes=escalation_batch_sizes,
+        downgraded_slot_ids=downgraded_slot_ids,
+        max_slot_rewrite_attempts=_MAX_SLOT_REWRITE_ATTEMPTS,
+    )
+    return final_enriched_results, quality_summary, auto_retry_meta, escalation_meta
+
+
+def _collect_retry_slot_candidates(
+    current_results: list[TitleOutputItem],
+    current_enriched_results: list[TitleOutputItem],
+    retry_threshold: int,
+    *,
+    recent_batch_size: int = _DEFAULT_PEER_TITLE_BATCH_WINDOW,
+) -> list[dict[str, Any]]:
+    slot_candidates: list[dict[str, Any]] = []
+    resolved_recent_batch_size = max(1, int(recent_batch_size or _DEFAULT_PEER_TITLE_BATCH_WINDOW))
+
+    for result_index, (item, enriched_item) in enumerate(zip(current_results, current_enriched_results)):
+        keyword = normalize_text(item.get("keyword") or enriched_item.get("keyword"))
+        if not keyword:
+            continue
+        quality_report = enriched_item.get("quality_report") if isinstance(enriched_item.get("quality_report"), dict) else {}
+        if not _should_retry_for_quality(quality_report, retry_threshold):
+            continue
+        titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
+        aligned_title_checks = _align_title_checks_to_current_slots(item, enriched_item)
+        for channel_name, channel_label in (("naver_home", "home"), ("blog", "blog")):
+            channel_titles = list(titles.get(channel_name, [])) if isinstance(titles.get(channel_name), list) else []
+            channel_reports = aligned_title_checks.get(channel_name, [])
+            for slot_index, raw_title in enumerate(channel_titles, start=1):
+                title = normalize_text(raw_title)
+                if not title:
+                    continue
+                report = channel_reports[slot_index - 1] if slot_index - 1 < len(channel_reports) else {}
+                if not _should_retry_slot(report, retry_threshold, channel_name=channel_name, title=title):
+                    continue
+                same_keyword_peer_titles = _collect_item_peer_titles(
+                    titles,
+                    exclude_channel=channel_name,
+                    exclude_slot_index=slot_index,
+                )[:_SAME_KEYWORD_PEER_TITLE_LIMIT]
+                recent_batch_peer_titles = _collect_recent_batch_peer_titles(
+                    current_results,
+                    result_index=result_index,
+                    recent_batch_size=resolved_recent_batch_size,
+                    exclude_titles=[title, *same_keyword_peer_titles],
+                    limit=_CROSS_KEYWORD_PEER_TITLE_LIMIT,
+                )
+                slot_candidates.append(
+                    {
+                        "slot_id": f"{result_index}_{channel_label}_{slot_index}",
+                        "result_index": result_index,
+                        "keyword": keyword,
+                        "channel": channel_name,
+                        "slot_index": slot_index,
+                        "current_title": title,
+                        "peer_titles": same_keyword_peer_titles + recent_batch_peer_titles,
+                        "issues": list(report.get("issues", []))[:5],
+                        "score": int(report.get("score") or 0),
+                        "status": str(report.get("status") or "").strip().lower(),
+                        "source_note": normalize_text(item.get("source_note")),
+                        "source_keywords": list(item.get("source_keywords", [])) if isinstance(item.get("source_keywords"), list) else [],
+                        "support_keywords": list(item.get("support_keywords", [])) if isinstance(item.get("support_keywords"), list) else [],
+                        "metrics": dict(item.get("metrics", {})) if isinstance(item.get("metrics"), dict) else {},
+                    }
+                )
+
+    slot_candidates.sort(
+        key=lambda candidate: (
+            0 if candidate.get("status") == "retry" else 1,
+            int(candidate.get("score") or 0),
+            -len(candidate.get("issues", [])),
+            int(candidate.get("result_index") or 0),
+            0 if candidate.get("channel") == "naver_home" else 1,
+            int(candidate.get("slot_index") or 0),
+        )
+    )
+    return slot_candidates
+
+
+def _request_slot_retry_candidates(
+    slot_candidates: list[dict[str, Any]],
+    retry_options: TitleGenerationOptions,
+    *,
+    phase: str,
+    progress_callback: TitleProgressCallback | None = None,
+    total_candidates: int | None = None,
+ ) -> tuple[dict[str, str], list[str], list[int]]:
+    rewritten_titles_by_slot_id: dict[str, str] = {}
+    error_messages: list[str] = []
+    processed_count = 0
+    resolved_total = total_candidates if isinstance(total_candidates, int) and total_candidates > 0 else len(slot_candidates)
+    chunks = _chunk_slot_candidates(slot_candidates, retry_options.batch_size)
+    batch_sizes = [len(chunk) for chunk in chunks]
+    total_call_count = len(chunks)
+
+    for call_index, chunk in enumerate(chunks, start=1):
+        _publish_title_progress(
+            progress_callback,
+            type="rewrite_batch",
+            phase=phase,
+            processed_count=processed_count,
+            total_count=resolved_total,
+            progress_percent=_compute_phase_progress(
+                processed_count,
+                resolved_total,
+                start=_AUTO_RETRY_PROGRESS_START if phase == "auto_retry" else _MODEL_ESCALATION_PROGRESS_START,
+                end=_AUTO_RETRY_PROGRESS_END if phase == "auto_retry" else _MODEL_ESCALATION_PROGRESS_END,
+            ),
+            message=f"slot rewrite batch {call_index}/{total_call_count}",
+            bad_slot_count=resolved_total,
+            rewrite_call_count=call_index,
+            rewrite_total_calls=total_call_count,
+            rewrite_batch_size=len(chunk),
+            rewrite_status="started",
+        )
+        try:
+            response_items = request_ai_slot_rewrites(chunk, options=retry_options)
+        except TitleProviderError as exc:
+            error_messages.append(str(exc))
+            continue
+
+        for item in response_items:
+            slot_id = normalize_text(item.get("slot_id"))
+            title = normalize_text(item.get("title"))
+            if not slot_id or not title:
+                continue
+            rewritten_titles_by_slot_id[slot_id] = title
+
+        processed_count = min(resolved_total, processed_count + len(chunk))
+        _publish_title_progress(
+            progress_callback,
+            type="phase",
+            phase=phase,
+            processed_count=processed_count,
+            total_count=resolved_total,
+            progress_percent=_compute_phase_progress(
+                processed_count,
+                resolved_total,
+                start=_AUTO_RETRY_PROGRESS_START if phase == "auto_retry" else _MODEL_ESCALATION_PROGRESS_START,
+                end=_AUTO_RETRY_PROGRESS_END if phase == "auto_retry" else _MODEL_ESCALATION_PROGRESS_END,
+            ),
+            message=_build_retry_progress_message(
+                "문제 slot 재작성 중" if phase == "auto_retry" else "상위 모델 slot 재작성 중",
+                selected_count=processed_count,
+                total_candidates=resolved_total,
+                include_ratio=True,
+            ),
+            bad_slot_count=resolved_total,
+            rewrite_call_count=call_index,
+            rewrite_total_calls=total_call_count,
+            rewrite_batch_size=len(chunk),
+            rewrite_status="completed",
+        )
+
+    return rewritten_titles_by_slot_id, error_messages, batch_sizes
+
+
+def _merge_slot_retry_candidates(
+    *,
+    current_results: list[TitleOutputItem],
+    current_enriched_results: list[TitleOutputItem],
+    slot_candidates: list[dict[str, Any]],
+    rewritten_titles_by_slot_id: dict[str, str],
+    evaluation_options: TitleEvaluationOptions | None = None,
+) -> tuple[list[TitleOutputItem], list[TitleOutputItem], list[str]]:
+    if not slot_candidates or not rewritten_titles_by_slot_id:
+        return current_results, current_enriched_results, []
+
+    effective_slot_candidates = [
+        candidate
+        for candidate in slot_candidates
+        if normalize_text(rewritten_titles_by_slot_id.get(candidate.get("slot_id")))
+        and normalize_text(rewritten_titles_by_slot_id.get(candidate.get("slot_id"))) != normalize_text(candidate.get("current_title"))
+    ]
+    if not effective_slot_candidates:
+        return current_results, current_enriched_results, []
+
+    candidate_results = _apply_slot_title_updates(
+        current_results,
+        effective_slot_candidates,
+        rewritten_titles_by_slot_id,
+    )
+    candidate_enriched_results, _ = refresh_title_results_for_changed_slots(
+        candidate_results,
+        current_enriched_results,
+        effective_slot_candidates,
+        evaluation_options=evaluation_options,
+    )
+    current_slot_reports = _build_slot_report_map(current_results, current_enriched_results)
+    candidate_slot_reports = _build_slot_report_map(candidate_results, candidate_enriched_results)
+
+    accepted_slot_ids: list[str] = []
+    accepted_title_updates: dict[str, str] = {}
+    for candidate in effective_slot_candidates:
+        slot_id = candidate["slot_id"]
+        rewritten_title = normalize_text(rewritten_titles_by_slot_id.get(slot_id))
+        if not rewritten_title or rewritten_title == normalize_text(candidate.get("current_title")):
+            continue
+        current_report = current_slot_reports.get(slot_id, {})
+        candidate_report = candidate_slot_reports.get(slot_id, {})
+        if _should_accept_slot_retry(current_report, candidate_report):
+            accepted_slot_ids.append(slot_id)
+            accepted_title_updates[slot_id] = rewritten_title
+
+    if not accepted_slot_ids:
+        return current_results, current_enriched_results, []
+
+    accepted_slot_candidates = [
+        candidate
+        for candidate in effective_slot_candidates
+        if candidate.get("slot_id") in accepted_title_updates
+    ]
+    merged_results = _apply_slot_title_updates(
+        current_results,
+        accepted_slot_candidates,
+        accepted_title_updates,
+    )
+    merged_enriched_results, _ = refresh_title_results_for_changed_slots(
+        merged_results,
+        current_enriched_results,
+        accepted_slot_candidates,
+        evaluation_options=evaluation_options,
+    )
+    return merged_results, merged_enriched_results, accepted_slot_ids
+
+
+def _apply_slot_title_updates(
+    current_results: list[TitleOutputItem],
+    slot_candidates: list[dict[str, Any]],
+    rewritten_titles_by_slot_id: dict[str, str],
+) -> list[TitleOutputItem]:
+    next_results = [_clone_title_output_item(item) for item in current_results]
+    candidate_lookup = {candidate["slot_id"]: candidate for candidate in slot_candidates}
+
+    for slot_id, rewritten_title in rewritten_titles_by_slot_id.items():
+        candidate = candidate_lookup.get(slot_id)
+        title = normalize_text(rewritten_title)
+        if not candidate or not title:
+            continue
+        result_index = int(candidate.get("result_index") or 0)
+        if result_index < 0 or result_index >= len(next_results):
+            continue
+        channel_name = str(candidate.get("channel") or "").strip()
+        slot_index = int(candidate.get("slot_index") or 0)
+        titles = next_results[result_index].get("titles") if isinstance(next_results[result_index].get("titles"), dict) else {}
+        channel_titles = titles.get(channel_name) if isinstance(titles.get(channel_name), list) else []
+        if slot_index <= 0 or slot_index > len(channel_titles):
+            continue
+        channel_titles[slot_index - 1] = title
+
+    return next_results
+
+
+def _build_slot_title_updates_from_bundle_candidates(
+    slot_candidates: list[dict[str, Any]],
+    bundle_candidates: dict[str, TitleOutputItem],
+) -> dict[str, str]:
+    rewritten_titles_by_slot_id: dict[str, str] = {}
+    for candidate in slot_candidates:
+        slot_id = normalize_text(candidate.get("slot_id"))
+        keyword = normalize_text(candidate.get("keyword"))
+        channel_name = str(candidate.get("channel") or "").strip()
+        slot_index = int(candidate.get("slot_index") or 0)
+        if not slot_id or not keyword or slot_index <= 0:
+            continue
+        bundle_candidate = bundle_candidates.get(keyword)
+        if not isinstance(bundle_candidate, dict):
+            continue
+        titles = bundle_candidate.get("titles") if isinstance(bundle_candidate.get("titles"), dict) else {}
+        channel_titles = titles.get(channel_name) if isinstance(titles.get(channel_name), list) else []
+        if slot_index > len(channel_titles):
+            continue
+        rewritten_title = normalize_text(channel_titles[slot_index - 1])
+        if not rewritten_title or rewritten_title == normalize_text(candidate.get("current_title")):
+            continue
+        rewritten_titles_by_slot_id[slot_id] = rewritten_title
+    return rewritten_titles_by_slot_id
+
+
+def _clone_title_output_item(item: TitleOutputItem) -> TitleOutputItem:
+    titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
+    return {
+        **_strip_generated_fields(item),
+        "keyword": normalize_text(item.get("keyword")),
+        "titles": {
+            "naver_home": list(titles.get("naver_home", [])) if isinstance(titles.get("naver_home"), list) else [],
+            "blog": list(titles.get("blog", [])) if isinstance(titles.get("blog"), list) else [],
+        },
+    }
+
+
+def _build_slot_report_map(
+    current_results: list[TitleOutputItem],
+    current_enriched_results: list[TitleOutputItem],
+) -> dict[str, dict[str, Any]]:
+    report_map: dict[str, dict[str, Any]] = {}
+    for result_index, (item, enriched_item) in enumerate(zip(current_results, current_enriched_results)):
+        aligned_title_checks = _align_title_checks_to_current_slots(item, enriched_item)
+        titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
+        for channel_name, channel_label in (("naver_home", "home"), ("blog", "blog")):
+            channel_titles = list(titles.get(channel_name, [])) if isinstance(titles.get(channel_name), list) else []
+            channel_reports = aligned_title_checks.get(channel_name, [])
+            for slot_index, raw_title in enumerate(channel_titles, start=1):
+                report_map[f"{result_index}_{channel_label}_{slot_index}"] = (
+                    channel_reports[slot_index - 1] if slot_index - 1 < len(channel_reports) else {"title": normalize_text(raw_title)}
+                )
+    return report_map
+
+
+def _align_title_checks_to_current_slots(
+    item: TitleOutputItem,
+    enriched_item: TitleOutputItem,
+) -> dict[str, list[dict[str, Any]]]:
+    titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
+    quality_report = enriched_item.get("quality_report") if isinstance(enriched_item.get("quality_report"), dict) else {}
+    raw_title_checks = quality_report.get("title_checks") if isinstance(quality_report.get("title_checks"), dict) else {}
+    aligned_title_checks: dict[str, list[dict[str, Any]]] = {"naver_home": [], "blog": []}
+
+    for channel_name in ("naver_home", "blog"):
+        channel_titles = list(titles.get(channel_name, [])) if isinstance(titles.get(channel_name), list) else []
+        raw_reports = list(raw_title_checks.get(channel_name, [])) if isinstance(raw_title_checks.get(channel_name), list) else []
+        reports_by_title: dict[str, list[dict[str, Any]]] = {}
+        for raw_report in raw_reports:
+            normalized_title = normalize_text(raw_report.get("title"))
+            reports_by_title.setdefault(normalized_title, []).append(raw_report)
+
+        fallback_reports = raw_reports[:]
+        aligned_reports: list[dict[str, Any]] = []
+        for raw_title in channel_titles:
+            title = normalize_text(raw_title)
+            title_reports = reports_by_title.get(title) or []
+            if title_reports:
+                matched_report = title_reports.pop(0)
+                if matched_report in fallback_reports:
+                    fallback_reports.remove(matched_report)
+                aligned_reports.append(matched_report)
+                continue
+            if fallback_reports:
+                aligned_reports.append(fallback_reports.pop(0))
+                continue
+            aligned_reports.append({"title": title, "score": 0, "status": "retry", "issues": [], "critical": True})
+
+        aligned_title_checks[channel_name] = aligned_reports
+
+    return aligned_title_checks
+
+
+def _collect_item_peer_titles(
+    titles: dict[str, Any],
+    *,
+    exclude_channel: str | None = None,
+    exclude_slot_index: int | None = None,
+) -> list[str]:
+    peer_titles: list[str] = []
+    for channel_name in ("naver_home", "blog"):
+        channel_titles = titles.get(channel_name, []) if isinstance(titles.get(channel_name), list) else []
+        for slot_index, raw_title in enumerate(channel_titles, start=1):
+            if exclude_channel == channel_name and exclude_slot_index == slot_index:
+                continue
+            title = normalize_text(raw_title)
+            if title:
+                peer_titles.append(title)
+    return peer_titles
+
+
+def _collect_recent_batch_peer_titles(
+    current_results: list[TitleOutputItem],
+    *,
+    result_index: int,
+    recent_batch_size: int,
+    exclude_titles: list[str] | None = None,
+    limit: int = _CROSS_KEYWORD_PEER_TITLE_LIMIT,
+) -> list[str]:
+    if limit <= 0 or not current_results:
+        return []
+
+    resolved_recent_batch_size = max(1, int(recent_batch_size or _DEFAULT_PEER_TITLE_BATCH_WINDOW))
+    batch_start = (result_index // resolved_recent_batch_size) * resolved_recent_batch_size
+    batch_end = min(len(current_results), batch_start + resolved_recent_batch_size)
+    seen = {normalize_text(title) for title in (exclude_titles or []) if normalize_text(title)}
+    title_groups: list[list[str]] = []
+
+    for candidate_index in range(batch_start, batch_end):
+        if candidate_index == result_index:
+            continue
+        titles = current_results[candidate_index].get("titles") if isinstance(current_results[candidate_index].get("titles"), dict) else {}
+        title_group = [
+            candidate_title
+            for candidate_title in _collect_item_peer_titles(titles)
+            if candidate_title and candidate_title not in seen
+        ]
+        if title_group:
+            title_groups.append(title_group)
+
+    collected_titles: list[str] = []
+    title_offset = 0
+    while len(collected_titles) < limit:
+        added_in_round = False
+        for title_group in title_groups:
+            if title_offset >= len(title_group):
+                continue
+            candidate_title = title_group[title_offset]
+            if candidate_title in seen:
+                continue
+            seen.add(candidate_title)
+            collected_titles.append(candidate_title)
+            added_in_round = True
+            if len(collected_titles) >= limit:
+                break
+        if not added_in_round:
+            break
+        title_offset += 1
+
+    return collected_titles
+
+
+def _extract_ctr_component(report: dict[str, Any], key: str) -> int:
+    if not isinstance(report, dict):
+        return 0
+    score_breakdown = report.get("score_breakdown") if isinstance(report.get("score_breakdown"), dict) else {}
+    try:
+        return int(score_breakdown.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _count_home_ctr_core_elements(report: dict[str, Any]) -> int:
+    return sum(
+        (
+            _extract_ctr_component(report, "issue_or_context") >= _HOME_CORE_ISSUE_MIN_SCORE,
+            _extract_ctr_component(report, "curiosity_gap") >= _HOME_CORE_CURIOSITY_MIN_SCORE,
+            _extract_ctr_component(report, "contrast_or_conflict") >= _HOME_CORE_CONTRAST_MIN_SCORE,
+        )
+    )
+
+
+def _should_never_retry_home_slot(report: dict[str, Any], title: str) -> bool:
+    normalized_title = normalize_text(title or report.get("title"))
+    score = int(report.get("score") or 0) if isinstance(report, dict) else 0
+    if score >= _HOME_RETRY_KEEP_SCORE_CUTOFF:
+        return True
+    if normalized_title.endswith("?") or normalized_title.endswith("？"):
+        return True
+    if len(normalized_title) <= _HOME_SHORT_TITLE_MAX_LENGTH:
+        return True
+    if _extract_ctr_component(report, "curiosity_gap") >= _HOME_CORE_CURIOSITY_MIN_SCORE:
+        return True
+    if _extract_ctr_component(report, "contrast_or_conflict") >= _HOME_CORE_CONTRAST_MIN_SCORE:
+        return True
+    if _extract_ctr_component(report, "emotional_trigger") >= _HOME_EMOTIONAL_HOOK_MIN_SCORE:
+        return True
+    return False
+
+
+def _should_retry_slot(report: dict[str, Any], retry_threshold: int, *, channel_name: str = "", title: str = "") -> bool:
+    if not isinstance(report, dict):
+        return False
+    normalized_channel = str(channel_name or "").strip().lower()
+    score = int(report.get("score") or 0)
+    resolved_threshold = min(int(retry_threshold or _DEFAULT_QUALITY_RETRY_THRESHOLD), _HOME_RETRY_KEEP_SCORE_CUTOFF)
+
+    if normalized_channel == "naver_home":
+        if _should_never_retry_home_slot(report, title):
+            return False
+        if score < _STRICT_RETRY_SCORE_CUTOFF:
+            return True
+        return _count_home_ctr_core_elements(report) < 2
+
+    return score < min(resolved_threshold, _STRICT_RETRY_SCORE_CUTOFF)
+
+
+def _should_accept_slot_retry(current_report: dict[str, Any], candidate_report: dict[str, Any]) -> bool:
+    if not isinstance(candidate_report, dict):
+        return False
+    current_score = int(current_report.get("score") or 0)
+    candidate_score = int(candidate_report.get("score") or 0)
+    current_status = str(current_report.get("status") or "").strip().lower()
+    candidate_status = str(candidate_report.get("status") or "").strip().lower()
+    current_issue_count = len(current_report.get("issues", [])) if isinstance(current_report.get("issues"), list) else 0
+    candidate_issue_count = len(candidate_report.get("issues", [])) if isinstance(candidate_report.get("issues"), list) else 0
+
+    if current_status == "retry" and candidate_status != "retry":
+        return True
+    if candidate_score >= current_score + 4:
+        return True
+    if candidate_score > current_score and candidate_issue_count <= current_issue_count:
+        return True
+    return candidate_score >= current_score and candidate_issue_count < current_issue_count
+
+
+def _collect_slot_candidate_keywords(
+    slot_candidates: list[dict[str, Any]],
+    accepted_slot_ids: list[str] | None = None,
+) -> list[str]:
+    accepted_lookup = {normalize_text(slot_id) for slot_id in (accepted_slot_ids or []) if normalize_text(slot_id)}
+    keywords: list[str] = []
+    seen: set[str] = set()
+    for candidate in slot_candidates:
+        slot_id = normalize_text(candidate.get("slot_id"))
+        if accepted_lookup and slot_id not in accepted_lookup:
+            continue
+        keyword = normalize_text(candidate.get("keyword"))
+        if not keyword or keyword in seen:
+            continue
+        seen.add(keyword)
+        keywords.append(keyword)
+    return keywords
+
+
+def _chunk_slot_candidates(
+    slot_candidates: list[dict[str, Any]],
+    size: int,
+) -> list[list[dict[str, Any]]]:
+    resolved_size = max(1, min(int(size or 20), 20))
+    return [
+        slot_candidates[index:index + resolved_size]
+        for index in range(0, len(slot_candidates), resolved_size)
+    ]
+
+
+def _dedupe_texts(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        normalized = normalize_text(value)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
+
+
+def _filter_slot_candidates_by_retry_attempts(
+    slot_candidates: list[dict[str, Any]],
+    retry_attempt_counts: dict[str, int],
+    *,
+    max_attempts: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    filtered_candidates: list[dict[str, Any]] = []
+    skipped_slot_ids: list[str] = []
+    resolved_max_attempts = max(1, int(max_attempts or _MAX_SLOT_REWRITE_ATTEMPTS))
+    for candidate in slot_candidates:
+        slot_id = normalize_text(candidate.get("slot_id"))
+        if not slot_id:
+            continue
+        if int(retry_attempt_counts.get(slot_id) or 0) >= resolved_max_attempts:
+            skipped_slot_ids.append(slot_id)
+            continue
+        filtered_candidates.append(candidate)
+    return filtered_candidates, skipped_slot_ids
+
+
+def _record_failed_slot_retry_attempts(
+    retry_attempt_counts: dict[str, int],
+    slot_candidates: list[dict[str, Any]],
+    accepted_slot_ids: list[str] | None = None,
+) -> list[str]:
+    accepted_lookup = {
+        normalize_text(slot_id)
+        for slot_id in (accepted_slot_ids or [])
+        if normalize_text(slot_id)
+    }
+    failed_slot_ids: list[str] = []
+    for candidate in slot_candidates:
+        slot_id = normalize_text(candidate.get("slot_id"))
+        if not slot_id or slot_id in accepted_lookup:
+            continue
+        retry_attempt_counts[slot_id] = int(retry_attempt_counts.get(slot_id) or 0) + 1
+        failed_slot_ids.append(slot_id)
+    return failed_slot_ids
+
+
+def _downgrade_exhausted_retry_slots(
+    current_results: list[TitleOutputItem],
+    current_enriched_results: list[TitleOutputItem],
+    exhausted_slot_ids: list[str],
+) -> tuple[list[TitleOutputItem], list[str]]:
+    exhausted_lookup = {
+        normalize_text(slot_id)
+        for slot_id in exhausted_slot_ids
+        if normalize_text(slot_id)
+    }
+    if not exhausted_lookup:
+        return current_enriched_results, []
+
+    downgraded_slot_ids: list[str] = []
+    downgraded_results: list[TitleOutputItem] = []
+
+    for result_index, (item, enriched_item) in enumerate(zip(current_results, current_enriched_results)):
+        aligned_title_checks = _align_title_checks_to_current_slots(item, enriched_item)
+        changed = False
+
+        for channel_name, channel_label in (("naver_home", "home"), ("blog", "blog")):
+            channel_reports = list(aligned_title_checks.get(channel_name, []))
+            for slot_index, report in enumerate(channel_reports, start=1):
+                slot_id = f"{result_index}_{channel_label}_{slot_index}"
+                if slot_id not in exhausted_lookup:
+                    continue
+                if str(report.get("status") or "").strip().lower() != "retry":
+                    continue
+                next_report = dict(report)
+                issues = list(next_report.get("issues", [])) if isinstance(next_report.get("issues"), list) else []
+                if _RETRY_LIMIT_DOWNGRADE_ISSUE not in issues:
+                    issues.append(_RETRY_LIMIT_DOWNGRADE_ISSUE)
+                checks = dict(next_report.get("checks", {})) if isinstance(next_report.get("checks"), dict) else {}
+                checks["retry_limit_reached"] = True
+                next_report["issues"] = _dedupe_texts(issues)
+                next_report["critical"] = False
+                next_report["status"] = "review"
+                next_report["checks"] = checks
+                channel_reports[slot_index - 1] = next_report
+                changed = True
+                downgraded_slot_ids.append(slot_id)
+            aligned_title_checks[channel_name] = channel_reports
+
+        if not changed:
+            downgraded_results.append(enriched_item)
+            continue
+
+        rebuilt_report = _build_bundle_report(
+            normalize_text(item.get("keyword")),
+            aligned_title_checks,
+        )
+        rebuilt_issues = list(rebuilt_report.get("issues", [])) if isinstance(rebuilt_report.get("issues"), list) else []
+        if _RETRY_LIMIT_DOWNGRADE_ISSUE not in rebuilt_issues:
+            rebuilt_issues.append(_RETRY_LIMIT_DOWNGRADE_ISSUE)
+        rebuilt_report["issues"] = _dedupe_texts(rebuilt_issues)
+        rebuilt_report["issue_count"] = len(rebuilt_report["issues"])
+        rebuilt_report["summary"] = " / ".join(rebuilt_report["issues"][:3]) if rebuilt_report["issues"] else _RETRY_LIMIT_DOWNGRADE_ISSUE
+        rebuilt_report["status"] = "review"
+        rebuilt_report["label"] = "검토 필요"
+        rebuilt_report["retry_recommended"] = False
+        rebuilt_report["passes_threshold"] = False
+        downgraded_results.append(
+            {
+                **enriched_item,
+                "quality_report": rebuilt_report,
+            }
+        )
+
+    return downgraded_results, _dedupe_texts(downgraded_slot_ids)
+
 
 def _should_retry_for_quality(report: dict[str, Any], retry_threshold: int) -> bool:
     if not isinstance(report, dict):
         return False
     if bool(report.get("recommended_pair_ready")):
         return False
-    if bool(report.get("retry_recommended")):
-        return True
-    return int(report.get("bundle_score") or 0) < retry_threshold
+    title_checks = report.get("title_checks") if isinstance(report.get("title_checks"), dict) else {}
+    for channel_name, channel_reports in title_checks.items():
+        if not isinstance(channel_reports, list):
+            continue
+        for slot_report in channel_reports:
+            if _should_retry_slot(
+                slot_report if isinstance(slot_report, dict) else {},
+                retry_threshold,
+                channel_name=str(channel_name or "").strip().lower(),
+                title=(slot_report or {}).get("title") if isinstance(slot_report, dict) else "",
+            ):
+                return True
+    return int(report.get("bundle_score") or 0) < min(int(retry_threshold or _DEFAULT_QUALITY_RETRY_THRESHOLD), _STRICT_RETRY_SCORE_CUTOFF)
+
+
+def _count_retry_candidates(items: list[TitleOutputItem], retry_threshold: int) -> int:
+    return sum(
+        1
+        for item in items
+        if _should_retry_for_quality(item.get("quality_report", {}), retry_threshold)
+        and normalize_text(item.get("keyword"))
+    )
+
+
+def _select_retry_keywords_for_pass(
+    items: list[TitleOutputItem],
+    retry_threshold: int,
+    *,
+    limit: int,
+) -> list[str]:
+    ranked_candidates: list[tuple[int, int, int, str]] = []
+
+    for item in items:
+        keyword = normalize_text(item.get("keyword"))
+        report = item.get("quality_report", {})
+        if not keyword or not _should_retry_for_quality(report, retry_threshold):
+            continue
+        ranked_candidates.append(
+            (
+                0 if bool(report.get("retry_recommended")) else 1,
+                int(report.get("bundle_score") or 0),
+                -int(report.get("issue_count") or 0),
+                keyword,
+            )
+        )
+
+    ranked_candidates.sort()
+    if limit > 0:
+        ranked_candidates = ranked_candidates[:limit]
+    return [keyword for _, _, _, keyword in ranked_candidates]
+
+
+def _build_retry_progress_message(
+    base: str,
+    *,
+    selected_count: int,
+    total_candidates: int,
+    include_ratio: bool = False,
+) -> str:
+    if total_candidates > selected_count:
+        if include_ratio:
+            return f"{base}: {selected_count} / {total_candidates}건 (상위 {selected_count}건만)"
+        return f"{base}: 후보 {total_candidates}건 중 상위 {selected_count}건만"
+    if include_ratio:
+        return f"{base}: {selected_count} / {total_candidates}건"
+    return f"{base}: {selected_count}건"
 
 
 def _should_accept_retry(current_report: dict[str, Any], retry_report: dict[str, Any]) -> bool:
@@ -711,10 +1875,12 @@ def _build_quality_retry_prompt(existing_prompt: str, retry_threshold: int) -> s
         "- Prefer concise hook-first wording. One clear hook plus one concrete noun is better than a long abstract explanation.\n"
         "- Keep the home-feed pair issue-aware: usually make one title issue/update + comparison/debate and the other title issue/update + reversal/question.\n"
         "- For naver_home titles, evaluate CTR first, not SEO. Strong titles usually combine issue/context, curiosity, contrast/conflict, reversal/unexpected, emotional trigger, specificity, and readability.\n"
-        "- Do not penalize a naver_home title just because it is phrased as a question or leaves part of the meaning implied.\n"
-        "- Do not penalize repeated question patterns, partial abstraction, or curiosity-driven phrasing in naver_home titles. These can be positive CTR signals.\n"
+        '- Strong positive CTR signals include question-led hooks such as "왜일까", "뭐지", "진짜?", unresolved curiosity phrasing, and emotional triggers such as "의외", "먼저", "갈렸다".\n'
+        "- Do not penalize a naver_home title just because it is phrased as a question, leaves part of the meaning implied, stays short, or keeps some abstraction.\n"
+        "- Do not penalize repeated question patterns, low explicit information density, partial abstraction, or curiosity-driven phrasing in naver_home titles. These can be positive CTR signals.\n"
         "- Do penalize purely informational naver_home titles, no-curiosity headlines, flat explanatory tone, and filler endings such as 확인해보자 or 알아보자.\n"
         "- Do not use SEO or blog criteria such as abstract, clickbait, templated, or lacking information as reasons to downscore naver_home titles.\n"
+        "- If a naver_home title already reaches practical CTR quality around 68 or higher, prefer keeping it instead of forcing another rewrite.\n"
         "- If a naver_home title is still weak, keep the keyword tokens and order, stay within 40 characters, and combine at least two of issue, contrast, reversal, and curiosity.\n"
         "- Make the 2 naver_home titles clearly different from each other.\n"
         "- Make the 2 blog titles clearly different from each other.\n"
@@ -758,17 +1924,26 @@ def _apply_practical_rescue_candidates(
     original_items_by_keyword: dict[str, TitleOutputItem],
     retry_threshold: int,
     evaluation_options: TitleEvaluationOptions | None = None,
+    retry_attempt_counts: dict[str, int] | None = None,
+    recent_batch_size: int = _DEFAULT_PEER_TITLE_BATCH_WINDOW,
+    max_slot_rewrite_attempts: int = _MAX_SLOT_REWRITE_ATTEMPTS,
 ) -> tuple[list[TitleOutputItem], list[TitleOutputItem], dict[str, Any], list[str]]:
-    rescue_keywords = [
-        normalize_text(item.get("keyword"))
-        for item in current_enriched_results
-        if _should_retry_for_quality(item.get("quality_report", {}), retry_threshold)
-    ]
-    rescue_keywords = [keyword for keyword in rescue_keywords if keyword]
-    if not rescue_keywords:
+    rescue_slot_candidates = _collect_retry_slot_candidates(
+        current_results,
+        current_enriched_results,
+        retry_threshold,
+        recent_batch_size=recent_batch_size,
+    )
+    rescue_slot_candidates, _ = _filter_slot_candidates_by_retry_attempts(
+        rescue_slot_candidates,
+        retry_attempt_counts or {},
+        max_attempts=max_slot_rewrite_attempts,
+    )
+    if not rescue_slot_candidates:
         quality_summary = _build_quality_summary_from_items(current_enriched_results)
         return current_results, current_enriched_results, quality_summary, []
 
+    rescue_keywords = _collect_slot_candidate_keywords(rescue_slot_candidates)
     rescue_candidates: dict[str, TitleOutputItem] = {}
     for keyword in rescue_keywords:
         source_item = original_items_by_keyword.get(keyword, {"keyword": keyword})
@@ -780,15 +1955,25 @@ def _apply_practical_rescue_candidates(
         quality_summary = _build_quality_summary_from_items(current_enriched_results)
         return current_results, current_enriched_results, quality_summary, []
 
-    rescued_results, accepted_rescue_keywords = _merge_retry_candidates(
+    rescued_titles_by_slot_id = _build_slot_title_updates_from_bundle_candidates(
+        rescue_slot_candidates,
+        rescue_candidates,
+    )
+    if not rescued_titles_by_slot_id:
+        quality_summary = _build_quality_summary_from_items(current_enriched_results)
+        return current_results, current_enriched_results, quality_summary, []
+
+    rescued_results, rescued_enriched_results, accepted_rescue_slot_ids = _merge_slot_retry_candidates(
         current_results=current_results,
         current_enriched_results=current_enriched_results,
-        retry_candidates=rescue_candidates,
+        slot_candidates=rescue_slot_candidates,
+        rewritten_titles_by_slot_id=rescued_titles_by_slot_id,
         evaluation_options=evaluation_options,
     )
-    rescued_enriched_results, quality_summary = enrich_title_results(
-        rescued_results,
-        evaluation_options=evaluation_options,
+    quality_summary = _build_quality_summary_from_items(rescued_enriched_results)
+    accepted_rescue_keywords = _collect_slot_candidate_keywords(
+        rescue_slot_candidates,
+        accepted_rescue_slot_ids,
     )
     return rescued_results, rescued_enriched_results, quality_summary, accepted_rescue_keywords
 
@@ -1405,25 +2590,41 @@ def _build_auto_retry_meta(
     *,
     attempted_keywords: list[str] | None = None,
     accepted_keywords: list[str] | None = None,
+    attempted_slot_count: int = 0,
+    accepted_slot_count: int = 0,
+    rewrite_call_count: int = 0,
+    rewrite_batch_sizes: list[int] | None = None,
+    downgraded_slot_ids: list[str] | None = None,
     remaining_retry_count: int = 0,
     error_messages: list[str] | None = None,
-    retry_threshold: int = TITLE_QUALITY_PASS_SCORE,
+    retry_threshold: int = _DEFAULT_QUALITY_RETRY_THRESHOLD,
     provider: str = "",
     model: str = "",
+    max_slot_rewrite_attempts: int = _MAX_SLOT_REWRITE_ATTEMPTS,
 ) -> dict[str, Any]:
     attempted_keywords = attempted_keywords or []
     accepted_keywords = accepted_keywords or []
     error_messages = error_messages or []
+    rewrite_batch_sizes = rewrite_batch_sizes or []
+    downgraded_slot_ids = downgraded_slot_ids or []
     return {
         "attempted_count": len(attempted_keywords),
         "attempted_keywords": attempted_keywords,
         "accepted_count": len(accepted_keywords),
         "accepted_keywords": accepted_keywords,
+        "bad_slot_count": max(0, int(attempted_slot_count or 0)),
+        "attempted_slot_count": max(0, int(attempted_slot_count or 0)),
+        "accepted_slot_count": max(0, int(accepted_slot_count or 0)),
+        "rewrite_call_count": max(0, int(rewrite_call_count or 0)),
+        "rewrite_batch_sizes": [max(0, int(size or 0)) for size in rewrite_batch_sizes],
+        "downgraded_slot_count": len(downgraded_slot_ids),
+        "downgraded_slot_ids": downgraded_slot_ids,
         "remaining_retry_count": remaining_retry_count,
         "error_messages": error_messages[:3],
         "retry_threshold": retry_threshold,
         "provider": str(provider or "").strip(),
         "model": str(model or "").strip(),
+        "max_slot_rewrite_attempts": max(1, int(max_slot_rewrite_attempts or _MAX_SLOT_REWRITE_ATTEMPTS)),
     }
 
 
@@ -1438,12 +2639,20 @@ def _build_model_escalation_meta(
     target_model: str = "",
     attempted_keywords: list[str] | None = None,
     accepted_keywords: list[str] | None = None,
+    attempted_slot_count: int = 0,
+    accepted_slot_count: int = 0,
+    rewrite_call_count: int = 0,
+    rewrite_batch_sizes: list[int] | None = None,
+    downgraded_slot_ids: list[str] | None = None,
     remaining_retry_count: int = 0,
     error_messages: list[str] | None = None,
+    max_slot_rewrite_attempts: int = _MAX_SLOT_REWRITE_ATTEMPTS,
 ) -> dict[str, Any]:
     attempted_keywords = attempted_keywords or []
     accepted_keywords = accepted_keywords or []
     error_messages = error_messages or []
+    rewrite_batch_sizes = rewrite_batch_sizes or []
+    downgraded_slot_ids = downgraded_slot_ids or []
     return {
         "enabled": enabled,
         "trigger_failure_count": max(1, int(trigger_failure_count or _MODEL_ESCALATION_TRIGGER_FAILURES)),
@@ -1456,8 +2665,16 @@ def _build_model_escalation_meta(
         "attempted_keywords": attempted_keywords,
         "accepted_count": len(accepted_keywords),
         "accepted_keywords": accepted_keywords,
+        "bad_slot_count": max(0, int(attempted_slot_count or 0)),
+        "attempted_slot_count": max(0, int(attempted_slot_count or 0)),
+        "accepted_slot_count": max(0, int(accepted_slot_count or 0)),
+        "rewrite_call_count": max(0, int(rewrite_call_count or 0)),
+        "rewrite_batch_sizes": [max(0, int(size or 0)) for size in rewrite_batch_sizes],
+        "downgraded_slot_count": len(downgraded_slot_ids),
+        "downgraded_slot_ids": downgraded_slot_ids,
         "remaining_retry_count": remaining_retry_count,
         "error_messages": error_messages[:3],
+        "max_slot_rewrite_attempts": max(1, int(max_slot_rewrite_attempts or _MAX_SLOT_REWRITE_ATTEMPTS)),
     }
 
 
@@ -1532,7 +2749,7 @@ def _request_retry_candidates(
 
     for chunk in _chunk_keywords(retry_input_items, retry_options.batch_size):
         try:
-            response_items = request_ai_titles(
+            response_items = _request_ai_titles_with_chunk_retry(
                 chunk,
                 options=retry_options,
             )
@@ -1620,9 +2837,9 @@ def _resolve_escalated_model(provider: str, model: str) -> str:
 
 def _resolve_quality_retry_threshold(value: int | float | None) -> int:
     try:
-        number = int(value or TITLE_QUALITY_PASS_SCORE)
+        number = int(value or _DEFAULT_QUALITY_RETRY_THRESHOLD)
     except (TypeError, ValueError):
-        return TITLE_QUALITY_PASS_SCORE
+        return _DEFAULT_QUALITY_RETRY_THRESHOLD
     return max(70, min(100, number))
 
 
@@ -1641,6 +2858,8 @@ def _build_title_evaluation_options(
         api_key=evaluation_api_key,
         system_prompt=normalize_text(options.quality_system_prompt),
         batch_size=max(1, min(options.batch_size, 20)),
+        sample_ratio=_DEFAULT_HOME_AI_EVALUATION_SAMPLE_RATIO,
+        max_sampled_items=_DEFAULT_HOME_AI_EVALUATION_MAX_ITEMS,
     )
 
 
@@ -1677,7 +2896,7 @@ def _build_meta(
     fallback_reason: str = "",
     fallback_keywords: list[str] | None = None,
     auto_retry_enabled: bool = False,
-    quality_retry_threshold: int = TITLE_QUALITY_PASS_SCORE,
+    quality_retry_threshold: int = _DEFAULT_QUALITY_RETRY_THRESHOLD,
     issue_context_enabled: bool = False,
     issue_context_limit: int = 0,
     issue_source_mode: str = "",

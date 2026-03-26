@@ -17,6 +17,9 @@ Does the title imply a situation, change, or event?
 
 2. curiosity_gap (0~20)
 Does it create curiosity or leave something unresolved?
+Strong positive:
+- question-led hooks such as "왜일까", "뭐지", "진짜?"
+- unresolved curiosity phrasing that makes the next click feel necessary
 
 3. contrast_or_conflict (0~15)
 Is there comparison, tension, or contrast?
@@ -25,10 +28,12 @@ Is there comparison, tension, or contrast?
 Does it imply something unexpected or non-obvious?
 
 5. emotional_trigger (0~15)
-Does it include emotional hooks (의외, 먼저, 갈렸다, 뜻밖)?
+Does it include emotional hooks such as "의외", "먼저", or "갈렸다"?
+Strong positive:
+- emotional or contrast hooks such as "의외", "먼저", "갈렸다"
 
 6. specificity (0~10)
-Is the subject clear and concrete?
+Is the subject clear and concrete enough for a click-oriented headline?
 
 7. readability (0~5)
 Is it concise and natural?
@@ -38,6 +43,8 @@ Is it concise and natural?
 DO NOT penalize:
 - question format
 - repeated question patterns
+- short titles when they feel natural
+- low explicit information density
 - partial abstraction
 - curiosity-driven phrasing
 
@@ -47,18 +54,23 @@ These are POSITIVE signals for CTR.
 
 Penalize ONLY if:
 
-- purely informational (ex: 준비물 정리, 방법 설명)
+- purely informational
 - no curiosity at all
 - flat tone with no tension
-- meaningless filler (확인해보자, 알아보자)
+- meaningless filler
+
+[VERDICT]
+
+- keep if the title reaches practical CTR quality at 68 or higher
+- rewrite only when the total score is below 68 or the title is clearly flat filler
 
 [CRITICAL RULE]
 
 Do NOT use SEO or blog criteria such as:
-- 추상적이다
-- 낚시형이다
-- 템플릿이다
-- 정보 부족
+- abstract
+- clickbait
+- templated
+- lacking information
 
-These are NOT valid for CTR evaluation.
+These are NOT valid reasons to downscore CTR-focused home titles.
 """

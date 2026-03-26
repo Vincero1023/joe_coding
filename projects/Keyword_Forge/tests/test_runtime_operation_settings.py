@@ -94,3 +94,6 @@ def test_auth_error_lock_blocks_follow_up_requests() -> None:
 
     assert excinfo.value.code == "auth_guard_locked"
     assert excinfo.value.status_code == 423
+    assert "보호 잠금" in str(excinfo.value)
+    assert excinfo.value.detail["auth_lock_active"] is True
+    assert excinfo.value.detail["auth_lock_message"] == "creator session expired"

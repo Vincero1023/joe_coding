@@ -160,7 +160,8 @@ const TITLE_TEMPERATURE_PRESETS = [
     },
 ];
 const TITLE_TEMPERATURE_DEFAULT = "0.7";
-const TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT = 84;
+const TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT = 75;
+const LEGACY_TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT = 84;
 const TITLE_ISSUE_CONTEXT_LIMIT_DEFAULT = 3;
 const TITLE_ISSUE_SOURCE_MODE_DEFAULT = "mixed";
 const TITLE_ISSUE_SOURCE_MODE_LIBRARY = Array.isArray(window.KEYWORD_FORGE_TITLE_ISSUE_SOURCE_MODES)
@@ -278,6 +279,8 @@ const state = {
     operationModePresets: [...OPERATION_MODE_PRESET_FALLBACKS],
     operationCustomPresetKey: "balanced",
     operationLastCustomSettings: null,
+    operationGuardResetPending: false,
+    operationGuardStatusMessage: "",
     keywordWorkHistory: null,
     keywordStatusRegistry: null,
     keywordLatestUsageMap: new Map(),
@@ -1307,6 +1310,80 @@ function buildTitleRunSummary(titleOptions) {
     return `${parts.join(" / ")} / ${modeSummary}`;
 }
 
+const TREND_BROWSER_LABELS = {
+    auto: "자동 감지",
+    edge: "Microsoft Edge",
+    msedge: "Microsoft Edge",
+    chrome: "Google Chrome",
+    firefox: "Mozilla Firefox",
+};
+
+function detectCurrentTrendBrowser() {
+    const userAgent = String(window.navigator?.userAgent || "");
+
+    if (/Edg\//i.test(userAgent)) {
+        return "edge";
+    }
+    if (/Firefox\//i.test(userAgent)) {
+        return "firefox";
+    }
+    if (/Chrome\//i.test(userAgent) || /CriOS\//i.test(userAgent)) {
+        return "chrome";
+    }
+    return "auto";
+}
+
+function formatTrendBrowserLabel(browser) {
+    const normalized = String(browser || "").trim().toLowerCase();
+    return TREND_BROWSER_LABELS[normalized] || normalized || TREND_BROWSER_LABELS.auto;
+}
+
+function resolveTrendBrowserRequest() {
+    const selected = String(elements.trendBrowserInput?.value || "auto").trim().toLowerCase();
+    if (selected && selected !== "auto") {
+        return selected;
+    }
+    const detected = detectCurrentTrendBrowser();
+    return detected !== "auto" ? detected : "auto";
+}
+
+function describeTrendBrowserSelection() {
+    const selected = String(elements.trendBrowserInput?.value || "auto").trim().toLowerCase();
+    if (selected === "auto") {
+        const detected = detectCurrentTrendBrowser();
+        return detected !== "auto"
+            ? `현재 접속 브라우저 자동 감지 (${formatTrendBrowserLabel(detected)})`
+            : "현재 접속 브라우저 자동 감지";
+    }
+    return formatTrendBrowserLabel(selected);
+}
+
+function updateTrendBrowserUiCopy() {
+    const detected = detectCurrentTrendBrowser();
+    const requested = resolveTrendBrowserRequest();
+    const selected = String(elements.trendBrowserInput?.value || "auto").trim().toLowerCase();
+    const autoOption = elements.trendBrowserInput?.querySelector('option[value="auto"]');
+
+    if (autoOption) {
+        autoOption.textContent = detected !== "auto"
+            ? `현재 접속 브라우저 자동 감지 (${formatTrendBrowserLabel(detected)})`
+            : "현재 접속 브라우저 자동 감지";
+    }
+
+    if (!elements.loadLocalCookieButton) {
+        return;
+    }
+    if (requested === "auto") {
+        elements.loadLocalCookieButton.textContent = "현재 브라우저에서 가져오기";
+        return;
+    }
+    if (selected === "auto" || requested === detected) {
+        elements.loadLocalCookieButton.textContent = `현재 브라우저(${formatTrendBrowserLabel(requested)})에서 가져오기`;
+        return;
+    }
+    elements.loadLocalCookieButton.textContent = `선택한 브라우저(${formatTrendBrowserLabel(requested)})에서 가져오기`;
+}
+
 function loadTrendSettings() {
     const defaults = {
         version: TREND_SETTINGS_VERSION,
@@ -1334,6 +1411,7 @@ function loadTrendSettings() {
     elements.trendCookieInput.value = settings.auth_cookie;
     elements.trendFallbackInput.checked = Boolean(settings.fallback_to_preset_search);
 
+    updateTrendBrowserUiCopy();
     renderTrendSettingsState();
 }
 
@@ -1401,12 +1479,66 @@ async function loadTrendSessionCacheStatus(options = {}) {
     return state.trendSessionCache;
 }
 
+function isDirectBrowserCookieAccessError(message, attempts = [], hint = "") {
+    const parts = [
+        String(message || ""),
+        String(hint || ""),
+        ...attempts.map((attempt) => `${attempt?.detail || ""} ${attempt?.hint || ""}`),
+    ];
+    const normalized = parts.join(" ").toLowerCase();
+    return [
+        "requires admin",
+        "permission denied",
+        "unable to read database file",
+        "database is locked",
+        "access is denied",
+    ].some((token) => normalized.includes(token));
+}
+
+async function restoreCachedDedicatedTrendSession(options = {}) {
+    const reason = String(options?.reason || "").trim();
+    const response = await postModule("/local/naver-session-cache/load", {});
+    const result = response.result || {};
+    const cookieHeader = String(result.cookie_header || "").trim();
+
+    if (!cookieHeader) {
+        throw new Error("저장된 전용 로그인 세션에 쿠키가 없습니다.");
+    }
+
+    elements.trendCookieInput.value = cookieHeader;
+    state.trendSessionCache = normalizeTrendSessionCacheInfo(result);
+    if (elements.localCookieStatus) {
+        elements.localCookieStatus.dataset.locked = "true";
+        elements.localCookieStatus.textContent = reason
+            ? `${reason} 저장된 전용 로그인 세션으로 전환했습니다.`
+            : `${formatTrendBrowserLabel(result.browser || "")} 전용 로그인 세션을 불러왔습니다.`;
+    }
+    persistTrendSettings();
+    renderTrendSettingsState();
+    await resetOperationGuards({
+        silent: true,
+        successMessage: "저장된 Creator Advisor 세션을 적용해 보호 잠금을 해제했습니다.",
+    });
+    addLog(
+        reason
+            ? `${reason} 저장된 전용 로그인 세션을 대신 불러왔습니다.`
+            : `${formatTrendBrowserLabel(result.browser || "")} 전용 로그인 세션을 불러왔습니다.`,
+        "success",
+    );
+    return result;
+}
+
 function renderTrendSettingsState() {
     const categoryMode = getCollectorMode() === "category";
     const usesTrendSource = categoryMode && elements.categorySourceInput.value === "naver_trend";
     const hasInlineCookie = Boolean(elements.trendCookieInput.value.trim());
     const trendSessionCache = state.trendSessionCache?.available ? state.trendSessionCache : null;
     const hasCachedSession = Boolean(trendSessionCache);
+    const browserLabel = describeTrendBrowserSelection();
+    const cachedBrowserLabel = formatTrendBrowserLabel(trendSessionCache?.browser || "");
+    const fallbackLabel = elements.trendFallbackInput.checked ? "켜짐" : "꺼짐";
+
+    updateTrendBrowserUiCopy();
 
     elements.trendServiceInput.disabled = !usesTrendSource;
     elements.trendDateInput.disabled = !usesTrendSource;
@@ -1453,7 +1585,7 @@ function getTrendSettingsFormState() {
 }
 
 async function importLocalNaverCookie() {
-    const browser = elements.trendBrowserInput.value || "auto";
+    const browser = resolveTrendBrowserRequest();
     try {
         const response = await postModule("/local/naver-session", {
             browser,
@@ -1469,7 +1601,7 @@ async function importLocalNaverCookie() {
         state.trendSessionCache = normalizeTrendSessionCacheInfo(result);
         if (elements.localCookieStatus) {
             elements.localCookieStatus.dataset.locked = "true";
-            elements.localCookieStatus.textContent = `${result.browser || browser} 브라우저에서 쿠키 ${result.cookie_count || 0}개를 불러왔습니다.`;
+            elements.localCookieStatus.textContent = `${formatTrendBrowserLabel(result.browser || browser)} 브라우저에서 쿠키 ${result.cookie_count || 0}개를 불러왔습니다.`;
         }
         persistTrendSettings();
         renderTrendSettingsState();
@@ -1477,7 +1609,7 @@ async function importLocalNaverCookie() {
             silent: true,
             successMessage: "Creator Advisor 세션을 다시 불러와 보호 잠금을 해제했습니다.",
         });
-        addLog(`${result.browser || browser} 브라우저에서 Creator Advisor 쿠키를 불러왔습니다.`, "success");
+        addLog(`${formatTrendBrowserLabel(result.browser || browser)} 브라우저에서 Creator Advisor 쿠키를 불러왔습니다.`, "success");
     } catch (error) {
         const normalized = normalizeError(error, {
             endpoint: "/local/naver-session",
@@ -1487,32 +1619,74 @@ async function importLocalNaverCookie() {
             ? normalized.detail.attempts
             : [];
         const hint = normalized.detail?.hint || "";
+        const directAccessBlocked = isDirectBrowserCookieAccessError(normalized.message, attempts, hint);
+        if (directAccessBlocked) {
+            const cacheInfo = state.trendSessionCache?.available
+                ? state.trendSessionCache
+                : await loadTrendSessionCacheStatus({ silent: true });
+            if (cacheInfo?.available) {
+                try {
+                    await restoreCachedDedicatedTrendSession({
+                        reason: "현재 브라우저 쿠키 접근이 막혀",
+                    });
+                    return;
+                } catch (cacheError) {
+                    addLog(normalizeError(cacheError).message, "error");
+                }
+            }
+        }
         if (elements.localCookieStatus) {
             elements.localCookieStatus.dataset.locked = "true";
-            elements.localCookieStatus.textContent = buildLocalCookieFailureMessage(browser, attempts, hint, normalized.message);
+            elements.localCookieStatus.textContent = buildLocalCookieFailureMessage(
+                browser,
+                attempts,
+                hint,
+                normalized.message,
+                {
+                    recommendDedicatedLogin: directAccessBlocked,
+                },
+            );
         }
         throw normalized;
     }
 }
 
-function buildLocalCookieFailureMessage(browser, attempts, hint, fallbackMessage) {
+function buildLocalCookieFailureMessage(browser, attempts, hint, fallbackMessage, options = {}) {
+    const recommendDedicatedLogin = Boolean(options?.recommendDedicatedLogin);
     if (attempts.length > 0) {
         const first = attempts[0];
-        const base = `${first.browser || browser} 브라우저 쿠키를 읽지 못했습니다: ${first.detail || fallbackMessage}`;
-        return first.hint ? `${base} / ${first.hint}` : base;
+        const base = `${formatTrendBrowserLabel(first.browser || browser)} 브라우저 쿠키를 읽지 못했습니다: ${first.detail || fallbackMessage}`;
+        if (first.hint) {
+            return recommendDedicatedLogin
+                ? `${base} / ${first.hint} / 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
+                : `${base} / ${first.hint}`;
+        }
+        return recommendDedicatedLogin
+            ? `${base} / 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
+            : base;
     }
 
-    return hint ? `${fallbackMessage} / ${hint}` : fallbackMessage;
+    if (hint) {
+        return recommendDedicatedLogin
+            ? `${fallbackMessage} / ${hint} / 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
+            : `${fallbackMessage} / ${hint}`;
+    }
+
+    return recommendDedicatedLogin
+        ? `${fallbackMessage} / 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
+        : fallbackMessage;
 }
 
 async function openDedicatedLoginBrowser() {
-    const browser = elements.trendBrowserInput.value === "chrome" ? "chrome" : "edge";
+    const requestedBrowser = resolveTrendBrowserRequest();
+    const browser = requestedBrowser === "chrome" ? "chrome" : "edge";
+    const browserLabel = formatTrendBrowserLabel(browser);
 
     if (elements.localCookieStatus) {
         elements.localCookieStatus.dataset.locked = "true";
-        elements.localCookieStatus.textContent = `${browser} 전용 로그인 브라우저를 열었습니다. 로그인 후 창이 자동으로 닫힐 때까지 기다려 주세요.`;
+        elements.localCookieStatus.textContent = `${browserLabel} 전용 로그인 브라우저를 열었습니다. 로그인 후 창이 자동으로 닫힐 때까지 기다려 주세요.`;
     }
-    addLog(`${browser} 전용 로그인 브라우저를 엽니다. 열린 창에서 네이버 로그인과 Creator Advisor 접속을 완료해 주세요.`);
+    addLog(`${browserLabel} 전용 로그인 브라우저를 엽니다. 열린 창에서 네이버 로그인과 Creator Advisor 접속을 완료해 주세요.`);
 
     try {
         const response = await postModule("/local/naver-login-browser", {
@@ -1530,7 +1704,7 @@ async function openDedicatedLoginBrowser() {
         state.trendSessionCache = normalizeTrendSessionCacheInfo(result);
         if (elements.localCookieStatus) {
             elements.localCookieStatus.dataset.locked = "true";
-            elements.localCookieStatus.textContent = `${result.browser || browser} 전용 프로필에서 쿠키 ${result.cookie_count || 0}개를 저장했습니다.`;
+            elements.localCookieStatus.textContent = `${formatTrendBrowserLabel(result.browser || browser)} 전용 프로필에서 쿠키 ${result.cookie_count || 0}개를 저장했습니다.`;
         }
         persistTrendSettings();
         renderTrendSettingsState();
@@ -1538,7 +1712,7 @@ async function openDedicatedLoginBrowser() {
             silent: true,
             successMessage: "Creator Advisor 재로그인 후 보호 잠금을 자동으로 해제했습니다.",
         });
-        addLog(`${result.browser || browser} 전용 로그인 브라우저에서 Creator Advisor 쿠키를 저장했습니다.`, "success");
+        addLog(`${formatTrendBrowserLabel(result.browser || browser)} 전용 로그인 브라우저에서 Creator Advisor 쿠키를 저장했습니다.`, "success");
     } catch (error) {
         const normalized = normalizeError(error, {
             endpoint: "/local/naver-login-browser",
@@ -5966,6 +6140,11 @@ function renderTrendSettingsState() {
     const hasInlineCookie = Boolean(elements.trendCookieInput.value.trim());
     const trendSessionCache = state.trendSessionCache?.available ? state.trendSessionCache : null;
     const hasCachedSession = Boolean(trendSessionCache);
+    const browserLabel = describeTrendBrowserSelection();
+    const cachedBrowserLabel = formatTrendBrowserLabel(trendSessionCache?.browser || "");
+    const fallbackLabel = elements.trendFallbackInput.checked ? "켜짐" : "꺼짐";
+
+    updateTrendBrowserUiCopy();
 
     elements.trendServiceInput.disabled = !usesTrendSource;
     elements.trendDateInput.disabled = !usesTrendSource;
@@ -5980,24 +6159,22 @@ function renderTrendSettingsState() {
     if (elements.trendSourceHelp) {
         if (usesTrendSource) {
             const service = elements.trendServiceInput.value || "naver_blog";
-            const browser = elements.trendBrowserInput.value || "auto";
-            const fallbackLabel = elements.trendFallbackInput.checked ? "\ucf1c\uc9d0" : "\uaebc\uc9d0";
             elements.trendSourceHelp.textContent = hasInlineCookie
-                ? `\ud604\uc7ac Creator Advisor ${service} \ud2b8\ub80c\ub4dc\ub97c \uc9c1\uc811 \uc870\ud68c\ud569\ub2c8\ub2e4. \ub85c\uceec \ube0c\ub77c\uc6b0\uc800\ub294 ${browser}, fallback\uc740 ${fallbackLabel} \uc0c1\ud0dc\uc785\ub2c8\ub2e4.`
+                ? `현재 Creator Advisor ${service} 트렌드를 직접 조회합니다. 세션을 읽은 브라우저는 ${browserLabel}, fallback은 ${fallbackLabel} 상태입니다.`
                 : hasCachedSession
-                    ? `\uc785\ub825 \uce78\uc740 \ube44\uc5b4 \uc788\uc9c0\ub9cc \uc800\uc7a5\ub41c ${trendSessionCache?.browser || "local"} \uc804\uc6a9 \ub85c\uadf8\uc778 \uc138\uc158\uc744 \uc790\ub3d9\uc73c\ub85c \uc0ac\uc6a9\ud569\ub2c8\ub2e4. \ub85c\uceec \ube0c\ub77c\uc6b0\uc800\ub294 ${browser}, fallback\uc740 ${fallbackLabel} \uc0c1\ud0dc\uc785\ub2c8\ub2e4.`
-                    : `\ud604\uc7ac Creator Advisor ${service} \uc138\uc158\uc774 \ube44\uc5b4 \uc788\uc2b5\ub2c8\ub2e4. '\uc804\uc6a9 \ub85c\uadf8\uc778 \ube0c\ub77c\uc6b0\uc800 \uc5f4\uae30'\ub85c \ub85c\uceec \uc138\uc158\uc744 \uc900\ube44\ud574 \uc8fc\uc138\uc694. \uc800\uc7a5\ub41c \uc804\uc6a9 \uc138\uc158\uc774 \uc5c6\uace0 fallback\uc774 \uaebc\uc838 \uc788\uc73c\uba74 \ud2b8\ub80c\ub4dc \uc218\uc9d1\uc740 \uba48\ucda5\ub2c8\ub2e4.`;
+                    ? `입력 칸은 비어 있지만 저장된 ${cachedBrowserLabel} 세션을 자동으로 사용합니다. 현재 브라우저 선택은 ${browserLabel}, fallback은 ${fallbackLabel} 상태입니다.`
+                    : `현재 Creator Advisor ${service} 세션이 비어 있습니다. 먼저 네이버에 로그인한 뒤 '현재 브라우저에서 가져오기'를 누르세요. 그게 막히면 '전용 로그인 브라우저 열기'를 사용하면 됩니다. fallback이 꺼져 있으면 트렌드 수집은 멈춥니다.`;
         } else {
-            elements.trendSourceHelp.textContent = "\uce74\ud14c\uace0\ub9ac \uc218\uc9d1 \uc18c\uc2a4\uac00 preset fallback\uc774\uba74 \uae30\uc874 \uacf5\uac1c \uac80\uc0c9 \uacbd\ub85c\ub85c \ud0a4\uc6cc\ub4dc\ub97c \uc218\uc9d1\ud569\ub2c8\ub2e4.";
+            elements.trendSourceHelp.textContent = "카테고리 수집 소스가 preset fallback이면 기존 공개 검색 경로로 키워드를 수집합니다.";
         }
     }
 
     if (elements.localCookieStatus && !elements.localCookieStatus.dataset.locked) {
         elements.localCookieStatus.textContent = hasInlineCookie
-            ? "\ube0c\ub77c\uc6b0\uc800\uc5d0\uc11c \ubd88\ub7ec\uc624\uac70\ub098 \uc9c1\uc811 \ubd99\uc5ec\ub123\uc740 \ub85c\uceec \uc138\uc158\uc774 \uc900\ube44\ub418\uc5b4 \uc788\uc2b5\ub2c8\ub2e4."
+            ? "현재 브라우저에서 불러오거나 직접 붙여넣은 Creator Advisor 세션이 준비되어 있습니다."
             : hasCachedSession
-                ? `\uc800\uc7a5\ub41c ${trendSessionCache?.browser || "local"} \uc804\uc6a9 \ub85c\uadf8\uc778 \uc138\uc158\uc774 \uc788\uc5b4 \uc785\ub825 \uce78\uc774 \ube44\uc5b4\ub3c4 \uc218\uc9d1 \uc2dc \uc790\ub3d9\uc73c\ub85c \uc0ac\uc6a9\ud569\ub2c8\ub2e4.`
-                : "\uc544\uc9c1 \uc800\uc7a5\ub41c \uc804\uc6a9 \ub85c\uadf8\uc778 \uc138\uc158\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.";
+                ? `저장된 ${cachedBrowserLabel} 세션이 있어 입력 칸이 비어도 수집 시 자동으로 사용합니다.`
+                : "먼저 이 페이지를 연 브라우저에서 네이버 로그인 후 세션을 불러오세요.";
     }
 }
 
@@ -9003,6 +9180,30 @@ function normalizeTitleQualityRetryThreshold(rawValue) {
     return Math.max(70, Math.min(100, parsedValue));
 }
 
+function migrateLegacyTitleRetryDefaults(settings = {}) {
+    const source = settings && typeof settings === "object" ? settings : {};
+    const nextSettings = { ...source };
+    const hasAutoRetry = Object.prototype.hasOwnProperty.call(source, "auto_retry_enabled");
+    const hasRetryThreshold = Object.prototype.hasOwnProperty.call(source, "quality_retry_threshold");
+    const parsedThreshold = Number.parseInt(String(source.quality_retry_threshold ?? "").trim(), 10);
+    const usesLegacyThreshold = !hasRetryThreshold
+        || (Number.isFinite(parsedThreshold) && parsedThreshold === LEGACY_TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT);
+
+    if ((!hasAutoRetry || source.auto_retry_enabled === true) && usesLegacyThreshold) {
+        nextSettings.auto_retry_enabled = false;
+        nextSettings.quality_retry_threshold = TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT;
+        return nextSettings;
+    }
+
+    if (!hasAutoRetry) {
+        nextSettings.auto_retry_enabled = false;
+    }
+    if (!hasRetryThreshold) {
+        nextSettings.quality_retry_threshold = TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT;
+    }
+    return nextSettings;
+}
+
 function getTitleTemperaturePreset(value) {
     const normalizedValue = normalizeTitleTemperatureValue(value);
     return TITLE_TEMPERATURE_PRESETS.find((preset) => preset.value === normalizedValue) || TITLE_TEMPERATURE_PRESETS[0];
@@ -9636,6 +9837,7 @@ function normalizeTitlePresetProfiles(value) {
         if (!item || typeof item !== "object") {
             return profiles;
         }
+        const normalizedRetryItem = migrateLegacyTitleRetryDefaults(item);
         const id = normalizeTitlePromptProfileId(item.id || `preset-${index + 1}`);
         const name = String(item.name || "").replace(/\s+/g, " ").trim() || `프리셋 ${profiles.length + 1}`;
         if (!id || seenIds.has(id)) {
@@ -9654,8 +9856,8 @@ function normalizeTitlePresetProfiles(value) {
             model: String(item.model || "").trim(),
             temperature: Number(normalizeTitleTemperatureValue(item.temperature)),
             fallback_to_template: Boolean(item.fallback_to_template ?? true),
-            auto_retry_enabled: Boolean(item.auto_retry_enabled ?? true),
-            quality_retry_threshold: normalizeTitleQualityRetryThreshold(item.quality_retry_threshold),
+            auto_retry_enabled: Boolean(normalizedRetryItem.auto_retry_enabled ?? false),
+            quality_retry_threshold: normalizeTitleQualityRetryThreshold(normalizedRetryItem.quality_retry_threshold),
             issue_context_enabled: Boolean(item.issue_context_enabled ?? true),
             issue_context_limit: normalizeTitleIssueContextLimit(item.issue_context_limit),
             issue_source_mode: normalizeTitleIssueSourceMode(item.issue_source_mode),
@@ -10401,7 +10603,7 @@ function loadTitleSettings() {
     const defaults = {
         mode: "template",
         keyword_modes: ["single", "longtail_selected"],
-        auto_retry_enabled: true,
+        auto_retry_enabled: false,
         quality_retry_threshold: TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT,
         issue_context_enabled: true,
         issue_context_limit: TITLE_ISSUE_CONTEXT_LIMIT_DEFAULT,
@@ -10430,11 +10632,12 @@ function loadTitleSettings() {
 
     let apiRegistry = loadTitleApiRegistry();
     const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY);
+    const migratedStoredSettings = migrateLegacyTitleRetryDefaults(storedSettings || {});
     const hasStoredSettings = Boolean(storedSettings && typeof storedSettings === "object");
     const hasStoredCommunitySources = Boolean(
         hasStoredSettings && Object.prototype.hasOwnProperty.call(storedSettings, "community_sources"),
     );
-    const localSettings = { ...defaults, ...(hasStoredSettings ? storedSettings : {}) };
+    const localSettings = { ...defaults, ...(hasStoredSettings ? migratedStoredSettings : {}) };
     const localPromptSettings = buildTitlePromptSettingsPayload(localSettings);
     const serverPromptSettings = readInjectedTitlePromptSettings();
     const shouldSeedServerPromptSettings = (
@@ -10491,7 +10694,7 @@ function loadTitleSettings() {
     setTitleRewriteModelOptions(selectedRewriteProvider, settings.rewrite_model);
     elements.titleFallback.checked = Boolean(settings.fallback_to_template);
     if (elements.titleAutoRetryEnabled) {
-        elements.titleAutoRetryEnabled.checked = Boolean(settings.auto_retry_enabled ?? true);
+        elements.titleAutoRetryEnabled.checked = Boolean(settings.auto_retry_enabled ?? false);
     }
     if (elements.titleAutoRetryThreshold) {
         elements.titleAutoRetryThreshold.value = String(
@@ -11166,10 +11369,26 @@ function renderOperationSettingsState() {
     if (elements.operationGuardStatus) {
         elements.operationGuardStatus.textContent = buildOperationGuardLabel(runtimeState);
     }
+    if (elements.resetOperationGuardsButton) {
+        elements.resetOperationGuardsButton.disabled = Boolean(state.operationGuardResetPending);
+        elements.resetOperationGuardsButton.textContent = state.operationGuardResetPending
+            ? "해제 중..."
+            : "보호 잠금 해제";
+        elements.resetOperationGuardsButton.setAttribute(
+            "aria-busy",
+            state.operationGuardResetPending ? "true" : "false",
+        );
+    }
     if (elements.operationSettingsSyncStatus) {
-        elements.operationSettingsSyncStatus.textContent = snapshot
-            ? `서버 반영값 기준입니다. 최근 작업: ${runtimeState.last_operation_name || "없음"}`
-            : "서버 반영값을 아직 받지 못했습니다. 로컬 저장본을 먼저 표시 중입니다.";
+        if (state.operationGuardResetPending) {
+            elements.operationSettingsSyncStatus.textContent = "보호 잠금 해제를 요청하는 중입니다...";
+        } else if (state.operationGuardStatusMessage) {
+            elements.operationSettingsSyncStatus.textContent = state.operationGuardStatusMessage;
+        } else {
+            elements.operationSettingsSyncStatus.textContent = snapshot
+                ? `서버 반영값 기준입니다. 최근 작업: ${runtimeState.last_operation_name || "없음"}`
+                : "서버 반영값을 아직 받지 못했습니다. 로컬 저장본을 먼저 표시 중입니다.";
+        }
     }
 }
 
@@ -11223,6 +11442,7 @@ async function loadOperationSettings(options = {}) {
         const snapshot = await requestOperationSettings("/settings/runtime");
         state.operationModePresets = normalizeOperationPresetList(snapshot.presets);
         state.operationSettingsSnapshot = snapshot;
+        state.operationGuardStatusMessage = "";
         applyOperationSettingsToForm(snapshot.settings || {});
         persistOperationSettingsDraft(snapshot.settings || {});
         renderOperationSettingsState();
@@ -11252,6 +11472,7 @@ async function saveOperationSettings() {
         });
         state.operationModePresets = normalizeOperationPresetList(snapshot.presets);
         state.operationSettingsSnapshot = snapshot;
+        state.operationGuardStatusMessage = "운영 설정을 저장하고 서버 런타임에 적용했습니다.";
         applyOperationSettingsToForm(snapshot.settings || settings);
         persistOperationSettingsDraft(snapshot.settings || settings);
         renderOperationSettingsState();
@@ -11271,6 +11492,12 @@ async function resetOperationGuards(options = {}) {
     }
 
     const wasLocked = Boolean(state.operationSettingsSnapshot?.state?.auth_lock_active);
+    state.operationGuardResetPending = true;
+    state.operationGuardStatusMessage = "보호 잠금 해제를 요청하는 중입니다...";
+    renderOperationSettingsState();
+    if (!options.silent) {
+        addLog("보호 잠금 해제를 요청했습니다.", "info");
+    }
 
     try {
         const snapshot = await requestOperationSettings("/settings/runtime/reset-guards", {
@@ -11278,26 +11505,25 @@ async function resetOperationGuards(options = {}) {
         });
         state.operationModePresets = normalizeOperationPresetList(snapshot.presets);
         state.operationSettingsSnapshot = snapshot;
+        state.operationGuardResetPending = false;
         applyOperationSettingsToForm(snapshot.settings || getOperationSettingsFormState());
-        renderOperationSettingsState();
         const isLocked = Boolean(snapshot?.state?.auth_lock_active);
         const feedbackMessage = isLocked
             ? "보호 잠금이 아직 유지되고 있습니다. 잠시 후 다시 시도해 주세요."
             : wasLocked
                 ? "보호 잠금을 해제했습니다. 다시 수집을 실행해 보세요."
                 : "이미 보호 잠금이 해제된 상태입니다.";
-        if (elements.operationSettingsSyncStatus && !options.silent) {
-            elements.operationSettingsSyncStatus.textContent = feedbackMessage;
-        }
+        state.operationGuardStatusMessage = feedbackMessage;
+        renderOperationSettingsState();
         if (!options.silent) {
             addLog(options.successMessage || feedbackMessage, isLocked ? "error" : "info");
             showUserNotice({ message: options.successMessage || feedbackMessage });
         }
     } catch (error) {
         const normalizedError = normalizeError(error, { endpoint: "/settings/runtime/reset-guards" });
-        if (elements.operationSettingsSyncStatus) {
-            elements.operationSettingsSyncStatus.textContent = normalizedError.message;
-        }
+        state.operationGuardResetPending = false;
+        state.operationGuardStatusMessage = normalizedError.message;
+        renderOperationSettingsState();
         if (!options.silent) {
             addLog(normalizedError.message, "error");
             showUserNotice(normalizedError);

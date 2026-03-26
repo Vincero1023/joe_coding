@@ -264,9 +264,12 @@ class RuntimeSettingsStore:
 
             if self._settings.stop_on_auth_error and self._state.auth_lock_active:
                 raise RuntimeGuardError(
-                    self._state.auth_lock_message or "401/403 보호 잠금이 활성화되어 요청을 중지했습니다.",
+                    "이전 인증 오류로 보호 잠금이 활성화되어 요청을 중지했습니다. 운영 설정에서 잠금을 해제한 뒤 다시 실행하세요.",
                     code="auth_guard_locked",
-                    detail={"auth_lock_active": True},
+                    detail={
+                        "auth_lock_active": True,
+                        "auth_lock_message": self._state.auth_lock_message,
+                    },
                     status_code=423,
                 )
 

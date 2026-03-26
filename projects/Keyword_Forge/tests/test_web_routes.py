@@ -91,7 +91,9 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "롱테일 탐색형" in response.text
     assert "data-queue-category" in response.text
     assert "localCookieStatus" in response.text
-    assert "저장된 전용 로그인 세션" in response.text
+    assert "loadLocalCookieButton" in response.text
+    assert "현재 브라우저에서 가져오기" in response.text
+    assert "전용 로그인 브라우저 열기" in response.text
     assert "executionHistoryList" in response.text
     assert "keywordVaultList" in response.text
     assert "topicSeedInput" in response.text

@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.local.naver_login_browser import (
     LocalLoginBrowserError,
     LocalNaverLoginBrowserService,
+    load_cached_session_payload,
     read_cached_session_summary,
 )
 from app.local.naver_session import LocalBrowserCookieError, LocalNaverSessionService
@@ -158,6 +159,31 @@ def test_read_cached_session_summary_returns_saved_metadata(tmp_path) -> None:
     assert result["saved_at"] == 1774101314
 
 
+def test_load_cached_session_payload_returns_cookie_header(tmp_path) -> None:
+    session_file = tmp_path / "naver_creator_session.json"
+    session_file.write_text(
+        json.dumps(
+            {
+                "browser": "chrome",
+                "cookie_header": "NID_AUT=test; NID_SES=session",
+                "cookie_names": ["NID_AUT", "NID_SES"],
+                "cookie_count": 2,
+                "saved_at": 1774101314,
+                "target_url": "https://creator-advisor.naver.com/naver_blog/goodbuy40/trends",
+                "profile_dir": "F:/tmp/profile",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = load_cached_session_payload(session_file)
+
+    assert result["browser"] == "chrome"
+    assert result["cookie_header"] == "NID_AUT=test; NID_SES=session"
+    assert result["cookie_count"] == 2
+
+
 def test_local_naver_session_cache_endpoint_returns_cached_summary() -> None:
     with patch(
         "app.api.routes.local_naver.read_cached_session_summary",
@@ -178,6 +204,27 @@ def test_local_naver_session_cache_endpoint_returns_cached_summary() -> None:
     assert result["available"] is True
     assert result["browser"] == "chrome"
     assert result["cookie_count"] == 3
+
+
+def test_local_naver_session_cache_load_endpoint_returns_cached_cookie_header() -> None:
+    with patch(
+        "app.api.routes.local_naver.load_cached_session_payload",
+        return_value={
+            "browser": "chrome",
+            "cookie_header": "NID_AUT=test; NID_SES=session",
+            "cookie_names": ["NID_AUT", "NID_SES"],
+            "cookie_count": 2,
+            "saved_at": 1774101314,
+            "target_url": "https://creator-advisor.naver.com/naver_blog/goodbuy40/trends",
+            "profile_dir": "F:/tmp/profile",
+        },
+    ):
+        response = client.post("/local/naver-session-cache/load", json={"input_data": {}})
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["browser"] == "chrome"
+    assert result["cookie_header"] == "NID_AUT=test; NID_SES=session"
 
 
 def test_local_naver_login_browser_session_paths_use_project_root() -> None:

@@ -5,6 +5,40 @@
 2. 증상-원인-해결-검증 순서로만 기록한다.
 3. 추측은 가정으로 표시하고, 확인 후 즉시 갱신한다.
 
+## Date
+- 2026-03-26 17:58 (KST)
+
+## What changed (변경점)
+- 제목 단계 장기 지연의 주원인을 홈판 AI 평가가 아니라 과도한 auto-retry로 정리했다.
+- 기본값을 `auto_retry_enabled=false`, `quality_retry_threshold=75`로 낮추고, 홈판 retry는 `score < 70` 또는 CTR 핵심 요소(`issue/curiosity/contrast`) 2개 미만일 때만 허용하도록 좁혔다.
+- 브라우저 localStorage와 사용자 preset이 예전 기본값 `true/84`를 다시 밀어넣지 않도록 JS 마이그레이션과 asset version `v77`을 추가했다.
+
+## Why (원인/배경)
+- status html 기준 성공 run도 `379s~452s`, 느린 run은 `782.6s`까지 올라갔고, `ai_evaluated: true`가 거의 없어도 오래 걸렸다.
+- 즉 병목은 홈판 AI 평가보다 재작성 횟수와 retry gate였는데, 중간에 timeout/sub-batch 쪽을 먼저 건드리면서 우회 수정이 반복됐다.
+- 또 코드 기본값을 바꿔도 브라우저 저장값과 활성 preset이 `true/84`를 유지하면 실제 요청은 계속 예전 설정으로 나갔다.
+
+## How verified (검증 방법/체크리스트)
+- [x] `python -m py_compile app/title/ai_client.py app/core/title_prompt_settings.py app/title/title_generator.py tests/test_title.py app/web.py`
+- [x] `node --check app/web_assets/app.js`
+- [x] `pytest -q tests/test_title.py -k "title_generation_options_parse_quality_retry_settings or title_generation_options_default_quality_retry_settings_are_relaxed or title_generator_keeps_custom_quality_retry_threshold_without_extra_retry_when_pair_ready or collect_retry_slot_candidates_adds_recent_batch_peer_titles_from_other_keywords or should_retry_slot_blocks_home_retry_for_ctr_hooks_and_short_titles or collect_retry_slot_candidates_only_keeps_home_slots_below_new_gate"`
+- [x] 결과: `6 passed`
+
+## Issues & Fix (문제-원인-해결)
+- 문제: 실행 시간이 10분 이상으로 늘어났고, 원인 진단이 홈판 AI 평가 쪽으로 여러 번 흔들렸다.
+- 원인: 실제 병목은 auto-retry/rewrite path였고, 브라우저/프리셋의 구기본값이 새 코드 기본값을 덮어썼다.
+- 해결: retry 기본값과 홈판 retry gate를 코드/서버/UI/저장값 전부 같은 기준으로 맞추고, 질문형/짧은 제목/감정 훅/contrast가 이미 있는 홈판 제목은 재작성 대상에서 제외했다.
+
+## Repeat Guardrails (재발 방지 규칙)
+- 제목 단계가 느리면 먼저 최신 status html에서 `auto_retry_enabled`, `quality_retry_threshold`, `rewrite_call_count`, `bad_slot_count`, `retry_limit_reached`, `ai_evaluated true/false`를 본다.
+- `홈판 AI timeout`이나 `sub-batch`를 다시 건드리기 전에, 현재 요청이 정말 `auto-retry OFF / threshold 75`로 실행됐는지 localStorage와 active preset까지 확인한다.
+- 속도 문제 수정은 반드시 변경 전/후 status html의 제목 단계 초(second)를 같이 남긴다. 추측만으로 timeout을 늘리지 않는다.
+- 홈판 CTR 제목은 짧아도 허용한다. 질문형, curiosity, contrast, emotional hook가 이미 있으면 우선 keep 쪽으로 본다.
+
+## Next (다음 작업)
+- 브라우저 강새로고침 후 새 기준으로 다시 실전 run
+- 다음 status html에서 제목 단계가 300초 안팎으로 내려오는지와 `auto_retry` 메타가 실제로 줄었는지 확인
+
 ## Update
 - 2026-03-26 09:05 (KST)
 - 제목 생성 기본 batch 크기를 20으로 올리고, 홈판 평가는 키워드 20개 단위 batch 호출로 전환했다.

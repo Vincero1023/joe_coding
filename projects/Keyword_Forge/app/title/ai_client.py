@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import datetime
 import json
 from dataclasses import dataclass
+import re
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -22,7 +23,7 @@ from app.title.issue_sources import (
     resolve_community_source_domains,
 )
 from app.title.presets import DEFAULT_TITLE_PRESET_KEY, get_title_preset
-from app.title.rules import NAVER_HOME_MAX_LENGTH, TITLE_QUALITY_PASS_SCORE
+from app.title.rules import NAVER_HOME_MAX_LENGTH, TITLE_QUALITY_REVIEW_SCORE
 
 
 _OPENAI_URL = "https://api.openai.com/v1/chat/completions"
@@ -41,6 +42,7 @@ _DEFAULT_MODELS = {
 _ISSUE_CONTEXT_MAX_LIMIT = 5
 _ISSUE_CONTEXT_DEFAULT_LIMIT = 3
 _ISSUE_CONTEXT_HEADLINE_LIMIT = 3
+_DEFAULT_QUALITY_RETRY_THRESHOLD = TITLE_QUALITY_REVIEW_SCORE
 _ISSUE_CONTEXT_CACHE: dict[tuple[str, ...], dict[str, Any]] = {}
 _ISSUE_CONTEXT_STOPWORD_KEYS = {
     normalize_key(token)
@@ -272,6 +274,57 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Do not include markdown, commentary, or code fences."
 )
 
+_SLOT_TITLE_SYSTEM_PROMPT = (
+    "You are a Korean title generator for Naver home CTR and SEO blog content.\n"
+    "Return strict JSON only.\n"
+    "\n"
+    "[MODE DETECTION]\n"
+    "If current_title is provided, use REWRITE MODE.\n"
+    "If current_title is empty, use GENERATION MODE.\n"
+    "\n"
+    "[COMMON RULES]\n"
+    "- Preserve the keyword exactly.\n"
+    "- Do not change token order of the keyword.\n"
+    "- Natural Korean only.\n"
+    "- No colon.\n"
+    "- Prefer zero or one comma.\n"
+    "\n"
+    "[GENERATION MODE]\n"
+    "Goal: Generate a high-quality title.\n"
+    "\n"
+    "[NAVER_HOME RULES]\n"
+    f"- Max {NAVER_HOME_MAX_LENGTH} characters.\n"
+    "- Focus on click-through rate.\n"
+    "- Use at least two of issue/change, comparison/difference, reversal/unexpected, and question.\n"
+    "- Create curiosity gap and do not fully explain.\n"
+    "- Allow emotional hooks and question forms.\n"
+    "- Avoid flat informational titles, generic phrasing, and repeated patterns across the batch.\n"
+    "\n"
+    "[BLOG RULES]\n"
+    "- Focus on clarity and SEO structure.\n"
+    "- Structure the title like keyword + specific detail + explanation.\n"
+    "- Include method, condition, comparison, or criteria.\n"
+    "- Avoid vague wording and excessive emotional hooks.\n"
+    "\n"
+    "[REWRITE MODE]\n"
+    "Goal: Fix the title based on issues and improve quality.\n"
+    "- The rewritten title must be clearly different from current_title.\n"
+    "- Fix all listed issues explicitly.\n"
+    "- Do not reuse the same structure from peer_titles.\n"
+    "- If channel is naver_home, strengthen curiosity and contrast and avoid repeating the same question pattern.\n"
+    "- If channel is blog, improve clarity and specificity and remove vague or weak phrasing.\n"
+    "\n"
+    "[OUTPUT FORMAT]\n"
+    "{\n"
+    '  "items": [\n'
+    "    {\n"
+    '      "slot_id": "...",\n'
+    '      "title": "..."\n'
+    "    }\n"
+    "  ]\n"
+    "}"
+)
+
 
 class TitleProviderError(RuntimeError):
     pass
@@ -296,8 +349,8 @@ class TitleGenerationOptions:
     preset_key: str = ""
     preset_label: str = ""
     preset_prompt: str = ""
-    auto_retry_enabled: bool = True
-    quality_retry_threshold: int = TITLE_QUALITY_PASS_SCORE
+    auto_retry_enabled: bool = False
+    quality_retry_threshold: int = _DEFAULT_QUALITY_RETRY_THRESHOLD
     issue_context_enabled: bool = True
     issue_context_limit: int = _ISSUE_CONTEXT_DEFAULT_LIMIT
     issue_source_mode: str = DEFAULT_ISSUE_SOURCE_MODE
@@ -373,10 +426,10 @@ class TitleGenerationOptions:
             preset_key=preset.key if preset else "",
             preset_label=preset.label if preset else "",
             preset_prompt=preset.prompt_guidance if preset else "",
-            auto_retry_enabled=bool(raw.get("auto_retry_enabled", True)),
+            auto_retry_enabled=bool(raw.get("auto_retry_enabled", False)),
             quality_retry_threshold=_coerce_int(
                 raw.get("quality_retry_threshold"),
-                default=TITLE_QUALITY_PASS_SCORE,
+                default=_DEFAULT_QUALITY_RETRY_THRESHOLD,
                 minimum=70,
                 maximum=100,
             ),
@@ -427,6 +480,32 @@ def request_ai_titles(
     raise TitleProviderError(f"Unsupported provider: {options.provider}")
 
 
+def request_ai_slot_rewrites(
+    input_items: list[Any],
+    options: TitleGenerationOptions,
+) -> list[dict[str, str]]:
+    if not input_items:
+        return []
+
+    if not options.api_key:
+        raise TitleProviderError("AI mode requires an API key.")
+
+    prompt_items = _normalize_slot_prompt_items(input_items)
+    if not prompt_items:
+        return []
+
+    payload = request_ai_json_object(
+        provider=options.provider,
+        api_key=options.api_key,
+        model=options.model,
+        system_prompt=_build_slot_title_system_prompt(options.system_prompt),
+        user_prompt=_build_slot_title_user_prompt(prompt_items),
+        temperature=options.temperature,
+        max_output_tokens=max(600, int(options.max_output_tokens or 0)),
+    )
+    return _parse_slot_title_items(payload)
+
+
 def request_ai_json_object(
     *,
     provider: str,
@@ -436,6 +515,8 @@ def request_ai_json_object(
     user_prompt: str,
     temperature: float = 0.2,
     max_output_tokens: int = 1400,
+    request_timeout_seconds: float = 30.0,
+    max_retries: int | None = None,
 ) -> dict[str, Any]:
     normalized_provider = _normalize_provider(provider)
     normalized_model = normalize_text(model) or _DEFAULT_MODELS[normalized_provider]
@@ -461,7 +542,13 @@ def request_ai_json_object(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        response = _post_json(_OPENAI_URL, headers, payload)
+        response = _post_json(
+            _OPENAI_URL,
+            headers,
+            payload,
+            max_retries=0 if max_retries is None else max(0, int(max_retries or 0)),
+            timeout_seconds=request_timeout_seconds,
+        )
         content = (
             response.get("choices", [{}])[0]
             .get("message", {})
@@ -487,7 +574,13 @@ def request_ai_json_object(
                 "Content-Type": "application/json",
             }
             url = _VERTEX_EXPRESS_URL_TEMPLATE.format(model=normalized_model, api_key=quote(api_key or "", safe=""))
-        response = _post_json(url, headers, payload, max_retries=2)
+        response = _post_json(
+            url,
+            headers,
+            payload,
+            max_retries=2 if max_retries is None else max(0, int(max_retries or 0)),
+            timeout_seconds=request_timeout_seconds,
+        )
         return _parse_json_object_text(_extract_gemini_like_text(response))
 
     if normalized_provider == "anthropic":
@@ -508,7 +601,13 @@ def request_ai_json_object(
             "x-api-key": api_key or "",
             "anthropic-version": "2023-06-01",
         }
-        response = _post_json(_ANTHROPIC_URL, headers, payload)
+        response = _post_json(
+            _ANTHROPIC_URL,
+            headers,
+            payload,
+            max_retries=0 if max_retries is None else max(0, int(max_retries or 0)),
+            timeout_seconds=request_timeout_seconds,
+        )
         content_items = response.get("content", [])
         content = "\n".join(
             normalize_text(item.get("text"))
@@ -601,6 +700,7 @@ def _post_json(
     payload: dict[str, Any],
     *,
     max_retries: int = 0,
+    timeout_seconds: float = 30.0,
 ) -> dict[str, Any]:
     raw_payload = json.dumps(payload).encode("utf-8")
     last_error: Exception | None = None
@@ -614,7 +714,7 @@ def _post_json(
         )
 
         try:
-            with urlopen(request, timeout=30.0) as response:
+            with urlopen(request, timeout=float(timeout_seconds or 30.0)) as response:
                 raw_text = response.read().decode("utf-8", errors="ignore")
             break
         except HTTPError as exc:
@@ -710,26 +810,14 @@ def _extract_gemini_like_text(response: dict[str, Any]) -> str:
 
 
 def _parse_json_object_text(raw_text: str) -> dict[str, Any]:
-    normalized_text = normalize_text(raw_text)
-    if not normalized_text:
-        raise TitleProviderError("Provider returned empty JSON content.")
-
-    candidates = [normalized_text]
-    start = normalized_text.find("{")
-    end = normalized_text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        sliced = normalized_text[start:end + 1]
-        if sliced not in candidates:
-            candidates.append(sliced)
-
-    for candidate in candidates:
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-
+    parsed = _parse_json_with_repairs(
+        raw_text,
+        empty_message="Provider returned empty JSON content.",
+        missing_message="Provider returned empty JSON content.",
+        invalid_message="Provider returned invalid JSON content.",
+    )
+    if isinstance(parsed, dict):
+        return parsed
     raise TitleProviderError("Provider returned invalid JSON content.")
 
 
@@ -910,6 +998,128 @@ def _format_prompt_item(index: int, item: dict[str, str]) -> str:
         lines.append(f"- community reaction: {item['community_reaction_summary']}")
     if item.get("community_headlines"):
         lines.append(f"- community headlines: {item['community_headlines']}")
+    return "\n".join(lines)
+
+
+def _build_slot_title_system_prompt(extra_guidance: str) -> str:
+    normalized_extra = normalize_text(extra_guidance)
+    if not normalized_extra:
+        return _SLOT_TITLE_SYSTEM_PROMPT
+    return f"{_SLOT_TITLE_SYSTEM_PROMPT}\n\n[ADDITIONAL GUIDANCE]\n{normalized_extra}"
+
+
+def _normalize_slot_prompt_items(input_items: list[Any]) -> list[dict[str, Any]]:
+    normalized_items: list[dict[str, Any]] = []
+
+    for index, raw_item in enumerate(input_items):
+        if not isinstance(raw_item, dict):
+            continue
+        keyword = normalize_text(raw_item.get("keyword"))
+        slot_id = normalize_text(raw_item.get("slot_id")) or f"slot_{index}"
+        channel = normalize_text(raw_item.get("channel")).lower()
+        if channel == "home":
+            channel = "naver_home"
+        if channel not in {"naver_home", "blog"} or not keyword:
+            continue
+        try:
+            slot_index = max(1, int(raw_item.get("slot_index") or 1))
+        except (TypeError, ValueError):
+            slot_index = 1
+
+        peer_titles = [
+            normalize_text(title)
+            for title in (raw_item.get("peer_titles") if isinstance(raw_item.get("peer_titles"), list) else [])
+            if normalize_text(title)
+        ]
+        issues = [
+            normalize_text(issue)
+            for issue in (raw_item.get("issues") if isinstance(raw_item.get("issues"), list) else [])
+            if normalize_text(issue)
+        ]
+        metrics = raw_item.get("metrics") if isinstance(raw_item.get("metrics"), dict) else {}
+        metric_summary = ", ".join(
+            f"{normalize_text(key)}={_format_metric_value(value)}"
+            for key, value in metrics.items()
+            if normalize_text(key) and _format_metric_value(value)
+        )
+        normalized_items.append(
+            {
+                "slot_id": slot_id,
+                "keyword": keyword,
+                "channel": channel,
+                "slot_index": slot_index,
+                "current_title": normalize_text(raw_item.get("current_title")),
+                "peer_titles": peer_titles[:8],
+                "issues": issues[:5],
+                "score": _coerce_int(raw_item.get("score"), default=0, minimum=0, maximum=100),
+                "source_note": normalize_text(raw_item.get("source_note")),
+                "source_keywords": [
+                    normalize_text(value)
+                    for value in (raw_item.get("source_keywords") if isinstance(raw_item.get("source_keywords"), list) else [])
+                    if normalize_text(value)
+                ][:6],
+                "support_keywords": [
+                    normalize_text(value)
+                    for value in (raw_item.get("support_keywords") if isinstance(raw_item.get("support_keywords"), list) else [])
+                    if normalize_text(value)
+                ][:6],
+                "metrics": metric_summary,
+            }
+        )
+
+    return normalized_items
+
+
+def _build_slot_title_user_prompt(input_items: list[dict[str, Any]]) -> str:
+    item_blocks = "\n\n".join(
+        _format_slot_prompt_item(index + 1, item)
+        for index, item in enumerate(input_items)
+    )
+    return (
+        "Generate or rewrite one Korean title per input item.\n\n"
+        "Return JSON in this exact shape:\n"
+        "{\n"
+        '  "items": [\n'
+        "    {\n"
+        '      "slot_id": "0_home_1",\n'
+        '      "title": "..." \n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        "Rules:\n"
+        "- Return exactly one output item for every input item.\n"
+        "- Preserve the input item order exactly.\n"
+        "- Keep each slot_id identical to the input slot_id.\n"
+        "- Write the title in natural Korean only.\n"
+        "- Do not return commentary, markdown, or code fences.\n\n"
+        f"Input items:\n{item_blocks}"
+    )
+
+
+def _format_slot_prompt_item(index: int, item: dict[str, Any]) -> str:
+    lines = [
+        f"Item {index}",
+        f"- slot_id: {item['slot_id']}",
+        f"- keyword: {item['keyword']}",
+        f"- channel: {item['channel']}",
+        f"- slot_index: {item['slot_index']}",
+    ]
+    if item.get("current_title"):
+        lines.append(f"- current_title: {item['current_title']}")
+    if item.get("peer_titles"):
+        lines.append(f"- peer_titles: {' | '.join(item['peer_titles'])}")
+    if item.get("issues"):
+        lines.append(f"- issues: {' | '.join(item['issues'])}")
+    if "score" in item:
+        lines.append(f"- score: {item['score']}")
+    if item.get("source_note"):
+        lines.append(f"- source_note: {item['source_note']}")
+    if item.get("source_keywords"):
+        lines.append(f"- source_keywords: {', '.join(item['source_keywords'])}")
+    if item.get("support_keywords"):
+        lines.append(f"- support_keywords: {', '.join(item['support_keywords'])}")
+    if item.get("metrics"):
+        lines.append(f"- metrics: {item['metrics']}")
     return "\n".join(lines)
 
 
@@ -1722,28 +1932,155 @@ def _parse_title_items(content: str) -> list[dict[str, Any]]:
     return normalized_items
 
 
+def _parse_slot_title_items(payload: Any) -> list[dict[str, str]]:
+    raw_items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(raw_items, list):
+        raise TitleProviderError("Provider JSON must include an items array.")
+
+    normalized_items: list[dict[str, str]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        slot_id = normalize_text(item.get("slot_id"))
+        title = normalize_text(item.get("title"))
+        if not slot_id or not title:
+            continue
+        normalized_items.append(
+            {
+                "slot_id": slot_id,
+                "title": title,
+            }
+        )
+    return normalized_items
+
+
 def _extract_json_object(content: str) -> Any:
-    fenced = content.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    try:
-        return json.loads(fenced)
-    except json.JSONDecodeError:
-        pass
-
-    start_index = min(
-        [index for index in (content.find("{"), content.find("[")) if index >= 0],
-        default=-1,
+    return _parse_json_with_repairs(
+        content,
+        empty_message="Provider returned empty content.",
+        missing_message="Provider response did not contain JSON.",
+        invalid_message="Provider response contained invalid JSON.",
     )
-    if start_index < 0:
-        raise TitleProviderError("Provider response did not contain JSON.")
 
-    for end_index in range(len(content), start_index, -1):
-        candidate = content[start_index:end_index].strip()
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError:
+
+def _parse_json_with_repairs(
+    raw_text: str,
+    *,
+    empty_message: str,
+    missing_message: str,
+    invalid_message: str,
+) -> Any:
+    normalized_text = normalize_text(str(raw_text or "").replace("\ufeff", ""))
+    if not normalized_text:
+        raise TitleProviderError(empty_message)
+
+    saw_json_shape = False
+    for candidate in _iter_json_candidate_texts(normalized_text):
+        saw_json_shape = True
+        parsed = _try_load_json_candidate(candidate)
+        if parsed is not None:
+            return parsed
+
+    if not saw_json_shape:
+        raise TitleProviderError(missing_message)
+    raise TitleProviderError(invalid_message)
+
+
+def _iter_json_candidate_texts(raw_text: str) -> list[str]:
+    candidates: list[str] = []
+
+    def add_candidate(value: str) -> None:
+        normalized = normalize_text(value)
+        if normalized and ("{" in normalized or "[" in normalized) and normalized not in candidates:
+            candidates.append(normalized)
+
+    add_candidate(raw_text)
+    stripped_fence = _strip_code_fence(raw_text)
+    add_candidate(stripped_fence)
+
+    for base in list(candidates):
+        balanced = _extract_balanced_json_snippet(base)
+        if balanced:
+            add_candidate(balanced)
+
+    repaired_candidates: list[str] = []
+    for candidate in candidates:
+        repaired_candidates.append(candidate)
+        trailing_comma_fixed = _remove_trailing_json_commas(candidate)
+        if trailing_comma_fixed != candidate:
+            repaired_candidates.append(trailing_comma_fixed)
+
+    deduped_candidates: list[str] = []
+    for candidate in repaired_candidates:
+        normalized = normalize_text(candidate)
+        if normalized and normalized not in deduped_candidates:
+            deduped_candidates.append(normalized)
+    return deduped_candidates
+
+
+def _strip_code_fence(raw_text: str) -> str:
+    lines = str(raw_text or "").strip().splitlines()
+    if len(lines) >= 2 and lines[0].strip().startswith("```") and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return str(raw_text or "").strip()
+
+
+def _extract_balanced_json_snippet(raw_text: str) -> str:
+    text = str(raw_text or "")
+    start_candidates = [index for index in (text.find("{"), text.find("[")) if index >= 0]
+    if not start_candidates:
+        return ""
+
+    start_index = min(start_candidates)
+    stack: list[str] = []
+    in_string = False
+    escape_next = False
+    closing_for = {"{": "}", "[": "]"}
+    opening_for = {"}": "{", "]": "["}
+
+    for index in range(start_index, len(text)):
+        char = text[index]
+        if in_string:
+            if escape_next:
+                escape_next = False
+            elif char == "\\":
+                escape_next = True
+            elif char == "\"":
+                in_string = False
             continue
 
-    raise TitleProviderError("Provider response contained invalid JSON.")
+        if char == "\"":
+            in_string = True
+            continue
+
+        if char in closing_for:
+            stack.append(char)
+            continue
+
+        if char in opening_for:
+            if not stack or stack[-1] != opening_for[char]:
+                return ""
+            stack.pop()
+            if not stack:
+                return text[start_index:index + 1].strip()
+
+    return ""
+
+
+def _remove_trailing_json_commas(raw_text: str) -> str:
+    text = str(raw_text or "")
+    while True:
+        updated = re.sub(r",(?=\s*[}\]])", "", text)
+        if updated == text:
+            return updated
+        text = updated
+
+
+def _try_load_json_candidate(candidate: str) -> Any | None:
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
 
 
 def _normalize_title_list(raw_titles: Any, max_length: int | None = None) -> list[str]:

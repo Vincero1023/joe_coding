@@ -8,20 +8,61 @@ from openpyxl import load_workbook
 
 from app.title.ai_client import (
     TitleGenerationOptions,
+    TitleProviderError,
     _build_user_prompt_from_items,
     _resolve_retry_delay_seconds,
+    request_ai_slot_rewrites,
     request_ai_titles,
+    request_ai_json_object,
 )
 from app.title.category_detector import detect_category
 from app.title.evaluation_prompt import DEFAULT_TITLE_EVALUATION_PROMPT
 from app.title.exporter import export_generated_titles
 from app.title.main import run
-from app.title.quality import assess_single_title, enrich_title_results
+from app.title.quality import assess_single_title, enrich_title_results, refresh_title_results_for_changed_slots
 from app.title.quality_ai import TitleEvaluationOptions
+from app.title.quality_ai import _normalize_batch_evaluation_item, request_naver_home_title_evaluations_batch
 from app.title.rules import NAVER_HOME_MAX_LENGTH
 from app.title.targets import _sanitize_related_mode_keyword, build_title_targets
-from app.title.title_generator import _build_practical_rescue_item, _build_quality_retry_prompt, generate_titles
+from app.title.title_generator import (
+    _apply_practical_rescue_candidates,
+    _build_title_evaluation_options,
+    _build_practical_rescue_item,
+    _build_quality_retry_prompt,
+    _collect_retry_slot_candidates,
+    _should_retry_slot,
+    generate_titles,
+)
 from app.title.templates import build_blog_titles, build_naver_home_titles
+
+
+def _build_slot_retry_response(chunk, *, degraded: bool = False) -> list[dict[str, str]]:
+    response: list[dict[str, str]] = []
+    for item in chunk:
+        keyword = str(item.get("keyword") or "").strip()
+        channel = str(item.get("channel") or "").strip()
+        slot_index = int(item.get("slot_index") or 1)
+        if degraded:
+            title = f"{keyword}!!"
+        elif channel == "naver_home":
+            title = (
+                f"{keyword}, 왜 선택 기준이 갈릴까?"
+                if slot_index == 1
+                else f"{keyword}, 지금 비교 포인트 2가지"
+            )
+        else:
+            title = (
+                f"{keyword} 비교 포인트 정리"
+                if slot_index == 1
+                else f"{keyword} 체크리스트 정리"
+            )
+        response.append(
+            {
+                "slot_id": str(item.get("slot_id") or "").strip(),
+                "title": title,
+            }
+        )
+    return response
 
 
 def test_detect_category_handles_finance_keyword() -> None:
@@ -293,7 +334,7 @@ def test_title_quality_exposes_naver_home_ctr_breakdown() -> None:
     assert breakdown["specificity"] >= 5
 
 
-def test_title_quality_penalizes_underdeveloped_naver_home_axis_label() -> None:
+def test_title_quality_flags_underdeveloped_naver_home_axis_label_without_forcing_penalty() -> None:
     weak = assess_single_title(
         "24K금값",
         "24K금값, 환율 영향",
@@ -319,8 +360,36 @@ def test_title_quality_penalizes_underdeveloped_naver_home_axis_label() -> None:
 
     assert weak["checks"]["home_hook_signal"] is False
     assert weak["checks"]["underdeveloped_home_title"] is True
-    assert "상황이나 갈등 없이 축만 제시해 클릭 유인이 약합니다." in weak["issues"]
     assert weak["score"] < hooky["score"]
+
+
+def test_title_quality_does_not_penalize_short_curiosity_naver_home_titles() -> None:
+    report = assess_single_title(
+        "ISA 계좌",
+        "ISA 계좌, 진짜 왜일까?",
+        "naver_home",
+        {},
+    )
+
+    assert report["score_breakdown"]["curiosity_gap"] >= 18
+    assert report["score_breakdown"]["emotional_trigger"] >= 10
+    assert report["score_breakdown"]["readability"] == 5
+    assert report["status"] != "retry"
+
+
+def test_title_quality_strongly_rewards_emotional_question_naver_home_titles() -> None:
+    report = assess_single_title(
+        "ISA 계좌",
+        "ISA 계좌, 의외로 먼저 갈린 이유는 뭘까?",
+        "naver_home",
+        {},
+    )
+
+    breakdown = report["score_breakdown"]
+    assert breakdown["curiosity_gap"] >= 18
+    assert breakdown["reversal_or_unexpected"] >= 12
+    assert breakdown["emotional_trigger"] >= 14
+    assert report["score"] >= 68
 
 
 def test_title_quality_prefers_informational_blog_title_over_vague_hook() -> None:
@@ -534,6 +603,123 @@ def test_enrich_title_results_sorts_best_titles_first_for_output() -> None:
     assert item["titles"]["blog"][0] == "로지텍 마우스 배터리·연결 안정성·추천 대상 정리"
     assert item["quality_report"]["title_checks"]["naver_home"][0]["status"] == "retry"
     assert item["quality_report"]["title_checks"]["blog"][0]["status"] == "good"
+
+
+def test_refresh_title_results_for_changed_slots_only_reassesses_changed_slots() -> None:
+    items = [
+        {
+            "keyword": "alpha mouse",
+            "titles": {
+                "naver_home": ["alpha mouse what changed", "alpha mouse compare point"],
+                "blog": ["alpha mouse buying note", "alpha mouse setup guide"],
+            },
+        }
+    ]
+    current_enriched_items, _ = enrich_title_results(items)
+    updated_items = [
+        {
+            **items[0],
+            "titles": {
+                "naver_home": list(items[0]["titles"]["naver_home"]),
+                "blog": ["alpha mouse condition guide", items[0]["titles"]["blog"][1]],
+            },
+        }
+    ]
+
+    with patch("app.title.quality.assess_single_title", wraps=assess_single_title) as mocked_assess:
+        refreshed_items, summary = refresh_title_results_for_changed_slots(
+            updated_items,
+            current_enriched_items,
+            [
+                {
+                    "result_index": 0,
+                    "channel": "blog",
+                    "slot_index": 1,
+                }
+            ],
+        )
+
+    assert mocked_assess.call_count == 1
+    assert refreshed_items[0]["titles"]["blog"][0] == "alpha mouse condition guide"
+    assert summary["total_count"] == 1
+
+
+def test_refresh_title_results_for_changed_slots_only_batches_changed_naver_home_titles() -> None:
+    items = [
+        {
+            "keyword": "alpha mouse",
+            "titles": {
+                "naver_home": ["alpha mouse what changed", "alpha mouse compare point"],
+                "blog": ["alpha mouse buying note", "alpha mouse setup guide"],
+            },
+        },
+        {
+            "keyword": "beta mouse",
+            "titles": {
+                "naver_home": ["beta mouse what changed", "beta mouse compare point"],
+                "blog": ["beta mouse buying note", "beta mouse setup guide"],
+            },
+        },
+    ]
+    current_enriched_items, _ = enrich_title_results(items)
+    updated_items = [
+        {
+            **items[0],
+            "titles": {
+                "naver_home": [items[0]["titles"]["naver_home"][0], "alpha mouse which choice changed"],
+                "blog": list(items[0]["titles"]["blog"]),
+            },
+        },
+        items[1],
+    ]
+    evaluation_options = TitleEvaluationOptions(
+        provider="openai",
+        model="gpt-4o-mini",
+        api_key="openai-key",
+        system_prompt="custom eval prompt",
+        batch_size=20,
+    )
+    captured_entries: list[dict[str, str]] = []
+
+    def fake_request(entries, options):
+        captured_entries.extend(entries)
+        return {
+            0: {
+                "title": entries[0]["title"],
+                "score_breakdown": {
+                    "issue_or_context": 13,
+                    "curiosity_gap": 15,
+                    "contrast_or_conflict": 14,
+                    "reversal_or_unexpected": 12,
+                    "emotional_trigger": 11,
+                    "specificity": 13,
+                    "readability": 12,
+                    "total": 90,
+                },
+                "score": 90,
+                "verdict": "keep",
+                "reason": "CTR 기준 통과",
+            }
+        }
+
+    with patch("app.title.quality.request_naver_home_title_evaluations_batch", side_effect=fake_request):
+        refreshed_items, summary = refresh_title_results_for_changed_slots(
+            updated_items,
+            current_enriched_items,
+            [
+                {
+                    "result_index": 0,
+                    "channel": "naver_home",
+                    "slot_index": 2,
+                }
+            ],
+            evaluation_options=evaluation_options,
+        )
+
+    assert len(captured_entries) == 1
+    assert captured_entries[0]["title"] == "alpha mouse which choice changed"
+    assert refreshed_items[0]["titles"]["naver_home"][0] == "alpha mouse which choice changed"
+    assert summary["total_count"] == 2
 
 
 def test_title_quality_retries_unverified_freshness_claim_without_issue_context() -> None:
@@ -1148,7 +1334,10 @@ def test_request_ai_titles_includes_live_issue_context_in_prompt() -> None:
     ), patch(
         "app.title.ai_client._request_openai_titles",
         return_value=[],
-    ) as mocked_request:
+    ) as mocked_request, patch(
+        "app.title.title_generator.request_ai_slot_rewrites",
+        side_effect=lambda chunk, options: _build_slot_retry_response(chunk),
+    ):
         request_ai_titles([{"keyword": "서울 청약 경쟁률"}], options)
 
     prompt = mocked_request.call_args.args[0]
@@ -1189,7 +1378,28 @@ def test_request_ai_titles_includes_selected_community_reaction_in_prompt() -> N
     ), patch(
         "app.title.ai_client._request_openai_titles",
         return_value=[],
-    ) as mocked_request:
+    ) as mocked_request, patch(
+        "app.title.title_generator.request_ai_slot_rewrites",
+        side_effect=[
+            _build_slot_retry_response(
+                [
+                    {"slot_id": "0_home_1", "keyword": keyword, "channel": "naver_home", "slot_index": 1},
+                    {"slot_id": "0_home_2", "keyword": keyword, "channel": "naver_home", "slot_index": 2},
+                    {"slot_id": "0_blog_1", "keyword": keyword, "channel": "blog", "slot_index": 1},
+                    {"slot_id": "0_blog_2", "keyword": keyword, "channel": "blog", "slot_index": 2},
+                ],
+                degraded=True,
+            ),
+            _build_slot_retry_response(
+                [
+                    {"slot_id": "0_home_1", "keyword": keyword, "channel": "naver_home", "slot_index": 1},
+                    {"slot_id": "0_home_2", "keyword": keyword, "channel": "naver_home", "slot_index": 2},
+                    {"slot_id": "0_blog_1", "keyword": keyword, "channel": "blog", "slot_index": 1},
+                    {"slot_id": "0_blog_2", "keyword": keyword, "channel": "blog", "slot_index": 2},
+                ]
+            ),
+        ],
+    ):
         request_ai_titles([{"keyword": "보험 추천"}], options)
 
     prompt = mocked_request.call_args.args[0]
@@ -1239,6 +1449,143 @@ def test_request_ai_titles_supports_vertex_provider() -> None:
     assert "key=vertex-key" in called_url
     assert called_headers["Content-Type"] == "application/json"
     assert result[0]["keyword"] == "보험 추천"
+
+
+def test_request_ai_titles_recovers_from_vertex_trailing_comma_json() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "vertex",
+                "api_key": "vertex-key",
+                "model": "gemini-2.5-flash-lite",
+            }
+        }
+    )
+
+    malformed_payload = """```json
+{
+  "items": [
+    {
+      "keyword": "보험 추천",
+      "naver_home": ["보험 추천 비교 포인트", "보험 추천 선택 기준"],
+      "blog": ["보험 추천 가이드", "보험 추천 체크포인트"],
+    },
+  ],
+}
+```"""
+
+    with patch(
+        "app.title.ai_client._post_json",
+        return_value={
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "text": malformed_payload
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+    ):
+        result = request_ai_titles([{"keyword": "보험 추천"}], options)
+
+    assert result[0]["keyword"] == "보험 추천"
+    assert len(result[0]["titles"]["naver_home"]) == 2
+    assert len(result[0]["titles"]["blog"]) == 2
+
+
+def test_request_ai_json_object_recovers_from_trailing_comma_json() -> None:
+    malformed_payload = """```json
+{
+  "score": {
+    "issue_or_context": 18,
+    "curiosity_gap": 16,
+    "contrast_or_tension": 12,
+    "reversal_or_unexpected": 10,
+    "emotional_trigger": 11,
+    "clarity": 9,
+    "readability": 4,
+    "total": 80,
+  },
+  "verdict": "keep",
+  "reason": "CTR 기준 통과",
+  "rewritten_title": "",
+}
+```"""
+
+    with patch(
+        "app.title.ai_client._post_json",
+        return_value={
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "text": malformed_payload
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+    ):
+        result = request_ai_json_object(
+            provider="vertex",
+            api_key="vertex-key",
+            model="gemini-2.5-flash-lite",
+            system_prompt="Return JSON only.",
+            user_prompt="Evaluate this title.",
+        )
+
+    assert result["verdict"] == "keep"
+    assert result["score"]["total"] == 80
+
+
+def test_generate_titles_retries_by_splitting_chunk_on_invalid_json() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "vertex",
+                "api_key": "vertex-key",
+                "model": "gemini-2.5-flash-lite",
+                "fallback_to_template": False,
+                "batch_size": 20,
+                "auto_retry_enabled": False,
+            }
+        }
+    )
+    items = [
+        {"keyword": "보험 추천"},
+        {"keyword": "실비보험 비교"},
+    ]
+    requested_chunk_sizes: list[int] = []
+
+    def fake_request(chunk, options):
+        requested_chunk_sizes.append(len(chunk))
+        if len(chunk) > 1:
+            raise TitleProviderError("Provider response contained invalid JSON.")
+        keyword = chunk[0]["keyword"]
+        return [
+            {
+                "keyword": keyword,
+                "titles": {
+                    "naver_home": [f"{keyword} 지금 왜 다를까", f"{keyword} 선택 기준은"],
+                    "blog": [f"{keyword} 핵심 정리", f"{keyword} 비교 가이드"],
+                },
+            }
+        ]
+
+    with patch("app.title.title_generator.request_ai_titles", side_effect=fake_request):
+        generated, meta = generate_titles(items, options=options)
+
+    assert [item["keyword"] for item in generated] == ["보험 추천", "실비보험 비교"]
+    assert meta["used_mode"] == "ai"
+    assert requested_chunk_sizes == [2, 1, 1]
 
 
 def test_resolve_retry_delay_seconds_reads_provider_hint() -> None:
@@ -1318,6 +1665,13 @@ def test_title_generation_options_parse_quality_retry_settings() -> None:
 
     assert options.auto_retry_enabled is False
     assert options.quality_retry_threshold == 92
+
+
+def test_title_generation_options_default_quality_retry_settings_are_relaxed() -> None:
+    options = TitleGenerationOptions.from_input({"title_options": {"mode": "ai"}})
+
+    assert options.auto_retry_enabled is False
+    assert options.quality_retry_threshold == 75
 
 
 def test_title_export_queue_filters_retry_items_by_default(tmp_path: Path) -> None:
@@ -1511,7 +1865,7 @@ def test_title_generator_keeps_custom_quality_retry_threshold_without_extra_retr
 
     assert mocked_request.call_count == 1
     assert result["generation_meta"]["quality_retry_threshold"] == 95
-    assert result["generation_meta"]["auto_retry"]["retry_threshold"] == 84
+    assert result["generation_meta"]["auto_retry"]["retry_threshold"] == 95
     assert result["generation_meta"]["auto_retry"]["attempted_count"] == 0
     assert result["generation_meta"]["auto_retry"]["accepted_count"] == 0
     assert result["generated_titles"][0]["quality_report"]["recommended_pair_ready"] is False
@@ -1522,7 +1876,10 @@ def test_title_quality_retry_prompt_includes_naver_home_ctr_guidance() -> None:
 
     assert "evaluate CTR first, not SEO" in prompt
     assert "Do not penalize a naver_home title just because it is phrased as a question" in prompt
+    assert "Strong positive CTR signals include question-led hooks" in prompt
     assert "Do not penalize repeated question patterns" in prompt
+    assert "stays short" in prompt
+    assert "low explicit information density" in prompt
     assert "Do penalize purely informational naver_home titles" in prompt
     assert "Do not use SEO or blog criteria" in prompt
 
@@ -1578,12 +1935,12 @@ def test_title_generator_auto_retries_low_quality_ai_titles() -> None:
             }
         )
 
-    assert mocked_request.call_count == 2
+    assert mocked_request.call_count == 1
     assert result["generation_meta"]["auto_retry"]["attempted_count"] == 1
     assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
     assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is False
     assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 75
-    assert result["generation_meta"]["model_escalation"]["triggered"] is False
+    assert result["generation_meta"]["model_escalation"]["triggered"] is True
 
 
 def test_title_generator_skips_auto_retry_when_recommended_pair_is_already_ready() -> None:
@@ -1705,7 +2062,7 @@ def test_title_generator_preserves_full_keyword_after_failed_retries() -> None:
     item = result["generated_titles"][0]
     all_titles = item["titles"]["naver_home"] + item["titles"]["blog"]
 
-    assert mocked_request.call_count == 3
+    assert mocked_request.call_count == 1
     assert result["generation_meta"]["auto_retry"]["attempted_count"] == 1
     assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
     assert result["generation_meta"]["model_escalation"]["triggered"] is True
@@ -1866,6 +2223,92 @@ def test_practical_rescue_builds_concrete_generic_stay_single_titles() -> None:
     )
 
 
+def test_practical_rescue_uses_partial_slot_refresh_without_full_enrich() -> None:
+    keyword = "alpha beta"
+    current_results = [
+        {
+            "keyword": keyword,
+            "titles": {
+                "naver_home": [keyword, keyword],
+                "blog": [keyword, keyword],
+            },
+        }
+    ]
+    current_enriched_results, _ = enrich_title_results(current_results)
+    rescue_item = {
+        "keyword": keyword,
+        "titles": {
+            "naver_home": [
+                f"{keyword}, 지금 갈리는 기준은?",
+                f"{keyword}, 비교 포인트 2가지",
+            ],
+            "blog": [
+                f"{keyword} 비교 기준 정리",
+                f"{keyword} 조건별 선택 기준 설명",
+            ],
+        },
+    }
+
+    with patch(
+        "app.title.title_generator._build_practical_rescue_item",
+        return_value=rescue_item,
+    ), patch(
+        "app.title.title_generator.enrich_title_results",
+        side_effect=AssertionError("full enrich should not be called"),
+    ):
+        rescued_results, rescued_enriched_results, quality_summary, accepted_keywords = _apply_practical_rescue_candidates(
+            current_results=current_results,
+            current_enriched_results=current_enriched_results,
+            original_items_by_keyword={keyword: current_results[0]},
+            retry_threshold=75,
+            retry_attempt_counts={},
+            recent_batch_size=20,
+            max_slot_rewrite_attempts=2,
+        )
+
+    assert accepted_keywords == [keyword]
+    assert rescued_results[0]["titles"]["naver_home"][0] != keyword
+    assert rescued_enriched_results[0]["quality_report"]["bundle_score"] >= current_enriched_results[0]["quality_report"]["bundle_score"]
+    assert quality_summary["total_count"] == 1
+
+
+def test_practical_rescue_skips_slots_that_reached_retry_limit() -> None:
+    keyword = "alpha beta"
+    current_results = [
+        {
+            "keyword": keyword,
+            "titles": {
+                "naver_home": [keyword, keyword],
+                "blog": [keyword, keyword],
+            },
+        }
+    ]
+    current_enriched_results, quality_summary = enrich_title_results(current_results)
+    retry_attempt_counts = {
+        "0_home_1": 2,
+        "0_home_2": 2,
+        "0_blog_1": 2,
+        "0_blog_2": 2,
+    }
+
+    with patch("app.title.title_generator._build_practical_rescue_item") as mocked_build_rescue_item:
+        rescued_results, rescued_enriched_results, rescued_summary, accepted_keywords = _apply_practical_rescue_candidates(
+            current_results=current_results,
+            current_enriched_results=current_enriched_results,
+            original_items_by_keyword={keyword: current_results[0]},
+            retry_threshold=75,
+            retry_attempt_counts=retry_attempt_counts,
+            recent_batch_size=20,
+            max_slot_rewrite_attempts=2,
+        )
+
+    assert mocked_build_rescue_item.call_count == 0
+    assert rescued_results == current_results
+    assert rescued_enriched_results == current_enriched_results
+    assert rescued_summary == quality_summary
+    assert accepted_keywords == []
+
+
 def test_title_generator_escalates_model_after_two_failed_quality_attempts() -> None:
     """
     with patch(
@@ -1945,42 +2388,37 @@ def test_title_generator_escalates_model_after_two_failed_quality_attempts() -> 
 
     with patch(
         "app.title.title_generator.request_ai_titles",
-        side_effect=[
-            [
-                {
-                    "keyword": keyword,
-                    "titles": {
-                        "naver_home": [keyword, keyword],
-                        "blog": [keyword, keyword],
-                    },
-                }
-            ],
-            [
-                {
-                    "keyword": keyword,
-                    "titles": {
-                        "naver_home": [f"{keyword}!!", f"{keyword}!!"],
-                        "blog": [f"{keyword}!!", f"{keyword}!!"],
-                    },
-                }
-            ],
-            [
-                {
-                    "keyword": keyword,
-                    "titles": {
-                        "naver_home": [
-                            f"{keyword} compare 2 options",
-                            f"{keyword} choice checklist",
-                        ],
-                        "blog": [
-                            f"{keyword} compare guide",
-                            f"{keyword} signup checklist",
-                        ],
-                    },
-                }
-            ],
+        return_value=[
+            {
+                "keyword": keyword,
+                "titles": {
+                    "naver_home": [keyword, keyword],
+                    "blog": [keyword, keyword],
+                },
+            }
         ],
-    ) as mocked_request:
+    ) as mocked_request, patch(
+        "app.title.title_generator.request_ai_slot_rewrites",
+        side_effect=[
+            _build_slot_retry_response(
+                [
+                    {"slot_id": "0_home_1", "keyword": keyword, "channel": "naver_home", "slot_index": 1},
+                    {"slot_id": "0_home_2", "keyword": keyword, "channel": "naver_home", "slot_index": 2},
+                    {"slot_id": "0_blog_1", "keyword": keyword, "channel": "blog", "slot_index": 1},
+                    {"slot_id": "0_blog_2", "keyword": keyword, "channel": "blog", "slot_index": 2},
+                ],
+                degraded=True,
+            ),
+            _build_slot_retry_response(
+                [
+                    {"slot_id": "0_home_1", "keyword": keyword, "channel": "naver_home", "slot_index": 1},
+                    {"slot_id": "0_home_2", "keyword": keyword, "channel": "naver_home", "slot_index": 2},
+                    {"slot_id": "0_blog_1", "keyword": keyword, "channel": "blog", "slot_index": 1},
+                    {"slot_id": "0_blog_2", "keyword": keyword, "channel": "blog", "slot_index": 2},
+                ]
+            ),
+        ],
+    ) as mocked_slot_request:
         result = run(
             {
                 "selected_keywords": [
@@ -1999,12 +2437,12 @@ def test_title_generator_escalates_model_after_two_failed_quality_attempts() -> 
             }
         )
 
-    assert mocked_request.call_count == 3
+    assert mocked_request.call_count == 1
     assert mocked_request.call_args_list[0].kwargs["options"].model == "gpt-4o-mini"
-    assert mocked_request.call_args_list[1].kwargs["options"].model == "gpt-4o-mini"
-    assert mocked_request.call_args_list[2].kwargs["options"].model == "gpt-4.1-mini"
+    assert mocked_slot_request.call_args_list[0].kwargs["options"].model == "gpt-4o-mini"
+    assert mocked_slot_request.call_args_list[1].kwargs["options"].model == "gpt-4.1-mini"
     assert result["generation_meta"]["auto_retry"]["attempted_count"] == 1
-    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 0
+    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
     assert result["generation_meta"]["model_escalation"]["enabled"] is True
     assert result["generation_meta"]["model_escalation"]["triggered"] is True
     assert result["generation_meta"]["model_escalation"]["source_model"] == "gpt-4o-mini"
@@ -2029,27 +2467,19 @@ def test_title_generator_quality_retry_preserves_prompt_context() -> None:
     )
     with patch(
         "app.title.title_generator.request_ai_titles",
-        side_effect=[
-            [
-                {
-                    "keyword": "서울 청약 경쟁률",
-                    "titles": {
-                        "naver_home": ["서울 청약 경쟁률", "서울 청약 경쟁률"],
-                        "blog": ["서울 청약 경쟁률", "서울 청약 경쟁률"],
-                    },
-                }
-            ],
-            [
-                {
-                    "keyword": "서울 청약 경쟁률",
-                    "titles": {
-                        "naver_home": ["서울 청약 경쟁률 이번주 비교 포인트", "서울 청약 경쟁률 왜 달라졌나"],
-                        "blog": ["서울 청약 경쟁률 체크포인트", "서울 청약 경쟁률 이슈 정리"],
-                    },
-                }
-            ],
+        return_value=[
+            {
+                "keyword": "서울 청약 경쟁률",
+                "titles": {
+                    "naver_home": ["서울 청약 경쟁률", "서울 청약 경쟁률"],
+                    "blog": ["서울 청약 경쟁률", "서울 청약 경쟁률"],
+                },
+            }
         ],
-    ) as mocked_request:
+    ) as mocked_request, patch(
+        "app.title.title_generator.request_ai_slot_rewrites",
+        side_effect=lambda chunk, options: _build_slot_retry_response(chunk),
+    ) as mocked_slot_request:
         generate_titles(
             [
                 {
@@ -2064,16 +2494,292 @@ def test_title_generator_quality_retry_preserves_prompt_context() -> None:
             options=options,
         )
 
-    assert mocked_request.call_count == 2
-    retry_chunk = mocked_request.call_args_list[1].args[0]
-    retry_options = mocked_request.call_args_list[1].kwargs["options"]
+    assert mocked_request.call_count == 1
+    assert mocked_slot_request.call_count == 1
+    retry_chunk = mocked_slot_request.call_args.args[0]
+    retry_options = mocked_slot_request.call_args.kwargs["options"]
 
     assert retry_chunk[0]["keyword"] == "서울 청약 경쟁률"
-    assert retry_chunk[0]["score"] == 77.0
+    assert retry_chunk[0]["score"] > 0
     assert retry_chunk[0]["metrics"]["volume"] == 1250.0
     assert retry_chunk[0]["source_note"] == "최근 청약 일정과 경쟁률 흐름 확인용"
     assert "home-feed pair issue-aware" in retry_options.system_prompt
     assert "Do not invent unsupported dates, numbers, rankings, or official changes" in retry_options.system_prompt
+
+
+def test_collect_retry_slot_candidates_adds_recent_batch_peer_titles_from_other_keywords() -> None:
+    current_results = [
+        {
+            "keyword": "alpha mouse",
+            "titles": {
+                "naver_home": ["alpha mouse what changed", "alpha mouse compare point"],
+                "blog": ["alpha mouse buying note", "alpha mouse setup guide"],
+            },
+        },
+        {
+            "keyword": "beta mouse",
+            "titles": {
+                "naver_home": ["beta mouse what changed", "beta mouse compare point"],
+                "blog": ["beta mouse buying note", "beta mouse setup guide"],
+            },
+        },
+    ]
+    current_enriched_results = [
+        {
+            "keyword": item["keyword"],
+            "quality_report": {
+                "retry_recommended": True,
+                "bundle_score": 61,
+                "title_checks": {
+                    "naver_home": [
+                        {"title": item["titles"]["naver_home"][0], "score": 61, "status": "retry", "issues": ["flat"]},
+                        {"title": item["titles"]["naver_home"][1], "score": 60, "status": "retry", "issues": ["flat"]},
+                    ],
+                    "blog": [
+                        {"title": item["titles"]["blog"][0], "score": 59, "status": "retry", "issues": ["flat"]},
+                        {"title": item["titles"]["blog"][1], "score": 58, "status": "retry", "issues": ["flat"]},
+                    ],
+                },
+            },
+        }
+        for item in current_results
+    ]
+
+    retry_candidates = _collect_retry_slot_candidates(
+        current_results,
+        current_enriched_results,
+        retry_threshold=75,
+        recent_batch_size=20,
+    )
+
+    candidate = next(item for item in retry_candidates if item["slot_id"] == "0_home_1")
+    assert candidate["peer_titles"][:3] == [
+        "alpha mouse compare point",
+        "alpha mouse buying note",
+        "alpha mouse setup guide",
+    ]
+    assert len(candidate["peer_titles"]) == 7
+    assert any(
+        title in candidate["peer_titles"][3:]
+        for title in (
+            "beta mouse what changed",
+            "beta mouse compare point",
+            "beta mouse buying note",
+            "beta mouse setup guide",
+        )
+    )
+
+
+def test_should_retry_slot_blocks_home_retry_for_ctr_hooks_and_short_titles() -> None:
+    assert _should_retry_slot(
+        {
+            "score": 66,
+            "score_breakdown": {"total": 66},
+        },
+        75,
+        channel_name="naver_home",
+        title="alpha card why now?",
+    ) is False
+    assert _should_retry_slot(
+        {
+            "score": 69,
+            "score_breakdown": {
+                "total": 69,
+                "emotional_trigger": 12,
+            },
+        },
+        75,
+        channel_name="naver_home",
+        title="alpha card shock point",
+    ) is False
+    assert _should_retry_slot(
+        {
+            "score": 69,
+            "score_breakdown": {"total": 69},
+        },
+        75,
+        channel_name="naver_home",
+        title="alpha card short",
+    ) is False
+
+
+def test_collect_retry_slot_candidates_only_keeps_home_slots_below_new_gate() -> None:
+    current_results = [
+        {
+            "keyword": "alpha card",
+            "titles": {
+                "naver_home": [
+                    "alpha card what changed",
+                    "alpha card why now?",
+                ],
+                "blog": [
+                    "alpha card compare guide",
+                    "alpha card checklist",
+                ],
+            },
+        }
+    ]
+    current_enriched_results = [
+        {
+            "keyword": "alpha card",
+            "quality_report": {
+                "retry_recommended": True,
+                "bundle_score": 71,
+                "title_checks": {
+                    "naver_home": [
+                        {
+                            "title": "alpha card what changed",
+                            "score": 74,
+                            "status": "retry",
+                            "issues": ["needs stronger CTR"],
+                            "score_breakdown": {
+                                "issue_or_context": 16,
+                                "curiosity_gap": 0,
+                                "contrast_or_conflict": 0,
+                                "total": 74,
+                            },
+                        },
+                        {
+                            "title": "alpha card why now?",
+                            "score": 66,
+                            "status": "retry",
+                            "issues": ["question hook already present"],
+                            "score_breakdown": {
+                                "issue_or_context": 10,
+                                "curiosity_gap": 10,
+                                "contrast_or_conflict": 0,
+                                "total": 66,
+                            },
+                        },
+                    ],
+                    "blog": [
+                        {
+                            "title": "alpha card compare guide",
+                            "score": 72,
+                            "status": "retry",
+                            "issues": ["soft issue"],
+                            "score_breakdown": {"total": 72},
+                        },
+                        {
+                            "title": "alpha card checklist",
+                            "score": 78,
+                            "status": "keep",
+                            "issues": [],
+                            "score_breakdown": {"total": 78},
+                        },
+                    ],
+                },
+            },
+        }
+    ]
+
+    retry_candidates = _collect_retry_slot_candidates(
+        current_results,
+        current_enriched_results,
+        retry_threshold=75,
+        recent_batch_size=20,
+    )
+
+    assert [candidate["slot_id"] for candidate in retry_candidates] == ["0_home_1"]
+
+
+def test_request_ai_slot_rewrites_keeps_extended_peer_titles_in_prompt() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "openai",
+                "api_key": "test-key",
+                "model": "gpt-4.1-mini",
+            }
+        }
+    )
+    captured: dict[str, str] = {}
+
+    def fake_request_ai_json_object(**kwargs):
+        captured["user_prompt"] = kwargs["user_prompt"]
+        return {
+            "items": [
+                {
+                    "slot_id": "0_home_1",
+                    "title": "alpha mouse, which choice changed now",
+                }
+            ]
+        }
+
+    peer_titles = [
+        "alpha mouse compare point",
+        "alpha mouse buying note",
+        "alpha mouse setup guide",
+        "beta mouse what changed",
+        "beta mouse compare point",
+        "beta mouse buying note",
+        "beta mouse setup guide",
+    ]
+
+    with patch("app.title.ai_client.request_ai_json_object", side_effect=fake_request_ai_json_object):
+        request_ai_slot_rewrites(
+            [
+                {
+                    "slot_id": "0_home_1",
+                    "keyword": "alpha mouse",
+                    "channel": "naver_home",
+                    "slot_index": 1,
+                    "current_title": "alpha mouse what changed",
+                    "peer_titles": peer_titles,
+                    "issues": ["flat"],
+                    "score": 61,
+                }
+            ],
+            options,
+        )
+
+    assert "peer_titles:" in captured["user_prompt"]
+    for title in peer_titles:
+        assert title in captured["user_prompt"]
+
+
+def test_request_ai_slot_rewrites_includes_zero_score_in_prompt() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "openai",
+                "api_key": "test-key",
+                "model": "gpt-4.1-mini",
+            }
+        }
+    )
+    captured: dict[str, str] = {}
+
+    def fake_request_ai_json_object(**kwargs):
+        captured["user_prompt"] = kwargs["user_prompt"]
+        return {
+            "items": [
+                {
+                    "slot_id": "0_blog_1",
+                    "title": "alpha mouse setup guide",
+                }
+            ]
+        }
+
+    with patch("app.title.ai_client.request_ai_json_object", side_effect=fake_request_ai_json_object):
+        request_ai_slot_rewrites(
+            [
+                {
+                    "slot_id": "0_blog_1",
+                    "keyword": "alpha mouse",
+                    "channel": "blog",
+                    "slot_index": 1,
+                    "current_title": "alpha mouse",
+                    "issues": ["too vague"],
+                    "score": 0,
+                }
+            ],
+            options,
+        )
+
+    assert "- score: 0" in captured["user_prompt"]
 
 
 def test_title_service_reuses_existing_serp_issue_context() -> None:
@@ -2827,6 +3533,24 @@ def test_title_generation_options_default_batch_size_is_twenty() -> None:
     assert options.batch_size == 20
 
 
+def test_title_generation_builds_sampled_home_evaluation_options_by_default() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key": "openai-key",
+            }
+        }
+    )
+
+    evaluation_options = _build_title_evaluation_options(options)
+
+    assert evaluation_options.sample_ratio == 0.15
+    assert evaluation_options.max_sampled_items == 2
+
+
 def test_title_quality_batches_home_evaluations_across_items() -> None:
     items = [
         {
@@ -2949,43 +3673,244 @@ def test_title_quality_batches_home_evaluations_across_items() -> None:
     assert enriched_items[1]["quality_report"]["title_checks"]["naver_home"][1]["checks"]["ai_evaluated"] is True
 
 
+def test_title_quality_samples_only_top_home_candidates_for_ai_evaluation() -> None:
+    items = [
+        {
+            "keyword": f"keyword {index}",
+            "titles": {
+                "naver_home": [
+                    f"keyword {index} 왜 다를까",
+                    f"keyword {index} 뭐가 갈렸을까",
+                ],
+                "blog": [
+                    f"keyword {index} 비교 가이드",
+                    f"keyword {index} 체크리스트",
+                ],
+            },
+        }
+        for index in range(1, 6)
+    ]
+
+    with patch(
+        "app.title.quality_ai.request_ai_json_object",
+        return_value={
+            "items": [
+                {
+                    "index": 0,
+                    "keyword": "keyword 1",
+                    "title": "keyword 1 왜 다를까",
+                    "score": {"total": 70},
+                    "verdict": "keep",
+                    "reason": "CTR ok",
+                },
+                {
+                    "index": 1,
+                    "keyword": "keyword 1",
+                    "title": "keyword 1 뭐가 갈렸을까",
+                    "score": {"total": 72},
+                    "verdict": "keep",
+                    "reason": "CTR ok",
+                },
+            ]
+        },
+    ) as mocked_request:
+        enriched_items, _summary = enrich_title_results(
+            items,
+            evaluation_options=TitleEvaluationOptions(
+                provider="openai",
+                model="gpt-4o-mini",
+                api_key="openai-key",
+                system_prompt="custom eval prompt",
+                sample_ratio=0.2,
+                max_sampled_items=1,
+            ),
+        )
+
+    assert mocked_request.call_count == 1
+    assert enriched_items[0]["quality_report"]["title_checks"]["naver_home"][0]["checks"]["ai_evaluated"] is True
+    assert enriched_items[1]["quality_report"]["title_checks"]["naver_home"][0]["checks"]["ai_evaluated"] is False
+
+
+def test_title_quality_evaluation_splits_large_provider_requests_and_uses_fast_timeout() -> None:
+    entries = [
+        {
+            "keyword": "insurance plan",
+            "title": f"insurance plan title {index}",
+        }
+        for index in range(25)
+    ]
+    captured_kwargs: list[dict[str, object]] = []
+
+    with patch(
+        "app.title.quality_ai.request_ai_json_object",
+        side_effect=lambda **kwargs: captured_kwargs.append(kwargs) or {"items": []},
+    ):
+        evaluations = request_naver_home_title_evaluations_batch(
+            entries,
+            TitleEvaluationOptions(
+                provider="openai",
+                model="gpt-4o-mini",
+                api_key="openai-key",
+                system_prompt="custom eval prompt",
+                request_batch_size=10,
+                request_timeout_seconds=10.0,
+                max_retries=0,
+            ),
+        )
+
+    assert evaluations == {}
+    assert len(captured_kwargs) == 6
+    assert all(call["request_timeout_seconds"] == 10.0 for call in captured_kwargs)
+    assert all(call["max_retries"] == 0 for call in captured_kwargs)
+
+
+def test_title_quality_evaluation_defaults_to_smaller_batches_and_longer_timeout() -> None:
+    options = TitleEvaluationOptions(
+        provider="openai",
+        model="gpt-4o-mini",
+        api_key="openai-key",
+        system_prompt="custom eval prompt",
+    )
+
+    assert options.request_batch_size == 6
+    assert options.request_timeout_seconds == 20.0
+
+
+def test_title_quality_evaluation_rescues_single_entry_after_full_batch_failure() -> None:
+    entries = [
+        {
+            "keyword": "insurance plan",
+            "title": "insurance plan why now",
+        },
+        {
+            "keyword": "card benefit",
+            "title": "card benefit what changed",
+        },
+    ]
+    captured_kwargs: list[dict[str, object]] = []
+    call_count = 0
+
+    def fake_request(**kwargs: object) -> dict[str, object]:
+        nonlocal call_count
+        call_count += 1
+        captured_kwargs.append(kwargs)
+        if call_count == 1:
+            raise RuntimeError("batch timeout")
+        return {
+            "items": [
+                {
+                    "index": 0,
+                    "keyword": "insurance plan",
+                    "title": "insurance plan why now",
+                    "score": {"total": 70},
+                    "verdict": "keep",
+                    "reason": "CTR ok",
+                }
+            ]
+        }
+
+    with patch("app.title.quality_ai.request_ai_json_object", side_effect=fake_request):
+        evaluations = request_naver_home_title_evaluations_batch(
+            entries,
+            TitleEvaluationOptions(
+                provider="openai",
+                model="gpt-4o-mini",
+                api_key="openai-key",
+                system_prompt="custom eval prompt",
+            ),
+        )
+
+    assert evaluations[0]["score"] == 70
+    assert len(captured_kwargs) == 2
+    assert all(call["request_timeout_seconds"] == 20.0 for call in captured_kwargs)
+
+
+def test_batch_evaluation_normalizer_keeps_home_titles_in_soft_keep_band() -> None:
+    keep_item = _normalize_batch_evaluation_item(
+        {
+            "index": 0,
+            "keyword": "insurance plan",
+            "title": "insurance plan why now",
+            "score": {"total": 68},
+            "verdict": "rewrite",
+            "reason": "soft keep",
+        }
+    )
+    high_keep_item = _normalize_batch_evaluation_item(
+        {
+            "index": 1,
+            "keyword": "insurance plan",
+            "title": "insurance plan compare point",
+            "score": {"total": 80},
+            "verdict": "rewrite",
+            "reason": "soft keep",
+        }
+    )
+    rewrite_item = _normalize_batch_evaluation_item(
+        {
+            "index": 2,
+            "keyword": "insurance plan",
+            "title": "insurance plan latest update",
+            "score": {"total": 67},
+            "verdict": "keep",
+            "reason": "rewrite",
+        }
+    )
+
+    assert keep_item["verdict"] == "keep"
+    assert high_keep_item["verdict"] == "keep"
+    assert rewrite_item["verdict"] == "rewrite"
+
+
+def test_assess_single_title_keeps_naver_home_scores_in_soft_keep_band() -> None:
+    report = assess_single_title(
+        "insurance plan",
+        "insurance plan why now",
+        "naver_home",
+        {},
+        ai_evaluation={
+            "score": 68,
+            "score_breakdown": {
+                "issue_or_context": 18,
+                "curiosity_gap": 16,
+                "contrast_or_conflict": 10,
+                "reversal_or_unexpected": 8,
+                "emotional_trigger": 7,
+                "specificity": 8,
+                "readability": 5,
+                "total": 68,
+            },
+            "verdict": "keep",
+            "reason": "soft keep band",
+        },
+    )
+
+    assert report["status"] == "keep"
+    assert report["checks"]["ai_rewrite_recommended"] is False
+
+
 def test_title_generator_batches_retry_candidates_with_batch_size_twenty() -> None:
     keywords = [f"보험 추천 {index}" for index in range(1, 6)]
 
     with patch(
         "app.title.title_generator.request_ai_titles",
-        side_effect=[
-            [
-                {
-                    "keyword": keyword,
-                    "titles": {
-                        "naver_home": [keyword, keyword],
-                        "blog": [
-                            f"{keyword} 비교 포인트 정리",
-                            f"{keyword} 가입 체크리스트",
-                        ],
-                    },
-                }
-                for keyword in keywords
-            ],
-            [
-                {
-                    "keyword": keyword,
-                    "titles": {
-                        "naver_home": [
-                            f"{keyword}, 왜 선택 기준이 갈릴까?",
-                            f"{keyword}, 지금 비교 포인트 2가지",
-                        ],
-                        "blog": [
-                            f"{keyword} 비교 포인트 정리",
-                            f"{keyword} 가입 체크리스트",
-                        ],
-                    },
-                }
-                for keyword in keywords
-            ],
+        return_value=[
+            {
+                "keyword": keyword,
+                "titles": {
+                    "naver_home": [keyword, keyword],
+                    "blog": [
+                        f"{keyword} 비교 포인트 정리",
+                        f"{keyword} 가입 체크리스트",
+                    ],
+                },
+            }
+            for keyword in keywords
         ],
-    ) as mocked_request:
+    ) as mocked_request, patch(
+        "app.title.title_generator.request_ai_slot_rewrites",
+        side_effect=lambda chunk, options: _build_slot_retry_response(chunk),
+    ) as mocked_slot_request:
         result = run(
             {
                 "selected_keywords": [
@@ -3006,10 +3931,73 @@ def test_title_generator_batches_retry_candidates_with_batch_size_twenty() -> No
             }
         )
 
-    assert mocked_request.call_count == 2
+    assert mocked_request.call_count == 1
+    assert mocked_slot_request.call_count == 1
     assert mocked_request.call_args_list[0].kwargs["options"].batch_size == 20
-    assert mocked_request.call_args_list[1].kwargs["options"].batch_size == 20
+    assert mocked_slot_request.call_args.kwargs["options"].batch_size == 20
+    assert len(mocked_slot_request.call_args.args[0]) == result["generation_meta"]["auto_retry"]["attempted_slot_count"]
     assert result["generation_meta"]["auto_retry"]["attempted_count"] == 5
+    assert result["generation_meta"]["auto_retry"]["attempted_slot_count"] == 15
+    assert result["generation_meta"]["auto_retry"]["rewrite_call_count"] == 1
+    assert result["generation_meta"]["auto_retry"]["rewrite_batch_sizes"] == [15]
+    assert result["generation_meta"]["auto_retry"]["max_slot_rewrite_attempts"] == 2
+
+
+def test_title_generator_batches_bad_slots_in_single_retry_call_when_under_twenty() -> None:
+    keywords = [f"보험 추천 {index}" for index in range(1, 8)]
+    requested_keyword_chunk_sizes: list[int] = []
+    requested_slot_chunk_sizes: list[int] = []
+
+    def fake_request(chunk, options):
+        requested_keyword_chunk_sizes.append(len(chunk))
+        return [
+            {
+                "keyword": item["keyword"],
+                "titles": {
+                    "naver_home": [item["keyword"], item["keyword"]],
+                    "blog": [
+                        f'{item["keyword"]} 비교 포인트 정리',
+                        f'{item["keyword"]} 가입 체크리스트',
+                    ],
+                },
+            }
+            for item in chunk
+        ]
+
+    def fake_slot_request(chunk, options):
+        requested_slot_chunk_sizes.append(len(chunk))
+        return _build_slot_retry_response(chunk)
+
+    with patch("app.title.title_generator.request_ai_titles", side_effect=fake_request), patch(
+        "app.title.title_generator.request_ai_slot_rewrites",
+        side_effect=fake_slot_request,
+    ):
+        result = run(
+            {
+                "selected_keywords": [
+                    {
+                        "keyword": keyword,
+                        "score": 1.0,
+                    }
+                    for keyword in keywords
+                ],
+                "title_options": {
+                    "mode": "ai",
+                    "provider": "openai",
+                    "api_key": "openai-key",
+                    "model": "gpt-4.1-mini",
+                    "keyword_modes": ["single"],
+                    "batch_size": 20,
+                },
+            }
+    )
+
+    assert requested_keyword_chunk_sizes == [7]
+    assert requested_slot_chunk_sizes == [20, 1]
+    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 7
+    assert result["generation_meta"]["auto_retry"]["attempted_slot_count"] == 21
+    assert result["generation_meta"]["auto_retry"]["rewrite_call_count"] == 2
+    assert result["generation_meta"]["auto_retry"]["rewrite_batch_sizes"] == [20, 1]
 
 
 def test_title_generator_uses_rewrite_ai_for_retry_and_escalation() -> None:
@@ -3017,42 +4005,37 @@ def test_title_generator_uses_rewrite_ai_for_retry_and_escalation() -> None:
 
     with patch(
         "app.title.title_generator.request_ai_titles",
-        side_effect=[
-            [
-                {
-                    "keyword": keyword,
-                    "titles": {
-                        "naver_home": [keyword, keyword],
-                        "blog": [keyword, keyword],
-                    },
-                }
-            ],
-            [
-                {
-                    "keyword": keyword,
-                    "titles": {
-                        "naver_home": [f"{keyword}!!", f"{keyword}!!"],
-                        "blog": [f"{keyword}!!", f"{keyword}!!"],
-                    },
-                }
-            ],
-            [
-                {
-                    "keyword": keyword,
-                    "titles": {
-                        "naver_home": [
-                            f"{keyword} compare 2 options",
-                            f"{keyword} choice checklist",
-                        ],
-                        "blog": [
-                            f"{keyword} compare guide",
-                            f"{keyword} signup checklist",
-                        ],
-                    },
-                }
-            ],
+        return_value=[
+            {
+                "keyword": keyword,
+                "titles": {
+                    "naver_home": [keyword, keyword],
+                    "blog": [keyword, keyword],
+                },
+            }
         ],
-    ) as mocked_request:
+    ) as mocked_request, patch(
+        "app.title.title_generator.request_ai_slot_rewrites",
+        side_effect=[
+            _build_slot_retry_response(
+                [
+                    {"slot_id": "0_home_1", "keyword": keyword, "channel": "naver_home", "slot_index": 1},
+                    {"slot_id": "0_home_2", "keyword": keyword, "channel": "naver_home", "slot_index": 2},
+                    {"slot_id": "0_blog_1", "keyword": keyword, "channel": "blog", "slot_index": 1},
+                    {"slot_id": "0_blog_2", "keyword": keyword, "channel": "blog", "slot_index": 2},
+                ],
+                degraded=True,
+            ),
+            _build_slot_retry_response(
+                [
+                    {"slot_id": "0_home_1", "keyword": keyword, "channel": "naver_home", "slot_index": 1},
+                    {"slot_id": "0_home_2", "keyword": keyword, "channel": "naver_home", "slot_index": 2},
+                    {"slot_id": "0_blog_1", "keyword": keyword, "channel": "blog", "slot_index": 1},
+                    {"slot_id": "0_blog_2", "keyword": keyword, "channel": "blog", "slot_index": 2},
+                ]
+            ),
+        ],
+    ) as mocked_slot_request:
         result = run(
             {
                 "selected_keywords": [
@@ -3074,15 +4057,86 @@ def test_title_generator_uses_rewrite_ai_for_retry_and_escalation() -> None:
             }
         )
 
-    assert mocked_request.call_count == 3
+    assert mocked_request.call_count == 1
     assert mocked_request.call_args_list[0].kwargs["options"].provider == "openai"
     assert mocked_request.call_args_list[0].kwargs["options"].model == "gpt-4o-mini"
-    assert mocked_request.call_args_list[1].kwargs["options"].provider == "vertex"
-    assert mocked_request.call_args_list[1].kwargs["options"].model == "gemini-2.5-flash-lite"
-    assert mocked_request.call_args_list[1].kwargs["options"].api_key == "vertex-key"
-    assert mocked_request.call_args_list[2].kwargs["options"].provider == "vertex"
-    assert mocked_request.call_args_list[2].kwargs["options"].model == "gemini-2.5-flash"
+    assert mocked_slot_request.call_args_list[0].kwargs["options"].provider == "vertex"
+    assert mocked_slot_request.call_args_list[0].kwargs["options"].model == "gemini-2.5-flash-lite"
+    assert mocked_slot_request.call_args_list[0].kwargs["options"].api_key == "vertex-key"
+    assert mocked_slot_request.call_args_list[1].kwargs["options"].provider == "vertex"
+    assert mocked_slot_request.call_args_list[1].kwargs["options"].model == "gemini-2.5-flash"
     assert result["generation_meta"]["auto_retry"]["provider"] == "vertex"
     assert result["generation_meta"]["auto_retry"]["model"] == "gemini-2.5-flash-lite"
+    assert result["generation_meta"]["auto_retry"]["rewrite_call_count"] == 1
+    assert result["generation_meta"]["auto_retry"]["rewrite_batch_sizes"] == [4]
     assert result["generation_meta"]["model_escalation"]["source_provider"] == "vertex"
     assert result["generation_meta"]["model_escalation"]["target_provider"] == "vertex"
+    assert result["generation_meta"]["model_escalation"]["rewrite_call_count"] == 1
+    assert result["generation_meta"]["model_escalation"]["rewrite_batch_sizes"] == [4]
+    assert result["generation_meta"]["model_escalation"]["max_slot_rewrite_attempts"] == 2
+
+
+def test_title_generator_downgrades_slots_after_two_failed_rewrite_attempts() -> None:
+    keyword = "alpha beta"
+    unchanged_slot_response = [
+        {"slot_id": "0_home_1", "title": keyword},
+        {"slot_id": "0_home_2", "title": keyword},
+        {"slot_id": "0_blog_1", "title": keyword},
+        {"slot_id": "0_blog_2", "title": keyword},
+    ]
+
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        return_value=[
+            {
+                "keyword": keyword,
+                "titles": {
+                    "naver_home": [keyword, keyword],
+                    "blog": [keyword, keyword],
+                },
+            }
+        ],
+    ), patch(
+        "app.title.title_generator.request_ai_slot_rewrites",
+        side_effect=[unchanged_slot_response, unchanged_slot_response],
+    ) as mocked_slot_request, patch(
+        "app.title.title_generator._build_practical_rescue_item",
+        return_value=None,
+    ):
+        result = run(
+            {
+                "selected_keywords": [
+                    {
+                        "keyword": keyword,
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "mode": "ai",
+                    "provider": "openai",
+                    "api_key": "openai-key",
+                    "model": "gpt-4o-mini",
+                    "keyword_modes": ["single"],
+                },
+            }
+        )
+
+    quality_report = result["generated_titles"][0]["quality_report"]
+    title_checks = quality_report["title_checks"]["naver_home"] + quality_report["title_checks"]["blog"]
+
+    assert mocked_slot_request.call_count == 2
+    assert result["generation_meta"]["auto_retry"]["accepted_slot_count"] == 0
+    assert result["generation_meta"]["model_escalation"]["accepted_slot_count"] == 0
+    assert result["generation_meta"]["model_escalation"]["downgraded_slot_count"] == 4
+    assert result["generation_meta"]["model_escalation"]["downgraded_slot_ids"] == [
+        "0_home_1",
+        "0_home_2",
+        "0_blog_1",
+        "0_blog_2",
+    ]
+    assert result["generation_meta"]["model_escalation"]["max_slot_rewrite_attempts"] == 2
+    assert quality_report["status"] == "review"
+    assert quality_report["retry_recommended"] is False
+    assert any("재작성 2회" in issue for issue in quality_report["issues"])
+    assert all(check["status"] == "review" for check in title_checks)
+    assert all(bool(check.get("checks", {}).get("retry_limit_reached")) for check in title_checks)

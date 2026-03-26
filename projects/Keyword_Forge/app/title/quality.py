@@ -8,10 +8,14 @@ from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize
 from app.title.category_detector import detect_category
 from app.title.quality_ai import (
     TitleEvaluationOptions,
-    request_naver_home_title_evaluations,
     request_naver_home_title_evaluations_batch,
 )
-from app.title.rules import NAVER_HOME_MAX_LENGTH, TITLE_QUALITY_PASS_SCORE, TITLE_QUALITY_REVIEW_SCORE
+from app.title.rules import (
+    NAVER_HOME_AI_REWRITE_SCORE_THRESHOLD,
+    NAVER_HOME_MAX_LENGTH,
+    TITLE_QUALITY_PASS_SCORE,
+    TITLE_QUALITY_REVIEW_SCORE,
+)
 _NOISY_PUNCTUATION_RE = re.compile(r"[!?]{2,}|\.{3,}")
 _FORBIDDEN_TITLE_PUNCTUATION = (":", "：")
 _MODEL_NUMBER_TOKEN_RE = re.compile(r"(?i)^[a-z]{1,6}\d{2,4}[a-z0-9-]*$")
@@ -144,8 +148,10 @@ _NAVER_HOME_CTR_CURIOSITY_KEYS = tuple(
     normalize_key(token)
     for token in (
         "\uc65c",
+        "\uc65c\uc77c\uae4c",
         "\ubb34\uc2a8",
         "\ubb34\uc5c7",
+        "\ubb50\uc9c0",
         "\uc5b4\ub5bb\uac8c",
         "\ub420\uae4c",
         "\ud560\uae4c",
@@ -153,6 +159,7 @@ _NAVER_HOME_CTR_CURIOSITY_KEYS = tuple(
         "\uc88b\uc744\uae4c",
         "\ub2e4\ub97c\uae4c",
         "\ubcf4\uc77c\uae4c",
+        "\uc9c4\uc9dc",
         "\uad81\uae08",
         "\uacc4\uc18d",
         "\uacb0\uad6d",
@@ -163,6 +170,9 @@ _NAVER_HOME_CTR_CURIOSITY_KEYS = tuple(
 _NAVER_HOME_CTR_HIGH_CURIOSITY_KEYS = tuple(
     normalize_key(token)
     for token in (
+        "\uc65c\uc77c\uae4c",
+        "\ubb50\uc9c0",
+        "\uc9c4\uc9dc",
         "\ud560\uae4c",
         "\uc88b\uc744\uae4c",
         "\ub2e4\ub97c\uae4c",
@@ -209,6 +219,7 @@ _NAVER_HOME_CTR_EMOTIONAL_KEYS = tuple(
     for token in (
         "\uc758\uc678",
         "\ub73b\ubc16",
+        "\uc9c4\uc9dc",
         "\uba3c\uc800",
         "\uac08\ub838",
         "\uc5c7\uac08\ub838",
@@ -699,6 +710,7 @@ _QUESTION_ENDING_PATTERNS = (
 )
 _BATCH_SKELETON_REPEAT_THRESHOLD = 2
 _TITLE_STATUS_SORT_RANK = {"good": 0, "review": 1, "retry": 2}
+_INTERNAL_BASE_REPORT_KEY = "_base_report"
 _BATCH_NOISY_FAMILY_PATTERNS = (
     ("difference_question", "차이 질문", ("뭐가다를까", "무엇이다를까", "차이가뭘까", "차이점")),
     ("check", "체크", ("체크리스트", "체크포인트", "체크", "확인")),
@@ -713,11 +725,126 @@ def enrich_title_results(
     *,
     evaluation_options: TitleEvaluationOptions | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    base_reports = _build_base_title_reports(
+        items,
+        evaluation_options=evaluation_options,
+    )
+    reports = _apply_batch_similarity_feedback(
+        items,
+        [_clone_bundle_report(report) for report in base_reports],
+    )
+    enriched_items = _build_enriched_items_from_reports(
+        items,
+        reports,
+        base_reports=base_reports,
+    )
+
+    return enriched_items, summarize_title_quality(reports)
+
+
+def refresh_title_results_for_changed_slots(
+    items: list[dict[str, Any]],
+    current_enriched_items: list[dict[str, Any]],
+    changed_slots: list[dict[str, Any]],
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    base_reports = _resolve_base_reports_from_enriched_items(
+        items,
+        current_enriched_items,
+        evaluation_options=evaluation_options,
+    )
+    changed_slots_by_item = _group_changed_slots_by_item(items, changed_slots)
+    if not changed_slots_by_item:
+        reports = _apply_batch_similarity_feedback(
+            items,
+            [_clone_bundle_report(report) for report in base_reports],
+        )
+        enriched_items = _build_enriched_items_from_reports(
+            items,
+            reports,
+            base_reports=base_reports,
+        )
+        return enriched_items, summarize_title_quality(reports)
+
+    next_base_reports = [_clone_bundle_report(report) for report in base_reports]
+    naver_home_ai_evaluations = _collect_changed_slot_naver_home_ai_evaluations(
+        items,
+        changed_slots_by_item,
+        evaluation_options=evaluation_options,
+    )
+
+    for item_index, slot_entries in changed_slots_by_item.items():
+        if item_index < 0 or item_index >= len(items):
+            continue
+        item = items[item_index]
+        keyword = normalize_text(item.get("keyword"))
+        titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
+        naver_home_titles = _normalize_title_list(titles.get("naver_home"))
+        blog_titles = _normalize_title_list(titles.get("blog"))
+        duplicate_counts = _count_duplicates(naver_home_titles + blog_titles)
+        channel_reports = _clone_title_checks(next_base_reports[item_index].get("title_checks", {}))
+
+        for slot_entry in slot_entries:
+            channel_name = str(slot_entry.get("channel") or "").strip()
+            slot_position = int(slot_entry.get("slot_index") or 0) - 1
+            if channel_name == "naver_home":
+                title_list = naver_home_titles
+            elif channel_name == "blog":
+                title_list = blog_titles
+            else:
+                title_list = []
+            if slot_position < 0 or slot_position >= len(title_list):
+                continue
+            while len(channel_reports.setdefault(channel_name, [])) <= slot_position:
+                channel_reports[channel_name].append(
+                    {
+                        "title": "",
+                        "score": 0,
+                        "status": "retry",
+                        "critical": True,
+                        "issues": [],
+                        "checks": {},
+                    }
+                )
+            ai_evaluation = (
+                naver_home_ai_evaluations.get((item_index, slot_position), {})
+                if channel_name == "naver_home"
+                else {}
+            )
+            channel_reports[channel_name][slot_position] = assess_single_title(
+                keyword,
+                title_list[slot_position],
+                channel_name,
+                duplicate_counts,
+                item_context=item,
+                ai_evaluation=ai_evaluation,
+            )
+
+        next_base_reports[item_index] = _build_bundle_report(keyword, channel_reports)
+
+    reports = _apply_batch_similarity_feedback(
+        items,
+        [_clone_bundle_report(report) for report in next_base_reports],
+    )
+    enriched_items = _build_enriched_items_from_reports(
+        items,
+        reports,
+        base_reports=next_base_reports,
+    )
+    return enriched_items, summarize_title_quality(reports)
+
+
+def _build_base_title_reports(
+    items: list[dict[str, Any]],
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+) -> list[dict[str, Any]]:
     batch_ai_evaluations = _collect_batch_naver_home_ai_evaluations(
         items,
         evaluation_options=evaluation_options,
     )
-    reports = [
+    return [
         assess_title_bundle(
             item,
             evaluation_options=evaluation_options,
@@ -725,11 +852,59 @@ def enrich_title_results(
         )
         for index, item in enumerate(items)
     ]
-    reports = _apply_batch_similarity_feedback(items, reports)
 
+
+def _select_naver_home_ai_item_indexes(
+    items: list[dict[str, Any]],
+    evaluation_options: TitleEvaluationOptions | None,
+) -> set[int]:
+    if evaluation_options is None or not evaluation_options.enabled:
+        return set()
+
+    try:
+        sample_ratio = float(evaluation_options.sample_ratio)
+    except (TypeError, ValueError):
+        sample_ratio = 1.0
+    sample_ratio = max(0.0, min(1.0, sample_ratio))
+
+    try:
+        max_sampled_items = int(evaluation_options.max_sampled_items)
+    except (TypeError, ValueError):
+        max_sampled_items = len(items)
+    max_sampled_items = max(0, max_sampled_items)
+
+    if sample_ratio <= 0 or max_sampled_items <= 0:
+        return set()
+
+    candidate_indexes = [
+        index
+        for index, item in enumerate(items)
+        if normalize_text(item.get("keyword"))
+        and _normalize_title_list((item.get("titles") if isinstance(item.get("titles"), dict) else {}).get("naver_home"))
+    ]
+    if not candidate_indexes:
+        return set()
+
+    desired_count = len(candidate_indexes) if sample_ratio >= 1 else max(1, round(len(candidate_indexes) * sample_ratio))
+    desired_count = min(len(candidate_indexes), max_sampled_items, desired_count)
+    return set(candidate_indexes[:desired_count])
+
+
+def _build_enriched_items_from_reports(
+    items: list[dict[str, Any]],
+    reports: list[dict[str, Any]],
+    *,
+    base_reports: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     enriched_items: list[dict[str, Any]] = []
-    for item, report in zip(items, reports):
+    for index, (item, report) in enumerate(zip(items, reports)):
         reordered_titles, reordered_title_checks = _reorder_titles_for_output(item, report)
+        quality_report = {
+            **report,
+            "title_checks": reordered_title_checks,
+        }
+        if isinstance(base_reports, list) and index < len(base_reports):
+            quality_report[_INTERNAL_BASE_REPORT_KEY] = _clone_bundle_report(base_reports[index])
         enriched_items.append(
             {
                 **{
@@ -739,14 +914,10 @@ def enrich_title_results(
                 },
                 "keyword": normalize_text(item.get("keyword")),
                 "titles": reordered_titles,
-                "quality_report": {
-                    **report,
-                    "title_checks": reordered_title_checks,
-                },
+                "quality_report": quality_report,
             }
         )
-
-    return enriched_items, summarize_title_quality(reports)
+    return enriched_items
 
 
 def assess_title_bundle(
@@ -761,25 +932,6 @@ def assess_title_bundle(
     blog_titles = _normalize_title_list(titles.get("blog"))
     duplicate_counts = _count_duplicates(naver_home_titles + blog_titles)
     resolved_naver_home_ai_evaluations = list(naver_home_ai_evaluations or [])
-    if (
-        not resolved_naver_home_ai_evaluations
-        and evaluation_options is not None
-        and evaluation_options.enabled
-        and keyword
-        and naver_home_titles
-    ):
-        try:
-            evaluations_by_title = request_naver_home_title_evaluations(
-                keyword,
-                naver_home_titles,
-                evaluation_options,
-            )
-            resolved_naver_home_ai_evaluations = [
-                evaluations_by_title.get(normalize_text(title), {})
-                for title in naver_home_titles
-            ]
-        except Exception:
-            resolved_naver_home_ai_evaluations = []
 
     channel_reports: dict[str, list[dict[str, Any]]] = {
         "naver_home": [
@@ -868,7 +1020,6 @@ def assess_single_title(
     naver_home_emotional = int(score_breakdown.get("emotional_trigger") or 0)
     naver_home_ai_reason = normalize_text(ai_evaluation.get("reason")) if ai_evaluation else ""
     naver_home_ai_rewrite = str(ai_evaluation.get("verdict") or "").strip().lower() == "rewrite"
-
     contains_keyword = _contains_keyword_phrase(keyword, normalized_title)
     starts_with_keyword = _starts_with_keyword_phrase(keyword, normalized_title)
     length_ok = True
@@ -900,7 +1051,7 @@ def assess_single_title(
         score -= 20
         critical = True
         length_ok = False
-    elif len(normalized_title) < max(10, len(keyword) + 2):
+    elif channel != "naver_home" and len(normalized_title) < max(10, len(keyword) + 2):
         issues.append("제목 길이가 너무 짧습니다.")
         score -= 8
 
@@ -931,11 +1082,11 @@ def assess_single_title(
 
     if channel == "naver_home" and not ai_evaluation and not home_hook_signal and _looks_like_plain_naver_home_title(normalized_title):
         issues.append("순수 정보형 설명에 가까워 CTR 유인이 약합니다.")
-        score -= 8
-    elif channel == "naver_home" and not ai_evaluation and underdeveloped_home_title:
+        score -= 4
+    elif False and channel == "naver_home" and not ai_evaluation and underdeveloped_home_title:
         issues.append("상황이나 갈등 없이 축만 제시해 클릭 유인이 약합니다.")
         score -= 10
-    elif (
+    elif False and (
         channel == "naver_home"
         and not ai_evaluation
         and naver_home_curiosity_gap == 0
@@ -1030,10 +1181,14 @@ def assess_single_title(
         score -= 20
 
     score = max(0, min(100, score))
+    status = _resolve_title_status(score, critical)
+    if channel == "naver_home" and not critical and score >= NAVER_HOME_AI_REWRITE_SCORE_THRESHOLD and status == "retry":
+        status = "keep"
+
     return {
         "title": normalized_title,
         "score": score,
-        "status": _resolve_title_status(score, critical),
+        "status": status,
         "critical": critical,
         "issues": _unique_preserve_order(issues),
         "score_breakdown": score_breakdown,
@@ -1099,6 +1254,9 @@ def _collect_batch_naver_home_ai_evaluations(
 
     batch_size = max(1, min(int(evaluation_options.batch_size or 20), 20))
     evaluations_by_item_index: dict[int, list[dict[str, Any]]] = {}
+    sampled_item_indexes = _select_naver_home_ai_item_indexes(items, evaluation_options)
+    if not sampled_item_indexes:
+        return {}
 
     for chunk_start in range(0, len(items), batch_size):
         batch_entries: list[dict[str, Any]] = []
@@ -1107,6 +1265,8 @@ def _collect_batch_naver_home_ai_evaluations(
 
         for local_item_index, item in enumerate(chunk):
             item_index = chunk_start + local_item_index
+            if item_index not in sampled_item_indexes:
+                continue
             keyword = normalize_text(item.get("keyword"))
             titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
             naver_home_titles = _normalize_title_list(titles.get("naver_home"))
@@ -1408,24 +1568,30 @@ def _score_naver_home_ctr_components(
         issue_or_context = 10
     elif concrete_tokens:
         issue_or_context = 6
-    if (contrast_signal or reversal_signal) and issue_or_context:
+    if has_question and (contrast_signal or reversal_signal or emotional_hits >= 1):
+        issue_or_context = min(20, issue_or_context + 4)
+    elif (contrast_signal or reversal_signal) and issue_or_context:
         issue_or_context = min(20, issue_or_context + 4)
     elif has_question and concrete_tokens:
         issue_or_context = min(20, issue_or_context + 2)
+    elif has_question and (curiosity_hits >= 1 or emotional_hits >= 1):
+        issue_or_context = min(20, issue_or_context + 2)
 
     curiosity_gap = 0
-    if has_question and (contrast_signal or reversal_signal):
+    if has_question and (contrast_signal or reversal_signal or emotional_hits >= 1):
         curiosity_gap = 20
+    elif has_question and curiosity_hits >= 1:
+        curiosity_gap = 18
     elif has_question:
-        curiosity_gap = 16
+        curiosity_gap = 18
     elif any(pattern in stripped_key for pattern in _NAVER_HOME_CTR_HIGH_CURIOSITY_KEYS):
-        curiosity_gap = 16
+        curiosity_gap = 18
     elif curiosity_hits >= 2:
-        curiosity_gap = 16
+        curiosity_gap = 18
     elif curiosity_hits == 1:
-        curiosity_gap = 12
-    elif contrast_signal or reversal_signal:
-        curiosity_gap = 8
+        curiosity_gap = 14
+    elif contrast_signal or reversal_signal or emotional_hits >= 1:
+        curiosity_gap = 10
 
     contrast_or_conflict = 0
     if contrast_signal and (has_question or issue_or_context >= 12 or len(concrete_tokens) >= 2):
@@ -1434,20 +1600,22 @@ def _score_naver_home_ctr_components(
         contrast_or_conflict = 10
 
     reversal_or_unexpected = 0
-    if reversal_signal and (has_question or issue_or_context >= 12):
+    if reversal_signal and (has_question or issue_or_context >= 12 or emotional_hits >= 1):
         reversal_or_unexpected = 15
     elif reversal_signal:
-        reversal_or_unexpected = 10
+        reversal_or_unexpected = 12
 
     emotional_trigger = 0
     if emotional_hits >= 2:
         emotional_trigger = 15
+    elif emotional_hits == 1 and has_question:
+        emotional_trigger = 15
     elif emotional_hits == 1:
-        emotional_trigger = 12
+        emotional_trigger = 14
     elif has_question and (contrast_signal or reversal_signal or issue_or_context >= 12):
-        emotional_trigger = 8
+        emotional_trigger = 10
     elif _has_naver_home_hook_signal(title):
-        emotional_trigger = 5
+        emotional_trigger = 8
 
     specificity = 0
     if _contains_keyword_phrase(keyword, title):
@@ -1459,10 +1627,6 @@ def _score_naver_home_ctr_components(
     if has_digit:
         specificity += 2
     specificity = min(10, specificity)
-    if underdeveloped:
-        specificity = min(specificity, 4)
-    if dry_info:
-        specificity = max(0, specificity - 2)
 
     title_length = len(title)
     if title_length > NAVER_HOME_MAX_LENGTH:
@@ -1470,7 +1634,7 @@ def _score_naver_home_ctr_components(
     elif _NOISY_PUNCTUATION_RE.search(title):
         readability = 2
     elif title_length < max(10, len(keyword) + 2):
-        readability = 3
+        readability = 5
     elif title_length <= 36:
         readability = 5
     else:
@@ -2163,6 +2327,144 @@ def _clone_title_checks(raw_title_checks: Any) -> dict[str, list[dict[str, Any]]
             for title_report in channel_reports
         ]
     return cloned
+
+
+def _clone_bundle_report(report: Any) -> dict[str, Any]:
+    if not isinstance(report, dict):
+        return {
+            "bundle_score": 0,
+            "status": "retry",
+            "label": "",
+            "passes_threshold": False,
+            "retry_recommended": True,
+            "issue_count": 0,
+            "issues": [],
+            "summary": "",
+            "channel_scores": {},
+            "title_checks": {"naver_home": [], "blog": []},
+            "channel_good_counts": {},
+            "channel_usable_counts": {},
+            "recommended_pair_ready": False,
+            "usable_pair_ready": False,
+        }
+    return {
+        **report,
+        "issues": list(report.get("issues", [])),
+        "channel_scores": dict(report.get("channel_scores", {})),
+        "title_checks": _clone_title_checks(report.get("title_checks", {})),
+        "channel_good_counts": dict(report.get("channel_good_counts", {})),
+        "channel_usable_counts": dict(report.get("channel_usable_counts", {})),
+    }
+
+
+def _resolve_base_reports_from_enriched_items(
+    items: list[dict[str, Any]],
+    enriched_items: list[dict[str, Any]],
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+) -> list[dict[str, Any]]:
+    base_reports: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        enriched_item = enriched_items[index] if index < len(enriched_items) and isinstance(enriched_items[index], dict) else {}
+        quality_report = enriched_item.get("quality_report") if isinstance(enriched_item.get("quality_report"), dict) else {}
+        base_report = quality_report.get(_INTERNAL_BASE_REPORT_KEY)
+        if isinstance(base_report, dict):
+            base_reports.append(_clone_bundle_report(base_report))
+            continue
+        base_reports.append(
+            assess_title_bundle(
+                item,
+                evaluation_options=evaluation_options,
+            )
+        )
+    return base_reports
+
+
+def _group_changed_slots_by_item(
+    items: list[dict[str, Any]],
+    changed_slots: list[dict[str, Any]],
+) -> dict[int, list[dict[str, Any]]]:
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for slot in changed_slots:
+        if not isinstance(slot, dict):
+            continue
+        try:
+            item_index = int(slot.get("result_index"))
+        except (TypeError, ValueError):
+            continue
+        if item_index < 0 or item_index >= len(items):
+            continue
+        channel_name = str(slot.get("channel") or "").strip()
+        try:
+            slot_index = int(slot.get("slot_index") or 0)
+        except (TypeError, ValueError):
+            continue
+        if channel_name not in {"naver_home", "blog"} or slot_index <= 0:
+            continue
+        grouped.setdefault(item_index, []).append(
+            {
+                "channel": channel_name,
+                "slot_index": slot_index,
+            }
+        )
+    return grouped
+
+
+def _collect_changed_slot_naver_home_ai_evaluations(
+    items: list[dict[str, Any]],
+    changed_slots_by_item: dict[int, list[dict[str, Any]]],
+    *,
+    evaluation_options: TitleEvaluationOptions | None = None,
+) -> dict[tuple[int, int], dict[str, Any]]:
+    if evaluation_options is None or not evaluation_options.enabled:
+        return {}
+
+    batch_entries: list[dict[str, Any]] = []
+    entry_keys: list[tuple[int, int]] = []
+    sampled_item_indexes = _select_naver_home_ai_item_indexes(items, evaluation_options)
+    if not sampled_item_indexes:
+        return {}
+
+    for item_index in sorted(changed_slots_by_item):
+        if item_index < 0 or item_index >= len(items):
+            continue
+        if item_index not in sampled_item_indexes:
+            continue
+        item = items[item_index]
+        keyword = normalize_text(item.get("keyword"))
+        titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
+        naver_home_titles = _normalize_title_list(titles.get("naver_home"))
+        if not keyword or not naver_home_titles:
+            continue
+        for slot in changed_slots_by_item[item_index]:
+            if str(slot.get("channel") or "").strip() != "naver_home":
+                continue
+            slot_position = int(slot.get("slot_index") or 0) - 1
+            if slot_position < 0 or slot_position >= len(naver_home_titles):
+                continue
+            batch_entries.append(
+                {
+                    "keyword": keyword,
+                    "title": naver_home_titles[slot_position],
+                }
+            )
+            entry_keys.append((item_index, slot_position))
+
+    if not batch_entries:
+        return {}
+
+    try:
+        batch_evaluations = request_naver_home_title_evaluations_batch(
+            batch_entries,
+            evaluation_options,
+        )
+    except Exception:
+        return {}
+
+    return {
+        entry_keys[index]: batch_evaluations.get(index, {})
+        for index in range(len(entry_keys))
+    }
 
 
 def _resolve_title_status(score: int, critical: bool) -> str:
