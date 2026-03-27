@@ -112,9 +112,25 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "로그인 상태 확인" in response.text
     assert "exportExpandedCsvButton" in response.text
     assert "exportExpandedTxtButton" in response.text
+    assert "copyCollectedLinesButton" in response.text
+    assert "copyCollectedCommaButton" in response.text
+    assert "copyExpandedLinesButton" in response.text
+    assert "copyExpandedCommaButton" in response.text
+    assert "copyAnalyzedLinesButton" in response.text
+    assert "copyAnalyzedCommaButton" in response.text
+    assert "copySelectedLinesButton" in response.text
+    assert "copySelectedCommaButton" in response.text
     assert "exportSelectedTxtButton" in response.text
     assert "resultsExportExpandedCsvButton" in response.text
     assert "resultsExportExpandedTxtButton" in response.text
+    assert "resultsCopyCollectedLinesButton" in response.text
+    assert "resultsCopyCollectedCommaButton" in response.text
+    assert "resultsCopyExpandedLinesButton" in response.text
+    assert "resultsCopyExpandedCommaButton" in response.text
+    assert "resultsCopyAnalyzedLinesButton" in response.text
+    assert "resultsCopyAnalyzedCommaButton" in response.text
+    assert "resultsCopySelectedLinesButton" in response.text
+    assert "resultsCopySelectedCommaButton" in response.text
     assert "resultsExportSelectedTxtButton" in response.text
 
 

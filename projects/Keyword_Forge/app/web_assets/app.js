@@ -2291,6 +2291,7 @@ function renderExpandedRows(items) {
             <td>
                 <div class="expanded-keyword-cell">
                     <strong>${escapeHtml(item.keyword || "-")}</strong>
+                    ${renderKeywordSeedifyAction(item.keyword)}
                 </div>
             </td>
             <td>${escapeHtml(item.origin || "-")}</td>
@@ -4277,6 +4278,162 @@ function downloadKeywordTxtFile(items, { filenamePrefix, emptyMessage, successMe
     addLog(successMessage(lines.length), "success");
 }
 
+function buildKeywordClipboardText(items, separator = "\n") {
+    return (items || [])
+        .map((item) => String(item?.keyword || "").trim())
+        .filter(Boolean)
+        .join(separator);
+}
+
+async function writeTextToClipboard(text) {
+    const normalizedText = String(text || "");
+    if (!normalizedText) {
+        return;
+    }
+
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(normalizedText);
+        return;
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = normalizedText;
+    textarea.setAttribute("readonly", "readonly");
+    textarea.style.position = "fixed";
+    textarea.style.top = "-9999px";
+    textarea.style.left = "-9999px";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+
+    let copied = false;
+    try {
+        copied = document.execCommand("copy");
+    } finally {
+        textarea.remove();
+    }
+
+    if (!copied) {
+        throw new Error("클립보드에 복사하지 못했습니다.");
+    }
+}
+
+async function copyKeywordTextToClipboard(items, { separator = "\n", emptyMessage, successMessage }) {
+    const keywords = (items || [])
+        .map((item) => String(item?.keyword || "").trim())
+        .filter(Boolean);
+    const text = buildKeywordClipboardText(items, separator);
+    if (!keywords.length) {
+        addLog(emptyMessage, "error");
+        showUserNotice({
+            message: emptyMessage,
+            type: "error",
+        });
+        return;
+    }
+
+    try {
+        await writeTextToClipboard(text);
+        const message = successMessage(keywords.length);
+        addLog(message, "success");
+        showUserNotice({
+            message,
+            type: "success",
+            noticeDurationMs: 1800,
+        });
+    } catch (error) {
+        const message = error instanceof Error && error.message
+            ? error.message
+            : "클립보드 복사 중 오류가 발생했습니다.";
+        addLog(message, "error");
+        showUserNotice({
+            message,
+            type: "error",
+        });
+    }
+}
+
+async function copyCollectedLines() {
+    await copyKeywordTextToClipboard(state.results.collected?.collected_keywords || [], {
+        separator: "\n",
+        emptyMessage: "복사할 수집 결과가 없습니다.",
+        successMessage: (count) => `수집 결과 ${count}건을 줄바꿈 형식으로 복사했습니다.`,
+    });
+}
+
+async function copyCollectedComma() {
+    await copyKeywordTextToClipboard(state.results.collected?.collected_keywords || [], {
+        separator: ", ",
+        emptyMessage: "복사할 수집 결과가 없습니다.",
+        successMessage: (count) => `수집 결과 ${count}건을 콤마 구분 형식으로 복사했습니다.`,
+    });
+}
+
+async function copyExpandedLines() {
+    await copyKeywordTextToClipboard(state.results.expanded?.expanded_keywords || [], {
+        separator: "\n",
+        emptyMessage: "복사할 확장 결과가 없습니다.",
+        successMessage: (count) => `확장 결과 ${count}건을 줄바꿈 형식으로 복사했습니다.`,
+    });
+}
+
+async function copyExpandedComma() {
+    await copyKeywordTextToClipboard(state.results.expanded?.expanded_keywords || [], {
+        separator: ", ",
+        emptyMessage: "복사할 확장 결과가 없습니다.",
+        successMessage: (count) => `확장 결과 ${count}건을 콤마 구분 형식으로 복사했습니다.`,
+    });
+}
+
+async function copyAnalyzedLines() {
+    await copyKeywordTextToClipboard(state.results.analyzed?.analyzed_keywords || [], {
+        separator: "\n",
+        emptyMessage: "복사할 분석 결과가 없습니다.",
+        successMessage: (count) => `분석 결과 ${count}건을 줄바꿈 형식으로 복사했습니다.`,
+    });
+}
+
+async function copyAnalyzedComma() {
+    await copyKeywordTextToClipboard(state.results.analyzed?.analyzed_keywords || [], {
+        separator: ", ",
+        emptyMessage: "복사할 분석 결과가 없습니다.",
+        successMessage: (count) => `분석 결과 ${count}건을 콤마 구분 형식으로 복사했습니다.`,
+    });
+}
+
+async function copySelectedLines() {
+    await copyKeywordTextToClipboard(state.results.selected?.selected_keywords || [], {
+        separator: "\n",
+        emptyMessage: "복사할 선별 결과가 없습니다.",
+        successMessage: (count) => `선별 결과 ${count}건을 줄바꿈 형식으로 복사했습니다.`,
+    });
+}
+
+async function copySelectedComma() {
+    await copyKeywordTextToClipboard(state.results.selected?.selected_keywords || [], {
+        separator: ", ",
+        emptyMessage: "복사할 선별 결과가 없습니다.",
+        successMessage: (count) => `선별 결과 ${count}건을 콤마 구분 형식으로 복사했습니다.`,
+    });
+}
+
+function renderKeywordSeedifyAction(keyword) {
+    const normalizedKeyword = normalizeKeywordLabel(keyword);
+    if (!normalizedKeyword) {
+        return "";
+    }
+    return `
+        <button
+            type="button"
+            class="ghost-chip keyword-seedify-btn"
+            data-inline-action="seedify_keyword"
+            data-keyword="${escapeHtml(normalizedKeyword)}"
+        >시드화</button>
+    `;
+}
+
 function getCollectorSourcePriority(source) {
     const priorityMap = {
         naver_trend: 0,
@@ -4504,22 +4661,38 @@ function bindElements() {
     elements.analyzeKeywordStatsInput = document.getElementById("analyzeKeywordStatsInput");
     elements.exportCollectedCsvButton = document.getElementById("exportCollectedCsvButton");
     elements.exportCollectedTxtButton = document.getElementById("exportCollectedTxtButton");
+    elements.copyCollectedLinesButton = document.getElementById("copyCollectedLinesButton");
+    elements.copyCollectedCommaButton = document.getElementById("copyCollectedCommaButton");
     elements.exportExpandedCsvButton = document.getElementById("exportExpandedCsvButton");
     elements.exportExpandedTxtButton = document.getElementById("exportExpandedTxtButton");
+    elements.copyExpandedLinesButton = document.getElementById("copyExpandedLinesButton");
+    elements.copyExpandedCommaButton = document.getElementById("copyExpandedCommaButton");
     elements.exportCsvButton = document.getElementById("exportCsvButton");
     elements.exportAnalyzedTxtButton = document.getElementById("exportAnalyzedTxtButton");
+    elements.copyAnalyzedLinesButton = document.getElementById("copyAnalyzedLinesButton");
+    elements.copyAnalyzedCommaButton = document.getElementById("copyAnalyzedCommaButton");
     elements.exportSelectedCsvButton = document.getElementById("exportSelectedCsvButton");
     elements.exportSelectedTxtButton = document.getElementById("exportSelectedTxtButton");
+    elements.copySelectedLinesButton = document.getElementById("copySelectedLinesButton");
+    elements.copySelectedCommaButton = document.getElementById("copySelectedCommaButton");
     elements.exportCollectedCsvButtonUtility = document.getElementById("exportCollectedCsvButtonUtility");
     elements.exportSelectedCsvButtonUtility = document.getElementById("exportSelectedCsvButtonUtility");
     elements.resultsExportCollectedCsvButton = document.getElementById("resultsExportCollectedCsvButton");
     elements.resultsExportCollectedTxtButton = document.getElementById("resultsExportCollectedTxtButton");
+    elements.resultsCopyCollectedLinesButton = document.getElementById("resultsCopyCollectedLinesButton");
+    elements.resultsCopyCollectedCommaButton = document.getElementById("resultsCopyCollectedCommaButton");
     elements.resultsExportExpandedCsvButton = document.getElementById("resultsExportExpandedCsvButton");
     elements.resultsExportExpandedTxtButton = document.getElementById("resultsExportExpandedTxtButton");
+    elements.resultsCopyExpandedLinesButton = document.getElementById("resultsCopyExpandedLinesButton");
+    elements.resultsCopyExpandedCommaButton = document.getElementById("resultsCopyExpandedCommaButton");
     elements.resultsExportAnalyzedCsvButton = document.getElementById("resultsExportAnalyzedCsvButton");
     elements.resultsExportAnalyzedTxtButton = document.getElementById("resultsExportAnalyzedTxtButton");
+    elements.resultsCopyAnalyzedLinesButton = document.getElementById("resultsCopyAnalyzedLinesButton");
+    elements.resultsCopyAnalyzedCommaButton = document.getElementById("resultsCopyAnalyzedCommaButton");
     elements.resultsExportSelectedCsvButton = document.getElementById("resultsExportSelectedCsvButton");
     elements.resultsExportSelectedTxtButton = document.getElementById("resultsExportSelectedTxtButton");
+    elements.resultsCopySelectedLinesButton = document.getElementById("resultsCopySelectedLinesButton");
+    elements.resultsCopySelectedCommaButton = document.getElementById("resultsCopySelectedCommaButton");
     elements.exportTitleCsvButton = document.getElementById("exportTitleCsvButton");
     if (elements.exportCollectedCsvButtonUtility && !elements.exportCollectedCsvButtonUtility.closest(".results-panel-tools")) {
         elements.exportCollectedCsvButtonUtility.hidden = true;
@@ -4836,22 +5009,38 @@ function bindEvents() {
     });
     elements.exportCollectedCsvButton?.addEventListener("click", downloadCollectedCsv);
     elements.exportCollectedTxtButton?.addEventListener("click", downloadCollectedTxt);
+    elements.copyCollectedLinesButton?.addEventListener("click", () => { void copyCollectedLines(); });
+    elements.copyCollectedCommaButton?.addEventListener("click", () => { void copyCollectedComma(); });
     elements.exportExpandedCsvButton?.addEventListener("click", downloadExpandedCsv);
     elements.exportExpandedTxtButton?.addEventListener("click", downloadExpandedTxt);
+    elements.copyExpandedLinesButton?.addEventListener("click", () => { void copyExpandedLines(); });
+    elements.copyExpandedCommaButton?.addEventListener("click", () => { void copyExpandedComma(); });
     elements.exportCsvButton?.addEventListener("click", downloadAnalyzedCsv);
     elements.exportAnalyzedTxtButton?.addEventListener("click", downloadAnalyzedTxt);
+    elements.copyAnalyzedLinesButton?.addEventListener("click", () => { void copyAnalyzedLines(); });
+    elements.copyAnalyzedCommaButton?.addEventListener("click", () => { void copyAnalyzedComma(); });
     elements.exportSelectedCsvButton?.addEventListener("click", downloadSelectedCsv);
     elements.exportSelectedTxtButton?.addEventListener("click", downloadSelectedTxt);
+    elements.copySelectedLinesButton?.addEventListener("click", () => { void copySelectedLines(); });
+    elements.copySelectedCommaButton?.addEventListener("click", () => { void copySelectedComma(); });
     elements.exportCollectedCsvButtonUtility?.addEventListener("click", downloadCollectedCsv);
     elements.exportSelectedCsvButtonUtility?.addEventListener("click", downloadSelectedCsv);
     elements.resultsExportCollectedCsvButton?.addEventListener("click", downloadCollectedCsv);
     elements.resultsExportCollectedTxtButton?.addEventListener("click", downloadCollectedTxt);
+    elements.resultsCopyCollectedLinesButton?.addEventListener("click", () => { void copyCollectedLines(); });
+    elements.resultsCopyCollectedCommaButton?.addEventListener("click", () => { void copyCollectedComma(); });
     elements.resultsExportExpandedCsvButton?.addEventListener("click", downloadExpandedCsv);
     elements.resultsExportExpandedTxtButton?.addEventListener("click", downloadExpandedTxt);
+    elements.resultsCopyExpandedLinesButton?.addEventListener("click", () => { void copyExpandedLines(); });
+    elements.resultsCopyExpandedCommaButton?.addEventListener("click", () => { void copyExpandedComma(); });
     elements.resultsExportAnalyzedCsvButton?.addEventListener("click", downloadAnalyzedCsv);
     elements.resultsExportAnalyzedTxtButton?.addEventListener("click", downloadAnalyzedTxt);
+    elements.resultsCopyAnalyzedLinesButton?.addEventListener("click", () => { void copyAnalyzedLines(); });
+    elements.resultsCopyAnalyzedCommaButton?.addEventListener("click", () => { void copyAnalyzedComma(); });
     elements.resultsExportSelectedCsvButton?.addEventListener("click", downloadSelectedCsv);
     elements.resultsExportSelectedTxtButton?.addEventListener("click", downloadSelectedTxt);
+    elements.resultsCopySelectedLinesButton?.addEventListener("click", () => { void copySelectedLines(); });
+    elements.resultsCopySelectedCommaButton?.addEventListener("click", () => { void copySelectedComma(); });
     elements.exportTitleCsvButton?.addEventListener("click", downloadTitleCsv);
     setExpandLimitPreset(elements.expandMaxResultsInput?.value || "1000");
 }
@@ -6949,6 +7138,10 @@ function handleResultsGridClick(event) {
     const inlineTrigger = event.target.closest("[data-inline-action]");
     if (inlineTrigger) {
         const action = inlineTrigger.getAttribute("data-inline-action") || "";
+        if (action === "seedify_keyword") {
+            applyKeywordAsSeed(inlineTrigger.getAttribute("data-keyword") || "");
+            return;
+        }
         if (action === "toggle_analysis_grade") {
             toggleGradeFilter(inlineTrigger.getAttribute("data-grade-toggle") || "");
             return;
@@ -11229,11 +11422,37 @@ function renderAnalysisKeywordCell(item) {
                 <strong>${escapeHtml(item.keyword || "-")}</strong>
                 ${meta.length ? `<span>${escapeHtml(meta.join(" / "))}</span>` : ""}
             </div>
-            ${renderKeywordWorkflowInline(item.keyword, { compact: true })}
+            <div class="analysis-keyword-tools">
+                ${renderKeywordWorkflowInline(item.keyword, { compact: true })}
+                ${renderKeywordSeedifyAction(item.keyword)}
+            </div>
         </div>
     `;
 }
 
+function applyKeywordAsSeed(keyword) {
+    const normalizedKeyword = normalizeKeywordLabel(keyword);
+    if (!normalizedKeyword || !elements.seedInput) {
+        return;
+    }
+
+    const seedModeRadio = document.querySelector("input[name='collectorMode'][value='seed']");
+    if (seedModeRadio instanceof HTMLInputElement) {
+        seedModeRadio.checked = true;
+    }
+    elements.seedInput.value = normalizedKeyword;
+    persistTrendSettings();
+    renderInputState();
+    elements.seedInput.focus();
+    elements.seedInput.select();
+    const message = `시드 키워드에 "${normalizedKeyword}"를 올렸습니다. 실행은 직접 눌러 주세요.`;
+    addLog(message, "success");
+    showUserNotice({
+        message,
+        type: "success",
+        noticeDurationMs: 1800,
+    });
+}
 
 function handleResultsGridInput(event) {
     const target = event.target;

@@ -2565,6 +2565,13 @@ body.utility-drawer-open {
     line-height: 1.4;
     word-break: break-word;
 }
+
+.expanded-keyword-cell {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
 .expanded-more {
     border-radius: 18px;
     border: 1px solid rgba(20, 32, 51, 0.08);
@@ -4247,10 +4254,11 @@ body.utility-drawer-open {
 
 .analysis-keyword-cell {
     display: inline-flex;
-    align-items: center;
+    align-items: flex-start;
+    flex-wrap: wrap;
     gap: 8px;
     min-width: max-content;
-    white-space: nowrap;
+    white-space: normal;
 }
 
 .analysis-keyword-cell strong {
@@ -4263,6 +4271,20 @@ body.utility-drawer-open {
     margin-top: 0;
     color: var(--muted);
     font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.analysis-keyword-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.keyword-seedify-btn {
+    padding: 7px 11px;
+    font-size: 0.76rem;
+    font-weight: 800;
     white-space: nowrap;
 }
 
