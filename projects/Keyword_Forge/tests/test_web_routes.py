@@ -87,6 +87,13 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "titleIssueSourceMode" in response.text
     assert "titleCommunityCustomDomains" in response.text
     assert "data-title-community-source" in response.text
+    assert "titleSurfaceHome" in response.text
+    assert "titleSurfaceBlog" in response.text
+    assert "titleSurfaceHybrid" in response.text
+    assert "titleSurfaceHomeCount" in response.text
+    assert "titleSurfaceBlogCount" in response.text
+    assert "titleSurfaceHybridCount" in response.text
+    assert "titleSurfaceSummary" in response.text
     assert "자동 선별" in response.text
     assert "황금형" in response.text
     assert "노출형" in response.text

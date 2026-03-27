@@ -13,6 +13,7 @@ from openpyxl import Workbook
 
 from app.expander.utils.tokenizer import normalize_text
 from app.title.rules import TITLE_QUALITY_REVIEW_SCORE
+from app.title.types import TITLE_CHANNEL_EXPORT_SEGMENTS, TITLE_CHANNEL_ORDER
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -21,20 +22,14 @@ _KST = ZoneInfo("Asia/Seoul")
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 _FILENAME_SPACE_PATTERN = re.compile(r"\s+")
 _FORMAT_SPLIT_PATTERN = re.compile(r"[\s,|;/]+")
-_TITLE_EXPORT_HEADER = [
+_TITLE_EXPORT_BASE_HEADER = [
     "keyword",
     "bundle_score",
     "bundle_status",
-    "naver_home_score",
-    "blog_score",
     "target_mode",
     "source_kind",
     "duplicate",
     "recent_used_date",
-    "naver_home_1",
-    "naver_home_2",
-    "blog_1",
-    "blog_2",
 ]
 _DEFAULT_EXPORT_FORMATS = ("csv",)
 _ALL_EXPORT_FORMATS = ("csv", "xlsx", "md")
@@ -142,12 +137,16 @@ def export_generated_titles(
     seed_keyword_label = _resolve_seed_keyword_label(input_data, generated_titles)
     output_root = Path(settings.output_root)
     output_root.mkdir(parents=True, exist_ok=True)
-    export_rows = _build_title_export_rows(generated_titles)
+    channel_counts = _resolve_export_channel_counts(generated_titles)
+    export_header = _build_title_export_header(channel_counts)
+    export_rows = _build_title_export_rows(generated_titles, channel_counts=channel_counts)
+    surface_segment = _build_export_surface_segment(channel_counts)
 
     filename_stem = _build_filename_stem(
         now=now,
         category_label=category_label,
         seed_keyword_label=seed_keyword_label,
+        surface_segment=surface_segment,
     )
     artifact_dirs = {
         format_key: _resolve_format_output_dir(output_root, format_key, now=now)
@@ -163,6 +162,7 @@ def export_generated_titles(
         _write_title_export_file(
             format_key=format_key,
             artifact_path=artifact_path,
+            export_header=export_header,
             export_rows=export_rows,
             generated_titles=generated_titles,
             now=now,
@@ -201,7 +201,44 @@ def export_generated_titles(
     return payload
 
 
-def _build_title_export_rows(generated_titles: list[dict[str, Any]]) -> list[list[str]]:
+def _resolve_export_channel_counts(generated_titles: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {channel_name: 0 for channel_name in TITLE_CHANNEL_ORDER}
+    for item in generated_titles:
+        if not isinstance(item, dict):
+            continue
+        titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
+        for channel_name in TITLE_CHANNEL_ORDER:
+            channel_titles = titles.get(channel_name) if isinstance(titles.get(channel_name), list) else []
+            counts[channel_name] = max(counts[channel_name], len(channel_titles))
+    return counts
+
+
+def _build_title_export_header(channel_counts: dict[str, int]) -> list[str]:
+    header = _TITLE_EXPORT_BASE_HEADER[:3]
+    for channel_name in TITLE_CHANNEL_ORDER:
+        if channel_counts.get(channel_name, 0) > 0:
+            header.append(f"{channel_name}_score")
+    header.extend(_TITLE_EXPORT_BASE_HEADER[3:])
+    for channel_name in TITLE_CHANNEL_ORDER:
+        for index in range(int(channel_counts.get(channel_name, 0) or 0)):
+            header.append(f"{channel_name}_{index + 1}")
+    return header
+
+
+def _build_export_surface_segment(channel_counts: dict[str, int]) -> str:
+    active_segments = [
+        TITLE_CHANNEL_EXPORT_SEGMENTS[channel_name]
+        for channel_name in TITLE_CHANNEL_ORDER
+        if int(channel_counts.get(channel_name, 0) or 0) > 0
+    ]
+    return "-".join(active_segments) if active_segments else "titles"
+
+
+def _build_title_export_rows(
+    generated_titles: list[dict[str, Any]],
+    *,
+    channel_counts: dict[str, int],
+) -> list[list[str]]:
     rows: list[list[str]] = []
     for item in generated_titles:
         if not isinstance(item, dict):
@@ -209,25 +246,27 @@ def _build_title_export_rows(generated_titles: list[dict[str, Any]]) -> list[lis
         titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
         quality_report = item.get("quality_report") if isinstance(item.get("quality_report"), dict) else {}
         channel_scores = quality_report.get("channel_scores") if isinstance(quality_report.get("channel_scores"), dict) else {}
-        naver_home_titles = titles.get("naver_home") if isinstance(titles.get("naver_home"), list) else []
-        blog_titles = titles.get("blog") if isinstance(titles.get("blog"), list) else []
-        rows.append(
+        row = [
+            normalize_text(item.get("keyword")),
+            str(int(quality_report.get("bundle_score") or 0)) if quality_report else "",
+            normalize_text(quality_report.get("status")),
+        ]
+        for channel_name in TITLE_CHANNEL_ORDER:
+            if channel_counts.get(channel_name, 0) > 0:
+                row.append(str(int(channel_scores.get(channel_name) or 0)) if channel_scores else "")
+        row.extend(
             [
-                normalize_text(item.get("keyword")),
-                str(int(quality_report.get("bundle_score") or 0)) if quality_report else "",
-                normalize_text(quality_report.get("status")),
-                str(int(channel_scores.get("naver_home") or 0)) if channel_scores else "",
-                str(int(channel_scores.get("blog") or 0)) if channel_scores else "",
                 normalize_text(item.get("target_mode")),
                 normalize_text(item.get("source_kind")),
                 "",
                 "",
-                normalize_text(naver_home_titles[0]) if len(naver_home_titles) > 0 else "",
-                normalize_text(naver_home_titles[1]) if len(naver_home_titles) > 1 else "",
-                normalize_text(blog_titles[0]) if len(blog_titles) > 0 else "",
-                normalize_text(blog_titles[1]) if len(blog_titles) > 1 else "",
             ]
         )
+        for channel_name in TITLE_CHANNEL_ORDER:
+            channel_titles = titles.get(channel_name) if isinstance(titles.get(channel_name), list) else []
+            for index in range(int(channel_counts.get(channel_name, 0) or 0)):
+                row.append(normalize_text(channel_titles[index]) if index < len(channel_titles) else "")
+        rows.append(row)
     return rows
 
 
@@ -388,6 +427,7 @@ def _write_title_export_file(
     *,
     format_key: str,
     artifact_path: Path,
+    export_header: list[str],
     export_rows: list[list[str]],
     generated_titles: list[dict[str, Any]],
     now: datetime,
@@ -395,11 +435,12 @@ def _write_title_export_file(
     seed_keyword_label: str,
 ) -> None:
     if format_key == "csv":
-        _write_csv_export(artifact_path, export_rows)
+        _write_csv_export(artifact_path, export_header, export_rows)
         return
     if format_key == "xlsx":
         _write_xlsx_export(
             artifact_path,
+            export_header,
             export_rows,
             now=now,
             category_label=category_label,
@@ -431,10 +472,10 @@ def _write_title_export_file(
     raise ValueError(f"unsupported title export format: {format_key}")
 
 
-def _write_csv_export(artifact_path: Path, export_rows: list[list[str]]) -> None:
+def _write_csv_export(artifact_path: Path, export_header: list[str], export_rows: list[list[str]]) -> None:
     with artifact_path.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(_TITLE_EXPORT_HEADER)
+        writer.writerow(export_header)
         writer.writerows(export_rows)
 
 
@@ -459,6 +500,7 @@ def _write_live_queue_file(path: Path, lines: list[str], *, append: bool) -> Non
 
 def _write_xlsx_export(
     artifact_path: Path,
+    export_header: list[str],
     export_rows: list[list[str]],
     *,
     now: datetime,
@@ -474,7 +516,7 @@ def _write_xlsx_export(
     summary_sheet.append(["row_count", len(export_rows)])
 
     title_sheet = workbook.create_sheet("titles")
-    title_sheet.append(_TITLE_EXPORT_HEADER)
+    title_sheet.append(export_header)
     for row in export_rows:
         title_sheet.append(row)
 
@@ -497,18 +539,19 @@ def _build_markdown_export_text(
         f"- row_count: {len(generated_titles)}",
         "",
     ]
+    channel_counts = _resolve_export_channel_counts(generated_titles)
     for item in generated_titles:
         if not isinstance(item, dict):
             continue
         keyword = normalize_text(item.get("keyword")) or "untitled-keyword"
         titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
-        naver_home_titles = titles.get("naver_home") if isinstance(titles.get("naver_home"), list) else []
-        blog_titles = titles.get("blog") if isinstance(titles.get("blog"), list) else []
         lines.append(f"## {keyword}")
-        lines.append(f"- naver_home_1: {normalize_text(naver_home_titles[0]) if len(naver_home_titles) > 0 else ''}")
-        lines.append(f"- naver_home_2: {normalize_text(naver_home_titles[1]) if len(naver_home_titles) > 1 else ''}")
-        lines.append(f"- blog_1: {normalize_text(blog_titles[0]) if len(blog_titles) > 0 else ''}")
-        lines.append(f"- blog_2: {normalize_text(blog_titles[1]) if len(blog_titles) > 1 else ''}")
+        for channel_name in TITLE_CHANNEL_ORDER:
+            channel_titles = titles.get(channel_name) if isinstance(titles.get(channel_name), list) else []
+            for index in range(int(channel_counts.get(channel_name, 0) or 0)):
+                lines.append(
+                    f"- {channel_name}_{index + 1}: {normalize_text(channel_titles[index]) if index < len(channel_titles) else ''}"
+                )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -528,18 +571,19 @@ def _build_text_export(
         f"row_count: {len(generated_titles)}",
         "",
     ]
+    channel_counts = _resolve_export_channel_counts(generated_titles)
     for item in generated_titles:
         if not isinstance(item, dict):
             continue
         keyword = normalize_text(item.get("keyword")) or "untitled-keyword"
         titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
-        naver_home_titles = titles.get("naver_home") if isinstance(titles.get("naver_home"), list) else []
-        blog_titles = titles.get("blog") if isinstance(titles.get("blog"), list) else []
         lines.append(f"[{keyword}]")
-        lines.append(f"naver_home_1: {normalize_text(naver_home_titles[0]) if len(naver_home_titles) > 0 else ''}")
-        lines.append(f"naver_home_2: {normalize_text(naver_home_titles[1]) if len(naver_home_titles) > 1 else ''}")
-        lines.append(f"blog_1: {normalize_text(blog_titles[0]) if len(blog_titles) > 0 else ''}")
-        lines.append(f"blog_2: {normalize_text(blog_titles[1]) if len(blog_titles) > 1 else ''}")
+        for channel_name in TITLE_CHANNEL_ORDER:
+            channel_titles = titles.get(channel_name) if isinstance(titles.get(channel_name), list) else []
+            for index in range(int(channel_counts.get(channel_name, 0) or 0)):
+                lines.append(
+                    f"{channel_name}_{index + 1}: {normalize_text(channel_titles[index]) if index < len(channel_titles) else ''}"
+                )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -674,11 +718,13 @@ def _build_filename_stem(
     now: datetime,
     category_label: str,
     seed_keyword_label: str,
+    surface_segment: str,
 ) -> str:
     timestamp = now.strftime("%Y%m%d-%H%M%S")
     category_segment = _sanitize_filename_segment(category_label, fallback="uncategorized")
     seed_segment = _sanitize_filename_segment(seed_keyword_label, fallback="titles")
-    return f"{timestamp}__{category_segment}__{seed_segment}"
+    surface_key = _sanitize_filename_segment(surface_segment, fallback="titles")
+    return f"{timestamp}__{category_segment}__{seed_segment}__{surface_key}"
 
 
 def _sanitize_filename_segment(value: str, *, fallback: str) -> str:

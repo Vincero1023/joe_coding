@@ -16,6 +16,7 @@ from app.title.rules import (
     TITLE_QUALITY_PASS_SCORE,
     TITLE_QUALITY_REVIEW_SCORE,
 )
+from app.title.types import TITLE_CHANNEL_LABELS, TITLE_CHANNEL_ORDER
 _NOISY_PUNCTUATION_RE = re.compile(r"[!?]{2,}|\.{3,}")
 _FORBIDDEN_TITLE_PUNCTUATION = (":", "：")
 _MODEL_NUMBER_TOKEN_RE = re.compile(r"(?i)^[a-z]{1,6}\d{2,4}[a-z0-9-]*$")
@@ -780,20 +781,23 @@ def refresh_title_results_for_changed_slots(
         item = items[item_index]
         keyword = normalize_text(item.get("keyword"))
         titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
-        naver_home_titles = _normalize_title_list(titles.get("naver_home"))
-        blog_titles = _normalize_title_list(titles.get("blog"))
-        duplicate_counts = _count_duplicates(naver_home_titles + blog_titles)
+        normalized_titles = {
+            channel_name: _normalize_title_list(titles.get(channel_name))
+            for channel_name in TITLE_CHANNEL_ORDER
+        }
+        duplicate_counts = _count_duplicates(
+            [
+                title
+                for channel_name in TITLE_CHANNEL_ORDER
+                for title in normalized_titles.get(channel_name, [])
+            ]
+        )
         channel_reports = _clone_title_checks(next_base_reports[item_index].get("title_checks", {}))
 
         for slot_entry in slot_entries:
             channel_name = str(slot_entry.get("channel") or "").strip()
             slot_position = int(slot_entry.get("slot_index") or 0) - 1
-            if channel_name == "naver_home":
-                title_list = naver_home_titles
-            elif channel_name == "blog":
-                title_list = blog_titles
-            else:
-                title_list = []
+            title_list = normalized_titles.get(channel_name, [])
             if slot_position < 0 or slot_position >= len(title_list):
                 continue
             while len(channel_reports.setdefault(channel_name, [])) <= slot_position:
@@ -812,13 +816,22 @@ def refresh_title_results_for_changed_slots(
                 if channel_name == "naver_home"
                 else {}
             )
-            channel_reports[channel_name][slot_position] = assess_single_title(
-                keyword,
-                title_list[slot_position],
-                channel_name,
-                duplicate_counts,
-                item_context=item,
-                ai_evaluation=ai_evaluation,
+            channel_reports[channel_name][slot_position] = (
+                assess_single_title(
+                    keyword,
+                    title_list[slot_position],
+                    channel_name,
+                    duplicate_counts,
+                    item_context=item,
+                    ai_evaluation=ai_evaluation,
+                )
+                if channel_name != "hybrid"
+                else _assess_hybrid_title(
+                    keyword,
+                    title_list[slot_position],
+                    duplicate_counts,
+                    item_context=item,
+                )
             )
 
         next_base_reports[item_index] = _build_bundle_report(keyword, channel_reports)
@@ -928,9 +941,17 @@ def assess_title_bundle(
 ) -> dict[str, Any]:
     keyword = normalize_text(item.get("keyword"))
     titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
-    naver_home_titles = _normalize_title_list(titles.get("naver_home"))
-    blog_titles = _normalize_title_list(titles.get("blog"))
-    duplicate_counts = _count_duplicates(naver_home_titles + blog_titles)
+    normalized_titles = {
+        channel_name: _normalize_title_list(titles.get(channel_name))
+        for channel_name in TITLE_CHANNEL_ORDER
+    }
+    duplicate_counts = _count_duplicates(
+        [
+            title
+            for channel_name in TITLE_CHANNEL_ORDER
+            for title in normalized_titles.get(channel_name, [])
+        ]
+    )
     resolved_naver_home_ai_evaluations = list(naver_home_ai_evaluations or [])
 
     channel_reports: dict[str, list[dict[str, Any]]] = {
@@ -947,14 +968,72 @@ def assess_title_bundle(
                     else {}
                 ),
             )
-            for index, title in enumerate(naver_home_titles)
+            for index, title in enumerate(normalized_titles["naver_home"])
         ],
         "blog": [
             assess_single_title(keyword, title, "blog", duplicate_counts, item_context=item)
-            for title in blog_titles
+            for title in normalized_titles["blog"]
+        ],
+        "hybrid": [
+            _assess_hybrid_title(keyword, title, duplicate_counts, item_context=item)
+            for title in normalized_titles["hybrid"]
         ],
     }
     return _build_bundle_report(keyword, channel_reports)
+
+
+def _assess_hybrid_title(
+    keyword: str,
+    title: str,
+    duplicate_counts: dict[str, int],
+    *,
+    item_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    home_report = assess_single_title(
+        keyword,
+        title,
+        "naver_home",
+        duplicate_counts,
+        item_context=item_context,
+    )
+    blog_report = assess_single_title(
+        keyword,
+        title,
+        "blog",
+        duplicate_counts,
+        item_context=item_context,
+    )
+    home_score = int(home_report.get("score") or 0)
+    blog_score = int(blog_report.get("score") or 0)
+    balance_gap = abs(home_score - blog_score)
+    balance_bonus = max(0, 12 - min(12, balance_gap // 2))
+    score = round(((home_score + blog_score) / 2) + (balance_bonus / 4))
+    critical = bool(home_report.get("critical")) or bool(blog_report.get("critical"))
+    issues = _unique_preserve_order(
+        list(home_report.get("issues", [])) + list(blog_report.get("issues", []))
+    )
+    status = _resolve_title_status(max(0, min(100, score)), critical)
+    return {
+        "title": normalize_text(title),
+        "score": max(0, min(100, score)),
+        "status": status,
+        "critical": critical,
+        "issues": issues,
+        "score_breakdown": {
+            "home_fit": home_score,
+            "blog_fit": blog_score,
+            "balance_bonus": balance_bonus,
+        },
+        "checks": {
+            "contains_keyword": bool(home_report.get("checks", {}).get("contains_keyword"))
+            and bool(blog_report.get("checks", {}).get("contains_keyword")),
+            "starts_with_keyword": bool(home_report.get("checks", {}).get("starts_with_keyword"))
+            or bool(blog_report.get("checks", {}).get("starts_with_keyword")),
+            "length_ok": bool(home_report.get("checks", {}).get("length_ok")),
+            "duplicate_risk": bool(home_report.get("checks", {}).get("duplicate_risk")),
+            "hybrid_balanced": balance_gap <= 20,
+        },
+    }
 
 
 def assess_single_title(
@@ -1316,13 +1395,23 @@ def _build_bundle_report(
     keyword: str,
     channel_reports: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
-    all_reports = channel_reports.get("naver_home", []) + channel_reports.get("blog", [])
+    active_channels = [
+        channel_name
+        for channel_name in TITLE_CHANNEL_ORDER
+        if channel_reports.get(channel_name)
+    ]
+    all_reports = [
+        report
+        for channel_name in active_channels
+        for report in channel_reports.get(channel_name, [])
+    ]
     all_titles = [report["title"] for report in all_reports if normalize_text(report.get("title"))]
     bundle_issues: list[str] = []
     channel_scores: dict[str, int] = {}
     critical_issue = False
 
-    for channel_name, title_reports in channel_reports.items():
+    for channel_name in active_channels:
+        title_reports = channel_reports.get(channel_name, [])
         base_score = round(sum(report["score"] for report in title_reports) / len(title_reports)) if title_reports else 0
         variation_penalty, variation_issue = _assess_channel_variation(keyword, channel_name, title_reports)
         channel_scores[channel_name] = max(0, base_score - variation_penalty)
@@ -1339,12 +1428,14 @@ def _build_bundle_report(
     channel_good_counts = {
         channel_name: sum(1 for report in title_reports if report.get("status") == "good")
         for channel_name, title_reports in channel_reports.items()
+        if title_reports
     }
     channel_usable_counts = {
         channel_name: sum(1 for report in title_reports if report.get("status") != "retry")
         for channel_name, title_reports in channel_reports.items()
+        if title_reports
     }
-    required_channels = ("naver_home", "blog")
+    required_channels = active_channels
     recommended_pair_ready = all(channel_good_counts.get(channel_name, 0) > 0 for channel_name in required_channels)
     usable_pair_ready = all(channel_usable_counts.get(channel_name, 0) > 0 for channel_name in required_channels)
 
@@ -1488,7 +1579,7 @@ def _assess_channel_variation(
         return 0, ""
 
     penalty = 12 if similarity >= 0.92 else 8
-    label = "네이버 홈형" if channel_name == "naver_home" else "블로그형"
+    label = TITLE_CHANNEL_LABELS.get(channel_name, str(channel_name or ""))
     return penalty, f"{label} 제목 2개가 너무 비슷합니다."
 
 
@@ -2000,10 +2091,10 @@ def _reorder_titles_for_output(
 ) -> tuple[dict[str, list[str]], dict[str, list[dict[str, Any]]]]:
     raw_titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
     raw_title_checks = report.get("title_checks") if isinstance(report.get("title_checks"), dict) else {}
-    reordered_titles: dict[str, list[str]] = {"naver_home": [], "blog": []}
-    reordered_checks: dict[str, list[dict[str, Any]]] = {"naver_home": [], "blog": []}
+    reordered_titles: dict[str, list[str]] = {channel_name: [] for channel_name in TITLE_CHANNEL_ORDER}
+    reordered_checks: dict[str, list[dict[str, Any]]] = {channel_name: [] for channel_name in TITLE_CHANNEL_ORDER}
 
-    for channel_name in ("naver_home", "blog"):
+    for channel_name in TITLE_CHANNEL_ORDER:
         channel_titles = list(raw_titles.get(channel_name, [])) if isinstance(raw_titles.get(channel_name), list) else []
         channel_checks = list(raw_title_checks.get(channel_name, [])) if isinstance(raw_title_checks.get(channel_name), list) else []
         sorted_titles, sorted_checks = _sort_channel_titles_by_quality(channel_titles, channel_checks)
@@ -2310,10 +2401,10 @@ def _join_labels_for_issue(labels: list[str]) -> str:
 
 def _clone_title_checks(raw_title_checks: Any) -> dict[str, list[dict[str, Any]]]:
     if not isinstance(raw_title_checks, dict):
-        return {"naver_home": [], "blog": []}
+        return {channel_name: [] for channel_name in TITLE_CHANNEL_ORDER}
 
     cloned: dict[str, list[dict[str, Any]]] = {}
-    for channel_name in ("naver_home", "blog"):
+    for channel_name in TITLE_CHANNEL_ORDER:
         channel_reports = raw_title_checks.get(channel_name)
         if not isinstance(channel_reports, list):
             cloned[channel_name] = []
@@ -2341,7 +2432,7 @@ def _clone_bundle_report(report: Any) -> dict[str, Any]:
             "issues": [],
             "summary": "",
             "channel_scores": {},
-            "title_checks": {"naver_home": [], "blog": []},
+            "title_checks": {channel_name: [] for channel_name in TITLE_CHANNEL_ORDER},
             "channel_good_counts": {},
             "channel_usable_counts": {},
             "recommended_pair_ready": False,
@@ -2399,7 +2490,7 @@ def _group_changed_slots_by_item(
             slot_index = int(slot.get("slot_index") or 0)
         except (TypeError, ValueError):
             continue
-        if channel_name not in {"naver_home", "blog"} or slot_index <= 0:
+        if channel_name not in TITLE_CHANNEL_ORDER or slot_index <= 0:
             continue
         grouped.setdefault(item_index, []).append(
             {

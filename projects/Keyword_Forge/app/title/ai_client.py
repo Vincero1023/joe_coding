@@ -25,6 +25,16 @@ from app.title.issue_sources import (
 )
 from app.title.presets import DEFAULT_TITLE_PRESET_KEY, get_title_preset
 from app.title.rules import NAVER_HOME_MAX_LENGTH, TITLE_QUALITY_REVIEW_SCORE
+from app.title.types import (
+    DEFAULT_TITLE_CHANNEL_COUNTS,
+    DEFAULT_TITLE_CHANNEL_ORDER,
+    TITLE_CHANNEL_LABELS,
+    TITLE_CHANNEL_ORDER,
+    TITLE_CHANNEL_SHORT_LABELS,
+    build_title_channel_counts,
+    create_empty_generated_titles,
+    normalize_title_channels,
+)
 
 
 _OPENAI_URL = "https://api.openai.com/v1/chat/completions"
@@ -240,15 +250,14 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Keep those keyword tokens in the same order, even when you insert short modifiers between them.\n"
     "Do not shorten or compress the keyword phrase. If the keyword starts with descriptive words, keep them all.\n"
     "Do not drop or paraphrase modifier tokens such as 체크리스트, 비교, 후기, 가격, 일정, 신청방법, 원인, 부작용, 추천, or 가이드.\n"
-    "For every keyword, generate exactly 2 naver_home titles and 2 blog titles.\n"
-    f"Each naver_home title must be {NAVER_HOME_MAX_LENGTH} characters or fewer.\n"
+    "Generate only the requested channels and requested counts for each keyword.\n"
+    f"Each naver_home and hybrid title must be {NAVER_HOME_MAX_LENGTH} characters or fewer.\n"
     "Write natural Korean titles that sound like a real editor wrote them.\n"
     "Keep the keyword near the front unless it becomes awkward.\n"
     "Prefer concise hook-first wording: one clear hook plus one concrete noun is better than a long abstract explanation.\n"
     "Do not use a colon in any title, including full-width punctuation like ：.\n"
     "Prefer zero or one comma per title.\n"
-    "The 2 naver_home titles for the same keyword must use clearly different framing.\n"
-    "The 2 blog titles for the same keyword must use clearly different framing.\n"
+    "Titles within the same channel for the same keyword must use clearly different framing.\n"
     "For naver_home titles, when natural, combine at least two of issue/update, debate/comparison, and reversal/question framing.\n"
     "Across the whole batch, avoid repeating the same headline skeleton.\n"
     "Favor timely issue-aware framing over evergreen encyclopedia phrasing when the keyword allows it.\n"
@@ -307,6 +316,11 @@ _SLOT_TITLE_SYSTEM_PROMPT = (
     "- Include method, condition, comparison, or criteria.\n"
     "- Avoid vague wording and excessive emotional hooks.\n"
     "\n"
+    "[HYBRID RULES]\n"
+    f"- Keep hybrid titles within {NAVER_HOME_MAX_LENGTH} characters.\n"
+    "- Make each hybrid title usable for both home-feed exposure and blog SEO.\n"
+    "- Balance curiosity and clarity instead of leaning too far to one side.\n"
+    "\n"
     "[REWRITE MODE]\n"
     "Goal: Fix the title based on issues and improve quality.\n"
     "- The rewritten title must be clearly different from current_title.\n"
@@ -356,6 +370,10 @@ class TitleGenerationOptions:
     issue_context_limit: int = _ISSUE_CONTEXT_DEFAULT_LIMIT
     issue_source_mode: str = DEFAULT_ISSUE_SOURCE_MODE
     community_sources: tuple[str, ...] = ()
+    surface_modes: tuple[str, ...] = DEFAULT_TITLE_CHANNEL_ORDER
+    naver_home_count: int = DEFAULT_TITLE_CHANNEL_COUNTS["naver_home"]
+    blog_count: int = DEFAULT_TITLE_CHANNEL_COUNTS["blog"]
+    hybrid_count: int = DEFAULT_TITLE_CHANNEL_COUNTS["hybrid"]
 
     @classmethod
     def from_input(cls, input_data: Any) -> "TitleGenerationOptions":
@@ -387,6 +405,33 @@ class TitleGenerationOptions:
         )
         max_output_tokens = _coerce_int(raw.get("max_output_tokens"), default=1200, minimum=200, maximum=4000)
         batch_size = _coerce_int(raw.get("batch_size"), default=20, minimum=1, maximum=20)
+        surface_modes = normalize_title_channels(
+            raw.get("surface_modes")
+            or raw.get("title_surfaces")
+            or raw.get("surface_types")
+            or list(DEFAULT_TITLE_CHANNEL_ORDER)
+        )
+        if not surface_modes:
+            surface_modes = DEFAULT_TITLE_CHANNEL_ORDER
+        surface_counts = build_title_channel_counts(
+            raw_counts=raw.get("surface_counts") or raw.get("title_surface_counts"),
+            enabled_channels=surface_modes,
+        )
+        if "naver_home_count" in raw:
+            surface_counts["naver_home"] = max(
+                1,
+                _coerce_int(raw.get("naver_home_count"), default=surface_counts["naver_home"], minimum=1, maximum=4),
+            )
+        if "blog_count" in raw:
+            surface_counts["blog"] = max(
+                1,
+                _coerce_int(raw.get("blog_count"), default=surface_counts["blog"], minimum=1, maximum=4),
+            )
+        if "hybrid_count" in raw:
+            surface_counts["hybrid"] = max(
+                1,
+                _coerce_int(raw.get("hybrid_count"), default=surface_counts["hybrid"] or 1, minimum=1, maximum=4),
+            )
 
         has_explicit_community_sources = (
             "community_sources" in raw
@@ -443,6 +488,10 @@ class TitleGenerationOptions:
             ),
             issue_source_mode=normalize_issue_source_mode(raw.get("issue_source_mode") or preset_issue_source_mode),
             community_sources=community_sources,
+            surface_modes=tuple(surface_modes),
+            naver_home_count=surface_counts["naver_home"],
+            blog_count=surface_counts["blog"],
+            hybrid_count=surface_counts["hybrid"],
         )
 
     @property
@@ -450,11 +499,103 @@ class TitleGenerationOptions:
         prompt_sections = [_DEFAULT_SYSTEM_PROMPT]
         preset_prompt = normalize_text(self.preset_prompt)
         extra_prompt = normalize_text(self.system_prompt)
+        prompt_sections.append(_build_title_channel_guidance(self))
         if preset_prompt:
             prompt_sections.append(f"Preset guidance:\n{preset_prompt}")
         if extra_prompt:
             prompt_sections.append(f"Additional guidance:\n{extra_prompt}")
         return "\n\n".join(prompt_sections)
+
+    @property
+    def channel_counts(self) -> dict[str, int]:
+        return {
+            "naver_home": max(0, int(self.naver_home_count or 0)),
+            "blog": max(0, int(self.blog_count or 0)),
+            "hybrid": max(0, int(self.hybrid_count or 0)),
+        }
+
+
+def _build_response_shape_text() -> str:
+    return (
+        '{\n'
+        '  "items": [\n'
+        '    {\n'
+        '      "keyword": "보험 추천",\n'
+        '      "naver_home": ["..."],\n'
+        '      "blog": ["..."],\n'
+        '      "hybrid": ["..."]\n'
+        "    }\n"
+        "  ]\n"
+        "}"
+    )
+
+
+def _resolve_channel_counts(options: TitleGenerationOptions | None = None) -> dict[str, int]:
+    if options is None:
+        return {
+            channel_name: DEFAULT_TITLE_CHANNEL_COUNTS[channel_name]
+            for channel_name in TITLE_CHANNEL_ORDER
+        }
+    return {
+        channel_name: max(0, int(options.channel_counts.get(channel_name, 0)))
+        for channel_name in TITLE_CHANNEL_ORDER
+    }
+
+
+def _build_channel_count_rules(options: TitleGenerationOptions | None = None) -> str:
+    channel_counts = _resolve_channel_counts(options)
+    rule_parts: list[str] = []
+    for channel_name in TITLE_CHANNEL_ORDER:
+        label = TITLE_CHANNEL_SHORT_LABELS[channel_name]
+        count = channel_counts[channel_name]
+        if count > 0:
+            rule_parts.append(f"{label} {count}개")
+        else:
+            rule_parts.append(f"{label} 0개([])")
+    return f"- Requested channel counts: {', '.join(rule_parts)}."
+
+
+def _build_title_channel_guidance(options: TitleGenerationOptions) -> str:
+    channel_counts = _resolve_channel_counts(options)
+    enabled_channels = [
+        channel_name
+        for channel_name in TITLE_CHANNEL_ORDER
+        if channel_counts[channel_name] > 0
+    ]
+    guidance_lines = [
+        "[REQUESTED CHANNELS]",
+        _build_channel_count_rules(options),
+        "- Return every channel key in the JSON output.",
+        "- If a channel count is 0, return an empty array for that channel.",
+    ]
+    for channel_name in enabled_channels:
+        label = TITLE_CHANNEL_LABELS[channel_name]
+        guidance_lines.append(f"- {label}: return exactly {channel_counts[channel_name]} titles.")
+    return "\n".join(guidance_lines)
+
+
+def _build_requested_user_prompt_from_items(
+    input_items: list[Any],
+    *,
+    options: TitleGenerationOptions,
+) -> str:
+    base_prompt = _build_user_prompt_from_items(input_items)
+    prompt = base_prompt.replace(
+        "- naver_home and blog must each contain exactly 2 items.\n",
+        f"{_build_channel_count_rules(options)}\n"
+        "- Return every channel key and use [] for any channel with count 0.\n",
+        1,
+    )
+    prompt = prompt.replace(
+        f"- Keep every naver_home title within {NAVER_HOME_MAX_LENGTH} Korean characters.\n",
+        f"- Keep every naver_home and hybrid title within {NAVER_HOME_MAX_LENGTH} Korean characters.\n",
+        1,
+    )
+    return (
+        f"{prompt}\n"
+        "JSON keys per item: keyword, naver_home, blog, hybrid.\n"
+        f"- Keep every hybrid title within {NAVER_HOME_MAX_LENGTH} Korean characters.\n"
+    )
 
 
 def request_ai_titles(
@@ -468,7 +609,7 @@ def request_ai_titles(
         raise TitleProviderError("AI mode requires an API key.")
 
     prompt_items = _attach_live_issue_contexts(input_items, options)
-    prompt = _build_user_prompt_from_items(prompt_items)
+    prompt = _build_requested_user_prompt_from_items(prompt_items, options=options)
     if options.provider == "openai":
         return _request_openai_titles(prompt, options)
     if options.provider == "gemini":
@@ -641,7 +782,7 @@ def _request_openai_titles(prompt: str, options: TitleGenerationOptions) -> list
         .get("message", {})
         .get("content", "")
     )
-    return _parse_title_items(content)
+    return _parse_title_items(content, options=options)
 
 
 def _request_gemini_titles(prompt: str, options: TitleGenerationOptions) -> list[dict[str, Any]]:
@@ -653,7 +794,7 @@ def _request_gemini_titles(prompt: str, options: TitleGenerationOptions) -> list
     url = _GEMINI_URL_TEMPLATE.format(model=options.model)
     response = _post_json(url, headers, payload, max_retries=2)
     content = _extract_gemini_like_text(response)
-    return _parse_title_items(content)
+    return _parse_title_items(content, options=options)
 
 
 def _request_vertex_titles(prompt: str, options: TitleGenerationOptions) -> list[dict[str, Any]]:
@@ -664,7 +805,7 @@ def _request_vertex_titles(prompt: str, options: TitleGenerationOptions) -> list
     url = _VERTEX_EXPRESS_URL_TEMPLATE.format(model=options.model, api_key=quote(options.api_key or "", safe=""))
     response = _post_json(url, headers, payload, max_retries=2)
     content = _extract_gemini_like_text(response)
-    return _parse_title_items(content)
+    return _parse_title_items(content, options=options)
 
 
 def _request_anthropic_titles(prompt: str, options: TitleGenerationOptions) -> list[dict[str, Any]]:
@@ -692,7 +833,7 @@ def _request_anthropic_titles(prompt: str, options: TitleGenerationOptions) -> l
         for item in content_items
         if isinstance(item, dict) and normalize_text(item.get("text"))
     )
-    return _parse_title_items(content)
+    return _parse_title_items(content, options=options)
 
 
 def _post_json(
@@ -948,6 +1089,8 @@ def _parse_json_object_text(raw_text: str) -> dict[str, Any]:
 
 def _build_user_prompt(keywords: list[str]) -> str:
     keyword_lines = "\n".join(f"- {keyword}" for keyword in keywords)
+    title_shape = _build_response_shape_text()
+    count_rules = _build_channel_count_rules()
     return (
         "Generate titles for the following Korean keywords.\n\n"
         "Return JSON in this exact shape:\n"
@@ -1141,10 +1284,9 @@ def _normalize_slot_prompt_items(input_items: list[Any]) -> list[dict[str, Any]]
             continue
         keyword = normalize_text(raw_item.get("keyword"))
         slot_id = normalize_text(raw_item.get("slot_id")) or f"slot_{index}"
-        channel = normalize_text(raw_item.get("channel")).lower()
-        if channel == "home":
-            channel = "naver_home"
-        if channel not in {"naver_home", "blog"} or not keyword:
+        normalized_channel = normalize_title_channels([raw_item.get("channel")])
+        channel = normalized_channel[0] if normalized_channel else ""
+        if channel not in TITLE_CHANNEL_ORDER or not keyword:
             continue
         try:
             slot_index = max(1, int(raw_item.get("slot_index") or 1))
@@ -2027,7 +2169,11 @@ def _format_metric_value(value: Any) -> str:
     return f"{number:,.1f}"
 
 
-def _parse_title_items(content: str) -> list[dict[str, Any]]:
+def _parse_title_items(
+    content: str,
+    *,
+    options: TitleGenerationOptions | None = None,
+) -> list[dict[str, Any]]:
     normalized = normalize_text(content)
     if not normalized:
         raise TitleProviderError("Provider returned empty content.")
@@ -2038,19 +2184,25 @@ def _parse_title_items(content: str) -> list[dict[str, Any]]:
         raise TitleProviderError("Provider JSON must include an items array.")
 
     normalized_items: list[dict[str, Any]] = []
+    channel_counts = _resolve_channel_counts(options)
     for item in items:
         if not isinstance(item, dict):
             continue
         keyword = normalize_text(item.get("keyword"))
         if not keyword:
             continue
+        titles = create_empty_generated_titles()
+        for channel_name in TITLE_CHANNEL_ORDER:
+            max_length = NAVER_HOME_MAX_LENGTH if channel_name in {"naver_home", "hybrid"} else None
+            titles[channel_name] = _normalize_title_list(
+                item.get(channel_name),
+                max_length=max_length,
+                limit=channel_counts[channel_name],
+            )
         normalized_items.append(
             {
                 "keyword": keyword,
-                "titles": {
-                    "naver_home": _normalize_title_list(item.get("naver_home"), NAVER_HOME_MAX_LENGTH),
-                    "blog": _normalize_title_list(item.get("blog")),
-                },
+                "titles": titles,
             }
         )
 
@@ -2208,7 +2360,12 @@ def _try_load_json_candidate(candidate: str) -> Any | None:
         return None
 
 
-def _normalize_title_list(raw_titles: Any, max_length: int | None = None) -> list[str]:
+def _normalize_title_list(
+    raw_titles: Any,
+    max_length: int | None = None,
+    *,
+    limit: int = 2,
+) -> list[str]:
     if not isinstance(raw_titles, list):
         return []
 
@@ -2224,7 +2381,7 @@ def _normalize_title_list(raw_titles: Any, max_length: int | None = None) -> lis
             continue
         seen.add(title)
         normalized_titles.append(title)
-    return normalized_titles[:2]
+    return normalized_titles[: max(0, int(limit or 0))]
 
 
 def _normalize_title_surface(value: Any) -> str:

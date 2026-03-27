@@ -17,6 +17,7 @@ from openpyxl import Workbook
 from app.core.keyword_inputs import parse_keyword_text
 from app.core.runtime_settings import RuntimeGuardError, record_operation_start
 from app.pipeline.main import pipeline_module
+from app.title.types import MAX_TITLE_COUNT_PER_CHANNEL, TITLE_CHANNEL_ORDER
 
 
 _KST = ZoneInfo("Asia/Seoul")
@@ -1004,8 +1005,6 @@ def _normalize_title_rows(payload: Any, context: dict[str, Any]) -> list[dict[st
         if not isinstance(item, dict):
             continue
         titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
-        naver_home = titles.get("naver_home") if isinstance(titles.get("naver_home"), list) else []
-        blog = titles.get("blog") if isinstance(titles.get("blog"), list) else []
         quality_report = item.get("quality_report") if isinstance(item.get("quality_report"), dict) else {}
         row = dict(context)
         row.update(
@@ -1013,14 +1012,14 @@ def _normalize_title_rows(payload: Any, context: dict[str, Any]) -> list[dict[st
                 "keyword": item.get("keyword", ""),
                 "target_mode": item.get("target_mode", ""),
                 "source_kind": item.get("source_kind", ""),
-                "naver_home_1": naver_home[0] if len(naver_home) > 0 else "",
-                "naver_home_2": naver_home[1] if len(naver_home) > 1 else "",
-                "blog_1": blog[0] if len(blog) > 0 else "",
-                "blog_2": blog[1] if len(blog) > 1 else "",
                 "quality_label": quality_report.get("label", ""),
                 "quality_score": quality_report.get("bundle_score", ""),
             }
         )
+        for channel_name in TITLE_CHANNEL_ORDER:
+            channel_titles = titles.get(channel_name) if isinstance(titles.get(channel_name), list) else []
+            for index in range(MAX_TITLE_COUNT_PER_CHANNEL):
+                row[f"{channel_name}_{index + 1}"] = channel_titles[index] if index < len(channel_titles) else ""
         rows.append(row)
     return rows
 

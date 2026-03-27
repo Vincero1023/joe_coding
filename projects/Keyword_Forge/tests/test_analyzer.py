@@ -143,6 +143,13 @@ def test_dual_axis_helpers_classify_gold_combo() -> None:
     assert classify_golden_bucket(profitability_grade, attackability_grade) == "gold"
 
 
+def test_profitability_score_keeps_search_volume_as_minor_signal() -> None:
+    high_volume_score = calculate_profitability_score(80.0, 100.0, 60.0)
+    low_volume_score = calculate_profitability_score(80.0, 10.0, 60.0)
+
+    assert round(high_volume_score - low_volume_score, 1) == 9.0
+
+
 def test_attackability_score_rewards_real_click_activity() -> None:
     base_score = calculate_attackability_score(
         2.0,

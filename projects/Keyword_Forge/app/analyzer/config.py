@@ -8,9 +8,9 @@ class AnalyzerConfig:
     monetization_weight: float = 0.40
     volume_weight: float = 0.35
     rarity_weight: float = 0.25
-    profitability_monetization_weight: float = 0.65
-    profitability_volume_weight: float = 0.20
-    profitability_click_weight: float = 0.15
+    profitability_monetization_weight: float = 0.70
+    profitability_volume_weight: float = 0.10
+    profitability_click_weight: float = 0.20
     attackability_opportunity_weight: float = 0.30
     attackability_rarity_weight: float = 0.05
     attackability_competition_weight: float = 0.25

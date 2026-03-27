@@ -229,6 +229,27 @@ const KEYWORD_STATUS_PRIORITY = {
 const GRADE_ORDER = ["S", "A", "B", "C", "D", "F"];
 const PROFITABILITY_ORDER = ["A", "B", "C", "D", "E", "F"];
 const ATTACKABILITY_ORDER = ["1", "2", "3", "4", "5", "6"];
+const TITLE_SURFACE_ORDER = ["naver_home", "blog", "hybrid"];
+const TITLE_SURFACE_SHORT_LABELS = {
+    naver_home: "홈판",
+    blog: "블로그형",
+    hybrid: "둘다",
+};
+const TITLE_SURFACE_COLUMN_LABELS = {
+    naver_home: "네이버 홈형",
+    blog: "블로그형",
+    hybrid: "공용형",
+};
+const TITLE_SURFACE_EXPORT_SEGMENTS = {
+    naver_home: "home",
+    blog: "blog",
+    hybrid: "both",
+};
+const DEFAULT_TITLE_SURFACE_COUNTS = {
+    naver_home: 2,
+    blog: 2,
+    hybrid: 0,
+};
 const GRADE_PRESET_MAP = {
     all: {
         label: "전체",
@@ -823,6 +844,8 @@ function buildTitleOptions() {
     return {
         mode,
         keyword_modes: formState.keyword_modes,
+        surface_modes: formState.surface_modes,
+        surface_counts: formState.surface_counts,
         auto_retry_enabled: formState.auto_retry_enabled,
         quality_retry_threshold: formState.quality_retry_threshold,
         issue_context_enabled: formState.issue_context_enabled,
@@ -864,6 +887,14 @@ function formatTitleKeywordModeSummary(rawModes) {
 
 function buildTitleRunSummary(titleOptions) {
     const modeSummary = formatTitleKeywordModeSummary(titleOptions.keyword_modes);
+    const surfaceSummary = formatTitleSurfaceSummary(titleOptions.surface_modes, titleOptions.surface_counts);
+    const hasProvider = Boolean(String(titleOptions.provider || "").trim());
+    if (titleOptions.mode !== "ai") {
+        return `템플릿 규칙 기반 / ${modeSummary} / ${surfaceSummary}`;
+    }
+    if (!hasProvider) {
+        return `AI 미등록 / ${modeSummary} / ${surfaceSummary}`;
+    }
     if (titleOptions.mode !== "ai") {
         return `템플릿 규칙 기반 / ${modeSummary}`;
     }
@@ -887,6 +918,7 @@ function buildTitleRunSummary(titleOptions) {
                     : "혼합형",
         );
     }
+    parts.push(surfaceSummary);
     return `${parts.join(" / ")} / ${modeSummary}`;
 }
 
@@ -1303,7 +1335,7 @@ async function validateTrendSession() {
                 successMessage: "유효한 Creator Advisor 세션을 확인해 인증 잠금을 해제했습니다.",
             });
             const successMessage = hadAuthLock
-                ? `${statusMessage} ?몄쬆 ?좉툑???댁젣?덉뒿?덈떎.`
+                ? `${statusMessage} 인증 잠금도 함께 해제했습니다.`
                 : statusMessage;
             if (elements.localCookieStatus) {
                 elements.localCookieStatus.dataset.locked = "true";
@@ -1316,7 +1348,7 @@ async function validateTrendSession() {
                 noticeDurationMs: 4200,
             });
         } else {
-            const warningMessage = `${statusMessage} ?대떦 ?뺤씤 ?붿껌???몄쬆 ?좉툑???붾줈 嫄곌? ?딆뒿?덈떎.`;
+            const warningMessage = `${statusMessage} 유효한 세션이 아니어서 인증 잠금은 유지됩니다.`;
             if (elements.localCookieStatus) {
                 elements.localCookieStatus.dataset.locked = "true";
                 elements.localCookieStatus.textContent = warningMessage;
@@ -1829,6 +1861,16 @@ function applyEmptySelectedResult(message) {
         backendDebug: null,
         note: message,
     };
+
+    if (countItems(state.results.analyzed?.analyzed_keywords || []) > 0) {
+        setActiveResultView("analyzed");
+    } else if (countItems(state.results.expanded?.expanded_keywords || []) > 0) {
+        setActiveResultView("expanded");
+    } else if (countItems(state.results.collected?.collected_keywords || []) > 0) {
+        setActiveResultView("collected");
+    } else {
+        setActiveResultView("selected");
+    }
 }
 
 function createEmptyResults() {
@@ -4477,6 +4519,13 @@ function bindElements() {
     elements.titleModeLongtailSelected = document.getElementById("titleModeLongtailSelected");
     elements.titleModeLongtailExploratory = document.getElementById("titleModeLongtailExploratory");
     elements.titleModeLongtailExperimental = document.getElementById("titleModeLongtailExperimental");
+    elements.titleSurfaceHome = document.getElementById("titleSurfaceHome");
+    elements.titleSurfaceBlog = document.getElementById("titleSurfaceBlog");
+    elements.titleSurfaceHybrid = document.getElementById("titleSurfaceHybrid");
+    elements.titleSurfaceHomeCount = document.getElementById("titleSurfaceHomeCount");
+    elements.titleSurfaceBlogCount = document.getElementById("titleSurfaceBlogCount");
+    elements.titleSurfaceHybridCount = document.getElementById("titleSurfaceHybridCount");
+    elements.titleSurfaceSummary = document.getElementById("titleSurfaceSummary");
     elements.titleKeywordModeSummary = document.getElementById("titleKeywordModeSummary");
     elements.titleAutoRetryEnabled = document.getElementById("titleAutoRetryEnabled");
     elements.titleAutoRetryThreshold = document.getElementById("titleAutoRetryThreshold");
@@ -4678,6 +4727,12 @@ function bindEvents() {
         elements.titleModeLongtailSelected,
         elements.titleModeLongtailExploratory,
         elements.titleModeLongtailExperimental,
+        elements.titleSurfaceHome,
+        elements.titleSurfaceBlog,
+        elements.titleSurfaceHybrid,
+        elements.titleSurfaceHomeCount,
+        elements.titleSurfaceBlogCount,
+        elements.titleSurfaceHybridCount,
         elements.titleAutoRetryEnabled,
         elements.titleAutoRetryThreshold,
         elements.titleIssueContextEnabled,
@@ -7458,6 +7513,109 @@ function applyTitleKeywordModes(rawModes) {
 
 
 
+function normalizeTitleSurfaceModes(rawModes) {
+    if (!Array.isArray(rawModes)) {
+        return [];
+    }
+    const seenModes = new Set();
+    return rawModes
+        .map((mode) => String(mode || "").trim().toLowerCase())
+        .filter((mode) => TITLE_SURFACE_ORDER.includes(mode) && !seenModes.has(mode) && seenModes.add(mode));
+}
+
+function normalizeTitleSurfaceCount(value, fallback) {
+    const normalized = Number.parseInt(value, 10);
+    const fallbackValue = Number.parseInt(fallback, 10);
+    const safeFallback = Number.isFinite(fallbackValue) ? fallbackValue : 1;
+    if (!Number.isFinite(normalized)) {
+        return Math.min(4, Math.max(1, safeFallback));
+    }
+    return Math.min(4, Math.max(1, normalized));
+}
+
+function buildNormalizedTitleSurfaceCounts(rawCounts, modes) {
+    const safeModes = normalizeTitleSurfaceModes(modes);
+    const raw = rawCounts && typeof rawCounts === "object" ? rawCounts : {};
+    const counts = {};
+    TITLE_SURFACE_ORDER.forEach((channel) => {
+        const defaultCount = DEFAULT_TITLE_SURFACE_COUNTS[channel] || 1;
+        counts[channel] = safeModes.includes(channel)
+            ? normalizeTitleSurfaceCount(raw[channel], defaultCount || 1)
+            : 0;
+    });
+    return counts;
+}
+
+function applyTitleSurfaceSelection(rawModes, rawCounts) {
+    const normalizedModes = normalizeTitleSurfaceModes(rawModes);
+    const nextModes = normalizedModes.length ? normalizedModes : ["naver_home"];
+    const counts = buildNormalizedTitleSurfaceCounts(rawCounts, nextModes);
+
+    if (elements.titleSurfaceHome) {
+        elements.titleSurfaceHome.checked = nextModes.includes("naver_home");
+    }
+    if (elements.titleSurfaceBlog) {
+        elements.titleSurfaceBlog.checked = nextModes.includes("blog");
+    }
+    if (elements.titleSurfaceHybrid) {
+        elements.titleSurfaceHybrid.checked = nextModes.includes("hybrid");
+    }
+    if (elements.titleSurfaceHomeCount) {
+        elements.titleSurfaceHomeCount.value = String(counts.naver_home || 1);
+        elements.titleSurfaceHomeCount.disabled = !nextModes.includes("naver_home");
+    }
+    if (elements.titleSurfaceBlogCount) {
+        elements.titleSurfaceBlogCount.value = String(counts.blog || 1);
+        elements.titleSurfaceBlogCount.disabled = !nextModes.includes("blog");
+    }
+    if (elements.titleSurfaceHybridCount) {
+        elements.titleSurfaceHybridCount.value = String(counts.hybrid || 1);
+        elements.titleSurfaceHybridCount.disabled = !nextModes.includes("hybrid");
+    }
+}
+
+function getTitleSurfaceSettingsState() {
+    const selectedModes = normalizeTitleSurfaceModes([
+        elements.titleSurfaceHome?.checked ? "naver_home" : "",
+        elements.titleSurfaceBlog?.checked ? "blog" : "",
+        elements.titleSurfaceHybrid?.checked ? "hybrid" : "",
+    ]);
+    const nextModes = selectedModes.length ? selectedModes : ["naver_home"];
+    const counts = buildNormalizedTitleSurfaceCounts(
+        {
+            naver_home: elements.titleSurfaceHomeCount?.value,
+            blog: elements.titleSurfaceBlogCount?.value,
+            hybrid: elements.titleSurfaceHybridCount?.value,
+        },
+        nextModes,
+    );
+    applyTitleSurfaceSelection(nextModes, counts);
+    return {
+        surface_modes: nextModes,
+        surface_counts: counts,
+    };
+}
+
+function formatTitleSurfaceSummary(rawModes, rawCounts) {
+    const modes = normalizeTitleSurfaceModes(rawModes);
+    const nextModes = modes.length ? modes : ["naver_home"];
+    const counts = buildNormalizedTitleSurfaceCounts(rawCounts, nextModes);
+    const labels = nextModes.map((channel) => `${TITLE_SURFACE_SHORT_LABELS[channel] || channel} ${counts[channel]}개`);
+    return labels.length ? `영역 ${labels.join(" + ")}` : "영역 홈판 2개";
+}
+
+function buildTitleSurfaceSummary() {
+    const state = getTitleSurfaceSettingsState();
+    return `선택: ${state.surface_modes.map((channel) => `${TITLE_SURFACE_SHORT_LABELS[channel]} ${state.surface_counts[channel]}개`).join(" + ")}`;
+}
+
+function updateTitleSurfaceSummary() {
+    if (!elements.titleSurfaceSummary) {
+        return;
+    }
+    elements.titleSurfaceSummary.textContent = buildTitleSurfaceSummary();
+}
+
 function buildTitleKeywordModeSummary() {
     const modeState = getTitleKeywordModeState();
     const enabledLabels = [];
@@ -8625,6 +8783,8 @@ function loadTitleSettings() {
     const defaults = {
         mode: "template",
         keyword_modes: ["single", "longtail_selected"],
+        surface_modes: ["naver_home", "blog"],
+        surface_counts: { ...DEFAULT_TITLE_SURFACE_COUNTS },
         auto_retry_enabled: false,
         quality_retry_threshold: TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT,
         issue_context_enabled: true,
@@ -8752,6 +8912,7 @@ function loadTitleSettings() {
         Object.assign(settings, getTitleSettingsFormState());
     }
     applyTitleKeywordModes(settings.keyword_modes);
+    applyTitleSurfaceSelection(settings.surface_modes, settings.surface_counts);
     try {
         window.localStorage.setItem(TITLE_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
     } catch (error) {
@@ -8889,6 +9050,36 @@ function handleTitleSettingsChange(event) {
         }
     }
 
+    if (
+        event?.target === elements.titleSurfaceHome
+        || event?.target === elements.titleSurfaceBlog
+        || event?.target === elements.titleSurfaceHybrid
+        || event?.target === elements.titleSurfaceHomeCount
+        || event?.target === elements.titleSurfaceBlogCount
+        || event?.target === elements.titleSurfaceHybridCount
+    ) {
+        const enabledCount = normalizeTitleSurfaceModes([
+            elements.titleSurfaceHome?.checked ? "naver_home" : "",
+            elements.titleSurfaceBlog?.checked ? "blog" : "",
+            elements.titleSurfaceHybrid?.checked ? "hybrid" : "",
+        ]).length;
+        if (enabledCount === 0 && elements.titleSurfaceHome) {
+            elements.titleSurfaceHome.checked = true;
+        }
+        applyTitleSurfaceSelection(
+            [
+                elements.titleSurfaceHome?.checked ? "naver_home" : "",
+                elements.titleSurfaceBlog?.checked ? "blog" : "",
+                elements.titleSurfaceHybrid?.checked ? "hybrid" : "",
+            ],
+            {
+                naver_home: elements.titleSurfaceHomeCount?.value,
+                blog: elements.titleSurfaceBlogCount?.value,
+                hybrid: elements.titleSurfaceHybridCount?.value,
+            },
+        );
+    }
+
     if (event?.target === elements.titleAutoRetryThreshold && elements.titleAutoRetryThreshold) {
         elements.titleAutoRetryThreshold.value = String(
             normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold.value),
@@ -8968,6 +9159,7 @@ function renderTitleSettingsState() {
         elements.titleQualityPromptProfilePicker.disabled = !isAiMode;
     }
     updateTitleKeywordModeSummary();
+    updateTitleSurfaceSummary();
     updateTitleAutoRetrySummary();
     updateTitleIssueContextSummary();
     updateTitlePresetDescription();
@@ -9001,6 +9193,7 @@ function getTitleSettingsFormState() {
             elements.titleModeLongtailExploratory?.checked ? "longtail_exploratory" : "",
             elements.titleModeLongtailExperimental?.checked ? "longtail_experimental" : "",
         ]),
+        ...getTitleSurfaceSettingsState(),
         auto_retry_enabled: Boolean(elements.titleAutoRetryEnabled?.checked),
         quality_retry_threshold: normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold?.value),
         issue_context_enabled: Boolean(elements.titleIssueContextEnabled?.checked),
@@ -11155,6 +11348,33 @@ function downloadAnalyzedCsv() {
     addLog(`분석 결과 ${items.length}건을 CSV로 내보냈습니다.`, "success");
 }
 
+function getTitleSurfaceChannelCounts(items) {
+    const counts = {};
+    TITLE_SURFACE_ORDER.forEach((channel) => {
+        counts[channel] = 0;
+    });
+    (items || []).forEach((item) => {
+        TITLE_SURFACE_ORDER.forEach((channel) => {
+            const channelTitles = Array.isArray(item?.titles?.[channel]) ? item.titles[channel] : [];
+            counts[channel] = Math.max(counts[channel], channelTitles.length);
+        });
+    });
+    return counts;
+}
+
+function getActiveTitleSurfaceChannels(items) {
+    const counts = getTitleSurfaceChannelCounts(items);
+    return TITLE_SURFACE_ORDER.filter((channel) => counts[channel] > 0);
+}
+
+function buildTitleSurfaceFilenameSegment(items) {
+    const activeChannels = getActiveTitleSurfaceChannels(items);
+    if (!activeChannels.length) {
+        return "titles";
+    }
+    return activeChannels.map((channel) => TITLE_SURFACE_EXPORT_SEGMENTS[channel] || channel).join("-");
+}
+
 function downloadTitleCsv() {
     const items = state.results.titled?.generated_titles || [];
     if (!items.length) {
@@ -11162,31 +11382,31 @@ function downloadTitleCsv() {
         return;
     }
 
-    const header = [
-        "keyword",
-        "duplicate",
-        "recent_used_date",
-        "naver_home_1",
-        "naver_home_2",
-        "blog_1",
-        "blog_2",
-    ];
+    const channelCounts = getTitleSurfaceChannelCounts(items);
+    const header = ["keyword", "duplicate", "recent_used_date"];
+    TITLE_SURFACE_ORDER.forEach((channel) => {
+        for (let index = 0; index < (channelCounts[channel] || 0); index += 1) {
+            header.push(`${channel}_${index + 1}`);
+        }
+    });
     const rows = items.map((item) => {
         const duplicateMeta = buildCsvDuplicateMeta(item.keyword);
-        const naverHomeTitles = Array.isArray(item.titles?.naver_home) ? item.titles.naver_home : [];
-        const blogTitles = Array.isArray(item.titles?.blog) ? item.titles.blog : [];
-        return [
+        const row = [
             item.keyword || "",
             duplicateMeta.duplicateLabel,
             duplicateMeta.recentUsedDate,
-            naverHomeTitles[0] || "",
-            naverHomeTitles[1] || "",
-            blogTitles[0] || "",
-            blogTitles[1] || "",
         ];
+        TITLE_SURFACE_ORDER.forEach((channel) => {
+            const channelTitles = Array.isArray(item.titles?.[channel]) ? item.titles[channel] : [];
+            for (let index = 0; index < (channelCounts[channel] || 0); index += 1) {
+                row.push(channelTitles[index] || "");
+            }
+        });
+        return row;
     });
 
-    downloadCsvFile(header, rows, `keyword-titles-${new Date().toISOString().slice(0, 10)}.csv`);
+    const filenameSegment = buildTitleSurfaceFilenameSegment(items);
+    downloadCsvFile(header, rows, `keyword-titles-${filenameSegment}-${new Date().toISOString().slice(0, 10)}.csv`);
     const addedCount = recordWorkedKeywords(items.map((item) => item.keyword));
     renderResults();
     addLog(
@@ -11203,8 +11423,11 @@ function renderTitleList(items) {
         return '<div class="collector-empty">선택한 조건에 맞는 제목 결과가 없습니다.</div>';
     }
     return `<div class="title-list">${entries.map(({ item, qualityReport }) => {
-        const naverHomeCount = Array.isArray(item.titles?.naver_home) ? item.titles.naver_home.length : 0;
-        const blogCount = Array.isArray(item.titles?.blog) ? item.titles.blog.length : 0;
+        const activeChannels = TITLE_SURFACE_ORDER.filter((channel) => Array.isArray(item.titles?.[channel]) && item.titles[channel].length);
+        const totalTitleCount = activeChannels.reduce(
+            (sum, channel) => sum + (Array.isArray(item.titles?.[channel]) ? item.titles[channel].length : 0),
+            0,
+        );
         const qualityStatus = qualityReport.status || "review";
         const qualityLabel = qualityReport.label || "검토 대기";
         const summary = qualityReport.summary || "제목 문장을 확인하는 중입니다.";
@@ -11224,7 +11447,7 @@ function renderTitleList(items) {
                             <strong>${escapeHtml(item.keyword || "-")}</strong>
                             ${renderKeywordWorkflowInline(item.keyword, { suppressRecentDuplicate: true })}
                         </div>
-                        <span class="badge">제목 ${escapeHtml(String(naverHomeCount + blogCount))}개</span>
+                        <span class="badge">제목 ${escapeHtml(String(totalTitleCount))}개</span>
                     </div>
                     <div class="title-item-actions">
                         <span class="title-quality-chip ${escapeHtml(qualityStatus)}">품질 ${escapeHtml(String(qualityReport.bundle_score || 0))}점</span>
@@ -11240,10 +11463,12 @@ function renderTitleList(items) {
                 ${renderTitleTargetMeta(item)}
                 <div class="title-quality-summary ${escapeHtml(qualityStatus)}">
                     <strong>${escapeHtml(summary)}</strong>
-                    <span>
+                    <span class="title-score-line">
                         네이버홈 ${escapeHtml(String(channelScores.naver_home || 0))}점 / 블로그 ${escapeHtml(String(channelScores.blog || 0))}점
                         ${pairReadyLabel ? ` / ${escapeHtml(pairReadyLabel)}` : ""}
+                        ${Array.isArray(item.titles?.hybrid) && item.titles.hybrid.length ? ` / ${escapeHtml(TITLE_SURFACE_COLUMN_LABELS.hybrid)} ${escapeHtml(String(channelScores.hybrid || 0))}점` : ""}
                     </span>
+                    <small class="title-target-note">${escapeHtml(activeChannels.map((channel) => `${TITLE_SURFACE_COLUMN_LABELS[channel] || channel} ${String(channelScores[channel] || 0)}점`).join(" / "))}</small>
                 </div>
                 ${renderTitleQualityIssues(qualityReport)}
                 <div class="title-columns">
@@ -11255,6 +11480,12 @@ function renderTitleList(items) {
                         <h4>블로그형</h4>
                         ${renderRecommendedTitleBlock(item.titles?.blog || [], titleChecks.blog || [])}
                     </div>
+                    ${Array.isArray(item.titles?.hybrid) && item.titles.hybrid.length ? `
+                        <div class="title-column">
+                            <h4>${escapeHtml(TITLE_SURFACE_COLUMN_LABELS.hybrid)}</h4>
+                            ${renderRecommendedTitleBlock(item.titles?.hybrid || [], titleChecks.hybrid || [])}
+                        </div>
+                    ` : ""}
                 </div>
             </div>
         `;

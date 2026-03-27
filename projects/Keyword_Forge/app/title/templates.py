@@ -58,16 +58,22 @@ class TemplateContext:
     is_policy: bool
 
 
-def build_naver_home_titles(keyword: str, category: CategoryType) -> list[str]:
+def build_naver_home_titles(keyword: str, category: CategoryType, *, limit: int = 2) -> list[str]:
     context = _build_template_context(keyword, category)
     groups = _build_naver_home_groups(context)
-    return _select_group_titles(context.keyword, groups, limit=2, max_length=NAVER_HOME_MAX_LENGTH)
+    return _select_group_titles(context.keyword, groups, limit=limit, max_length=NAVER_HOME_MAX_LENGTH)
 
 
-def build_blog_titles(keyword: str, category: CategoryType) -> list[str]:
+def build_blog_titles(keyword: str, category: CategoryType, *, limit: int = 2) -> list[str]:
     context = _build_template_context(keyword, category)
     groups = _build_blog_groups(context)
-    return _select_group_titles(context.keyword, groups, limit=2)
+    return _select_group_titles(context.keyword, groups, limit=limit)
+
+
+def build_hybrid_titles(keyword: str, category: CategoryType, *, limit: int = 2) -> list[str]:
+    context = _build_template_context(keyword, category)
+    groups = _build_hybrid_groups(context)
+    return _select_group_titles(context.keyword, groups, limit=limit, max_length=NAVER_HOME_MAX_LENGTH)
 
 
 def _build_template_context(keyword: str, category: CategoryType) -> TemplateContext:
@@ -232,6 +238,70 @@ def _build_blog_groups(context: TemplateContext) -> list[list[str]]:
     return _order_groups_for_keyword(context.keyword, groups, locked_prefix_count=priority_count)
 
 
+def _build_hybrid_groups(context: TemplateContext) -> list[list[str]]:
+    triggers = build_trigger_bundle(context.keyword)
+    groups: list[list[str]] = []
+
+    if context.intent == "review" or context.is_media:
+        groups.append([
+            f"{context.keyword} 후기에서 갈린 포인트",
+            f"{context.keyword} 실사용 전 체크할 기준",
+        ])
+    if context.intent == "action":
+        groups.append([
+            f"{context.keyword} 진행 전 놓치기 쉬운 조건",
+            f"{context.keyword} 준비 전에 먼저 볼 기준",
+        ])
+    if context.intent == "price":
+        groups.append([
+            f"{context.keyword} 가격 차이, 어디서 갈릴까",
+            f"{context.keyword} 비용과 조건 같이 보는 기준",
+        ])
+    if context.intent == "comparison":
+        groups.append([
+            f"{context.keyword} 차이, 먼저 볼 핵심은",
+            f"{context.keyword} 비교 포인트 바로 정리",
+        ])
+    if context.intent == "definition" or context.is_profile:
+        groups.append([
+            f"{context.keyword} 핵심 정보, 먼저 볼 기준",
+            f"{context.keyword} 지금 다시 보는 이유",
+        ])
+    if context.intent == "location" or context.is_local:
+        groups.append([
+            f"{context.keyword} 위치와 접근성 같이 보기",
+            f"{context.keyword} 방문 전에 볼 체크포인트",
+        ])
+    if context.is_service:
+        groups.append([
+            f"{context.keyword} 선택 전 꼭 볼 포인트",
+            f"{context.keyword} 비교 전에 확인할 기준",
+        ])
+    if context.is_policy:
+        groups.append([
+            f"{context.keyword} 조건 차이, 어디서 갈릴까",
+            f"{context.keyword} 확인 전에 먼저 볼 기준",
+        ])
+
+    priority_count = len(groups)
+    groups.extend([
+        [
+            f"{context.keyword} {context.detail_focus} 한 번에 보기",
+            f"{context.keyword} {context.detail_focus} 먼저 체크",
+        ],
+        [
+            f"{triggers.time} {context.keyword} 지금 보는 포인트",
+            f"{context.keyword} 지금 다시 보는 이유",
+        ],
+        [
+            f"{context.keyword} 무엇부터 보면 좋을까",
+            f"{context.keyword} 바로 체크할 핵심 {triggers.numeric}",
+        ],
+    ])
+
+    return _order_groups_for_keyword(context.keyword, groups, locked_prefix_count=priority_count)
+
+
 def _select_group_titles(
     keyword: str,
     groups: list[list[str]],
@@ -239,6 +309,10 @@ def _select_group_titles(
     limit: int,
     max_length: int | None = None,
 ) -> list[str]:
+    resolved_limit = max(0, int(limit or 0))
+    if resolved_limit <= 0:
+        return []
+
     selected: list[str] = []
     seen: set[str] = set()
     used_noisy_families: set[str] = set()
@@ -273,7 +347,7 @@ def _select_group_titles(
                 noisy_family = _detect_noisy_frame_family(keyword, deferred_title)
                 if noisy_family:
                     used_noisy_families.add(noisy_family)
-        if len(selected) >= limit:
+        if len(selected) >= resolved_limit:
             return selected
 
     return selected

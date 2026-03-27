@@ -10,7 +10,15 @@ from app.title.category_detector import detect_category
 from app.title.quality import _build_bundle_report, enrich_title_results, refresh_title_results_for_changed_slots
 from app.title.quality_ai import TitleEvaluationOptions
 from app.title.rules import NAVER_HOME_MAX_LENGTH, TITLE_QUALITY_REVIEW_SCORE
-from app.title.templates import build_blog_titles, build_naver_home_titles
+from app.title.templates import build_blog_titles, build_hybrid_titles, build_naver_home_titles
+from app.title.types import (
+    DEFAULT_TITLE_CHANNEL_COUNTS,
+    MAX_TITLE_COUNT_PER_CHANNEL,
+    TITLE_CHANNEL_ORDER,
+    TITLE_CHANNEL_SLOT_LABELS,
+    build_title_channel_counts,
+    create_empty_generated_titles,
+)
 from app.title.types import TitleOutputItem
 
 _MODEL_ESCALATION_TRIGGER_FAILURES = 2
@@ -112,6 +120,7 @@ def generate_titles(
     if options is None or options.mode != "ai":
         template_results = _build_template_results(
             normalized_items,
+            options=options,
             progress_callback=progress_callback,
             total_count=total_count,
             stop_event=stop_event,
@@ -143,6 +152,7 @@ def generate_titles(
             raise TitleProviderError("AI mode requires an API key.")
         template_results = _build_template_results(
             normalized_items,
+            options=options,
             progress_callback=progress_callback,
             total_count=total_count,
             stop_event=stop_event,
@@ -188,7 +198,7 @@ def generate_titles(
                 keyword = normalize_text(source_item.get("keyword"))
                 response_item = aligned_response_items[local_index] if local_index < len(aligned_response_items) else {}
                 titles = response_item.get("titles") if isinstance(response_item, dict) else None
-                if not keyword or not _is_valid_title_bundle(titles):
+                if not keyword or not _is_valid_title_bundle(titles, options=options):
                     processed_count += 1
                     _publish_title_progress(
                         progress_callback,
@@ -209,10 +219,7 @@ def generate_titles(
                 ai_results[chunk_start + local_index] = {
                     **_strip_generated_fields(source_payload),
                     "keyword": keyword,
-                    "titles": {
-                        "naver_home": list(titles["naver_home"]),
-                        "blog": list(titles["blog"]),
-                    },
+                    "titles": _normalize_generated_title_bundle(titles, options=options),
                 }
                 processed_count += 1
                 _publish_title_progress(
@@ -234,6 +241,7 @@ def generate_titles(
             raise
         template_results = _build_template_results(
             normalized_items,
+            options=options,
             progress_callback=progress_callback,
             total_count=total_count,
             stop_event=stop_event,
@@ -270,7 +278,7 @@ def generate_titles(
             continue
 
         fallback_keywords.append(keyword)
-        results.append(_build_template_title_item(keyword))
+        results.append(_build_template_title_item(keyword, options=options))
 
     used_mode = "ai"
     if fallback_keywords:
@@ -320,9 +328,51 @@ def _normalize_input_items(items: list[dict[str, Any]]) -> list[dict[str, str]]:
     return normalized_items
 
 
+def _resolve_title_channel_counts(options: TitleGenerationOptions | None = None) -> dict[str, int]:
+    if options is None:
+        return {
+            channel_name: DEFAULT_TITLE_CHANNEL_COUNTS[channel_name]
+            for channel_name in TITLE_CHANNEL_ORDER
+        }
+    return build_title_channel_counts(
+        raw_counts=options.channel_counts,
+        enabled_channels=tuple(options.surface_modes),
+    )
+
+
+def _build_empty_title_bundle() -> dict[str, list[str]]:
+    return {
+        channel_name: list(create_empty_generated_titles().get(channel_name, []))
+        for channel_name in TITLE_CHANNEL_ORDER
+    }
+
+
+def _normalize_generated_title_bundle(
+    raw_titles: Any,
+    *,
+    options: TitleGenerationOptions | None = None,
+) -> dict[str, list[str]]:
+    counts = _resolve_title_channel_counts(options)
+    titles = raw_titles if isinstance(raw_titles, dict) else {}
+    normalized_bundle = _build_empty_title_bundle()
+    for channel_name in TITLE_CHANNEL_ORDER:
+        channel_titles = titles.get(channel_name)
+        if not isinstance(channel_titles, list):
+            normalized_bundle[channel_name] = []
+            continue
+        filtered_titles = [
+            normalize_text(title)
+            for title in channel_titles
+            if normalize_text(title)
+        ]
+        normalized_bundle[channel_name] = filtered_titles[:counts[channel_name]]
+    return normalized_bundle
+
+
 def _build_template_results(
     items: list[dict[str, Any]],
     *,
+    options: TitleGenerationOptions | None = None,
     progress_callback: TitleProgressCallback | None = None,
     total_count: int | None = None,
     stop_event: Event | None = None,
@@ -332,7 +382,7 @@ def _build_template_results(
     for index, item in enumerate(items, start=1):
         if stop_event is not None and stop_event.is_set():
             break
-        built_item = _build_template_title_item(item)
+        built_item = _build_template_title_item(item, options=options)
         results.append(built_item)
         _publish_title_progress(
             progress_callback,
@@ -351,7 +401,11 @@ def _build_template_results(
     return results
 
 
-def _build_template_title_item(item: dict[str, Any] | str) -> TitleOutputItem:
+def _build_template_title_item(
+    item: dict[str, Any] | str,
+    *,
+    options: TitleGenerationOptions | None = None,
+) -> TitleOutputItem:
     if isinstance(item, dict):
         keyword = normalize_text(item.get("keyword"))
         source_item = _strip_generated_fields(item)
@@ -359,12 +413,14 @@ def _build_template_title_item(item: dict[str, Any] | str) -> TitleOutputItem:
         keyword = normalize_text(item)
         source_item = {"keyword": keyword}
     category = detect_category(keyword)
+    counts = _resolve_title_channel_counts(options)
     return {
         **source_item,
         "keyword": keyword,
         "titles": {
-            "naver_home": build_naver_home_titles(keyword, category),
-            "blog": build_blog_titles(keyword, category),
+            "naver_home": build_naver_home_titles(keyword, category, limit=counts["naver_home"]),
+            "blog": build_blog_titles(keyword, category, limit=counts["blog"]),
+            "hybrid": build_hybrid_titles(keyword, category, limit=counts["hybrid"]),
         },
     }
 
@@ -475,18 +531,27 @@ def _strip_internal_quality_fields(items: list[TitleOutputItem]) -> list[TitleOu
     return cleaned_items
 
 
-def _is_valid_title_bundle(titles: Any) -> bool:
+def _is_valid_title_bundle(
+    titles: Any,
+    *,
+    options: TitleGenerationOptions | None = None,
+) -> bool:
     if not isinstance(titles, dict):
         return False
 
-    naver_home = titles.get("naver_home")
-    blog = titles.get("blog")
-    return (
-        isinstance(naver_home, list)
-        and isinstance(blog, list)
-        and len(naver_home) >= 2
-        and len(blog) >= 2
-    )
+    counts = _resolve_title_channel_counts(options)
+    for channel_name in TITLE_CHANNEL_ORDER:
+        channel_titles = titles.get(channel_name)
+        required_count = int(counts.get(channel_name, 0) or 0)
+        if required_count <= 0:
+            if channel_titles is not None and not isinstance(channel_titles, list):
+                return False
+            continue
+        if not isinstance(channel_titles, list):
+            return False
+        if len(channel_titles) < required_count:
+            return False
+    return True
 
 
 def _finalize_generated_results(
@@ -820,16 +885,13 @@ def _slot_auto_retry_flow_impl_v2(
         for item in aligned_response_items:
             keyword = normalize_text(item.get("keyword"))
             titles = item.get("titles") if isinstance(item, dict) else None
-            if not keyword or not _is_valid_title_bundle(titles):
+            if not keyword or not _is_valid_title_bundle(titles, options=retry_options):
                 continue
             source_item = original_items_by_keyword.get(keyword, {"keyword": keyword})
             retried_by_keyword[keyword] = {
                 **_strip_generated_fields(source_item),
                 "keyword": keyword,
-                "titles": {
-                    "naver_home": list(titles["naver_home"]),
-                    "blog": list(titles["blog"]),
-                },
+                "titles": _normalize_generated_title_bundle(titles, options=retry_options),
             }
         retried_count = min(len(retry_keywords), retried_count + len(chunk))
         _publish_title_progress(
@@ -1156,7 +1218,8 @@ def _collect_retry_slot_candidates(
             continue
         titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
         aligned_title_checks = _align_title_checks_to_current_slots(item, enriched_item)
-        for channel_name, channel_label in (("naver_home", "home"), ("blog", "blog")):
+        for channel_name in TITLE_CHANNEL_ORDER:
+            channel_label = TITLE_CHANNEL_SLOT_LABELS[channel_name]
             channel_titles = list(titles.get(channel_name, [])) if isinstance(titles.get(channel_name), list) else []
             channel_reports = aligned_title_checks.get(channel_name, [])
             for slot_index, raw_title in enumerate(channel_titles, start=1):
@@ -1203,7 +1266,7 @@ def _collect_retry_slot_candidates(
             int(candidate.get("score") or 0),
             -len(candidate.get("issues", [])),
             int(candidate.get("result_index") or 0),
-            0 if candidate.get("channel") == "naver_home" else 1,
+            TITLE_CHANNEL_ORDER.index(candidate.get("channel")) if candidate.get("channel") in TITLE_CHANNEL_ORDER else len(TITLE_CHANNEL_ORDER),
             int(candidate.get("slot_index") or 0),
         )
     )
@@ -1416,8 +1479,8 @@ def _clone_title_output_item(item: TitleOutputItem) -> TitleOutputItem:
         **_strip_generated_fields(item),
         "keyword": normalize_text(item.get("keyword")),
         "titles": {
-            "naver_home": list(titles.get("naver_home", [])) if isinstance(titles.get("naver_home"), list) else [],
-            "blog": list(titles.get("blog", [])) if isinstance(titles.get("blog"), list) else [],
+            channel_name: list(titles.get(channel_name, [])) if isinstance(titles.get(channel_name), list) else []
+            for channel_name in TITLE_CHANNEL_ORDER
         },
     }
 
@@ -1430,7 +1493,8 @@ def _build_slot_report_map(
     for result_index, (item, enriched_item) in enumerate(zip(current_results, current_enriched_results)):
         aligned_title_checks = _align_title_checks_to_current_slots(item, enriched_item)
         titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
-        for channel_name, channel_label in (("naver_home", "home"), ("blog", "blog")):
+        for channel_name in TITLE_CHANNEL_ORDER:
+            channel_label = TITLE_CHANNEL_SLOT_LABELS[channel_name]
             channel_titles = list(titles.get(channel_name, [])) if isinstance(titles.get(channel_name), list) else []
             channel_reports = aligned_title_checks.get(channel_name, [])
             for slot_index, raw_title in enumerate(channel_titles, start=1):
@@ -1447,9 +1511,9 @@ def _align_title_checks_to_current_slots(
     titles = item.get("titles") if isinstance(item.get("titles"), dict) else {}
     quality_report = enriched_item.get("quality_report") if isinstance(enriched_item.get("quality_report"), dict) else {}
     raw_title_checks = quality_report.get("title_checks") if isinstance(quality_report.get("title_checks"), dict) else {}
-    aligned_title_checks: dict[str, list[dict[str, Any]]] = {"naver_home": [], "blog": []}
+    aligned_title_checks: dict[str, list[dict[str, Any]]] = {channel_name: [] for channel_name in TITLE_CHANNEL_ORDER}
 
-    for channel_name in ("naver_home", "blog"):
+    for channel_name in TITLE_CHANNEL_ORDER:
         channel_titles = list(titles.get(channel_name, [])) if isinstance(titles.get(channel_name), list) else []
         raw_reports = list(raw_title_checks.get(channel_name, [])) if isinstance(raw_title_checks.get(channel_name), list) else []
         reports_by_title: dict[str, list[dict[str, Any]]] = {}
@@ -1485,7 +1549,7 @@ def _collect_item_peer_titles(
     exclude_slot_index: int | None = None,
 ) -> list[str]:
     peer_titles: list[str] = []
-    for channel_name in ("naver_home", "blog"):
+    for channel_name in TITLE_CHANNEL_ORDER:
         channel_titles = titles.get(channel_name, []) if isinstance(titles.get(channel_name), list) else []
         for slot_index, raw_title in enumerate(channel_titles, start=1):
             if exclude_channel == channel_name and exclude_slot_index == slot_index:
@@ -1724,7 +1788,8 @@ def _downgrade_exhausted_retry_slots(
         aligned_title_checks = _align_title_checks_to_current_slots(item, enriched_item)
         changed = False
 
-        for channel_name, channel_label in (("naver_home", "home"), ("blog", "blog")):
+        for channel_name in TITLE_CHANNEL_ORDER:
+            channel_label = TITLE_CHANNEL_SLOT_LABELS[channel_name]
             channel_reports = list(aligned_title_checks.get(channel_name, []))
             for slot_index, report in enumerate(channel_reports, start=1):
                 slot_id = f"{result_index}_{channel_label}_{slot_index}"
@@ -1883,9 +1948,8 @@ def _build_quality_retry_prompt(existing_prompt: str, retry_threshold: int) -> s
         "- Do not use SEO or blog criteria such as abstract, clickbait, templated, or lacking information as reasons to downscore naver_home titles.\n"
         "- If a naver_home title already reaches practical CTR quality around 68 or higher, prefer keeping it instead of forcing another rewrite.\n"
         "- If a naver_home title is still weak, keep the keyword tokens and order, stay within 40 characters, and combine at least two of issue, contrast, reversal, and curiosity.\n"
-        "- Make the 2 naver_home titles clearly different from each other.\n"
-        "- Make the 2 blog titles clearly different from each other.\n"
-        f"- Keep every naver_home title within {NAVER_HOME_MAX_LENGTH} characters.\n"
+        "- Make titles within the same channel clearly different from each other.\n"
+        f"- Keep every naver_home and hybrid title within {NAVER_HOME_MAX_LENGTH} characters.\n"
         "- Avoid exaggerated words such as 무조건, 충격, 레전드, 미쳤다, 대박.\n"
         "- Do not invent unsupported dates, numbers, rankings, or official changes just to sound current.\n"
         "- Avoid stale filler such as 완벽 정리, 한 번에 정리, 갑자기 바뀌었다, 이유가 이상하다, 놓치면 손해.\n"
@@ -2001,14 +2065,40 @@ def _build_practical_rescue_item(item: dict[str, Any]) -> TitleOutputItem | None
         target_mode=normalize_text(item.get("target_mode")),
         source_selection_mode=normalize_text(item.get("source_selection_mode") or item.get("selection_mode")),
     )
+    generated_naver_titles = [f"{keyword}, {suffix}" for suffix in naver_suffixes]
+    generated_blog_titles = [f"{keyword} {suffix}" for suffix in blog_suffixes]
     return {
         **_strip_generated_fields(item),
         "keyword": keyword,
         "titles": {
-            "naver_home": [f"{keyword}, {suffix}" for suffix in naver_suffixes[:2]],
-            "blog": [f"{keyword} {suffix}" for suffix in blog_suffixes[:2]],
+            "naver_home": _merge_title_candidates(
+                generated_naver_titles,
+                build_naver_home_titles(keyword, category, limit=MAX_TITLE_COUNT_PER_CHANNEL),
+                limit=MAX_TITLE_COUNT_PER_CHANNEL,
+            ),
+            "blog": _merge_title_candidates(
+                generated_blog_titles,
+                build_blog_titles(keyword, category, limit=MAX_TITLE_COUNT_PER_CHANNEL),
+                limit=MAX_TITLE_COUNT_PER_CHANNEL,
+            ),
+            "hybrid": build_hybrid_titles(keyword, category, limit=MAX_TITLE_COUNT_PER_CHANNEL),
         },
     }
+
+
+def _merge_title_candidates(*groups: list[str], limit: int) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for title in group:
+            normalized_title = normalize_text(title)
+            if not normalized_title or normalized_title in seen:
+                continue
+            seen.add(normalized_title)
+            merged.append(normalized_title)
+            if len(merged) >= limit:
+                return merged
+    return merged
 
 
 def _resolve_practical_rescue_kind(keyword_key: str) -> str:
@@ -2762,16 +2852,13 @@ def _request_retry_candidates(
         for item in aligned_response_items:
             keyword = normalize_text(item.get("keyword"))
             titles = item.get("titles") if isinstance(item, dict) else None
-            if not keyword or not _is_valid_title_bundle(titles):
+            if not keyword or not _is_valid_title_bundle(titles, options=retry_options):
                 continue
             source_item = original_items_by_keyword.get(keyword, {"keyword": keyword})
             retried_by_keyword[keyword] = {
                 **_strip_generated_fields(source_item),
                 "keyword": keyword,
-                "titles": {
-                    "naver_home": list(titles["naver_home"]),
-                    "blog": list(titles["blog"]),
-                },
+                "titles": _normalize_generated_title_bundle(titles, options=retry_options),
             }
         processed_count = min(len(retry_keywords), processed_count + len(chunk))
         _publish_title_progress(

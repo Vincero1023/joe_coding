@@ -4159,3 +4159,77 @@ def test_title_generator_downgrades_slots_after_two_failed_rewrite_attempts() ->
     assert all(check["status"] == "review" for check in blog_checks)
     assert all(not bool(check.get("checks", {}).get("retry_limit_reached")) for check in home_checks)
     assert all(bool(check.get("checks", {}).get("retry_limit_reached")) for check in blog_checks)
+
+
+def test_title_generator_respects_surface_modes_and_counts() -> None:
+    result = run(
+        {
+            "selected_keywords": [
+                {
+                    "keyword": "보험 추천",
+                    "score": 1.0,
+                }
+            ],
+            "title_options": {
+                "surface_modes": ["blog", "hybrid"],
+                "surface_counts": {
+                    "blog": 4,
+                    "hybrid": 3,
+                },
+            },
+        }
+    )
+
+    titles = result["generated_titles"][0]["titles"]
+    assert titles["naver_home"] == []
+    assert len(titles["blog"]) == 4
+    assert len(titles["hybrid"]) == 3
+
+
+def test_title_export_filename_and_header_follow_selected_surfaces(tmp_path: Path) -> None:
+    result = run(
+        {
+            "category": "비즈니스경제",
+            "seed_input": "보험 추천",
+            "selected_keywords": [
+                {
+                    "keyword": "보험 추천",
+                    "score": 1.0,
+                }
+            ],
+            "title_options": {
+                "surface_modes": ["blog", "hybrid"],
+                "surface_counts": {
+                    "blog": 3,
+                    "hybrid": 2,
+                },
+            },
+            "title_export": {
+                "enabled": True,
+                "output_dir": str(tmp_path),
+            },
+        }
+    )
+
+    artifact_path = Path(result["generation_meta"]["export_artifact"]["path"])
+    assert "__blog-both" in artifact_path.stem
+
+    with artifact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+
+    assert rows[0] == [
+        "keyword",
+        "bundle_score",
+        "bundle_status",
+        "blog_score",
+        "hybrid_score",
+        "target_mode",
+        "source_kind",
+        "duplicate",
+        "recent_used_date",
+        "blog_1",
+        "blog_2",
+        "blog_3",
+        "hybrid_1",
+        "hybrid_2",
+    ]

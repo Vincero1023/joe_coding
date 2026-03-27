@@ -29,7 +29,7 @@ from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_paylo
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260327-api-usage-csv-v79"
+_ASSET_VERSION = "20260327-title-surfaces-v80"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -1822,6 +1822,11 @@ def _render_home() -> str:
         "V2는 관련 탈락 키워드 연계 확장입니다.\n"
         "V3는 저검색량까지 넓히는 실험형입니다."
     )
+    title_surface_help = _render_help_tooltip(
+        "홈판, 블로그형, 둘다를 각각 켜고 끌 수 있습니다.\n"
+        "켜진 영역은 1개부터 4개까지 개수를 따로 정합니다.\n"
+        "둘다는 홈 유입과 블로그 검색을 함께 노리는 공용형 제목입니다."
+    )
     title_auto_retry_help = _render_help_tooltip(
         "AI 모드에서 품질 점수가 기준보다 낮은 제목은 자동으로 다시 생성합니다.\n"
         "2회 연속 기준 미달이면 더 강한 모델로 자동 승격해 한 번 더 보정합니다.\n"
@@ -1916,13 +1921,15 @@ def _render_home() -> str:
             <div id="resultStageDock" class="result-stage-dock workspace-nav-stage-dock"></div>
         </nav>
 
-        <main class="layout-grid">
+        <main class="layout-grid workspace-cockpit">
+            <div class="workspace-main-column">
             <div class="workspace-sidebar">
                 <section class="panel summary-panel" id="section-progress">
                     <div class="panel-head">
                         <div>
                             <p class="panel-kicker">진행 현황</p>
                             <h2>진행 현황</h2>
+                            <p class="panel-copy">실행 상태를 먼저 확인하고, 바로 아래 작업대에서 실시간 선별 결과를 확인합니다.</p>
                         </div>
                         <span class="status-pill" id="pipelineStatus">대기 중</span>
                     </div>
@@ -1942,6 +1949,44 @@ def _render_home() -> str:
                 </section>
             </div>
 
+            <section class="panel results-panel" id="section-results">
+                <div class="panel-head results-panel-head">
+                    <div class="results-panel-lead">
+                        <p class="panel-kicker">작업대</p>
+                        <h2>키워드 작업대</h2>
+                        <p class="panel-copy results-panel-copy">확장과 분석은 백엔드에서 계속 진행하고, 먼저 살아남는 후보는 여기에서 바로 확인하고 다음 작업으로 넘깁니다.</p>
+                    </div>
+                    <div class="results-panel-badges">
+                        <span class="badge">실시간 선별 우선</span>
+                        <span class="badge">CSV / TXT export</span>
+                    </div>
+                </div>
+                <div class="results-panel-tools">
+                    <div class="results-tool-group">
+                        <span class="results-tool-label">단계 파일</span>
+                        <button type="button" class="ghost-chip" id="resultsExportCollectedCsvButton">수집 CSV</button>
+                        <button type="button" class="ghost-chip" id="resultsExportCollectedTxtButton">수집 TXT</button>
+                        <button type="button" class="ghost-chip" id="resultsExportExpandedCsvButton">확장 CSV</button>
+                        <button type="button" class="ghost-chip" id="resultsExportExpandedTxtButton">확장 TXT</button>
+                        <button type="button" class="ghost-chip" id="resultsExportAnalyzedCsvButton">분석 CSV</button>
+                        <button type="button" class="ghost-chip" id="resultsExportAnalyzedTxtButton">분석 TXT</button>
+                        <button type="button" class="ghost-chip" id="resultsExportSelectedCsvButton">선별 CSV</button>
+                        <button type="button" class="ghost-chip" id="resultsExportSelectedTxtButton">선별 TXT</button>
+                    </div>
+                    <div class="results-tool-group">
+                        <span class="results-tool-label">보조 도구</span>
+                        <button type="button" class="ghost-chip" data-utility-open="history" aria-pressed="false">실행 기록</button>
+                        <button type="button" class="ghost-chip" data-utility-open="vault" aria-pressed="false">키워드 보관함</button>
+                        <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">오류 / 진단</button>
+                        <button type="button" class="ghost-chip" data-utility-open="logs" aria-pressed="false">실행 로그</button>
+                        <button type="button" class="ghost-chip" id="exportTitleCsvButton">제목 결과 CSV</button>
+                    </div>
+                </div>
+                <div id="resultsGrid" class="results-grid"></div>
+            </section>
+            </div>
+
+            <div class="workspace-side-column">
             <div class="control-column">
             <section class="panel control-panel" id="section-controls">
                 <div class="panel-head">
@@ -2152,6 +2197,8 @@ def _render_home() -> str:
                         <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="4">4</button>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="5">5</button>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="6">6</button>
+                    </div>
+                    <div class="grade-select-actions">
                         <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">선택 조합 적용</button>
                     </div>
                 </section>
@@ -2363,6 +2410,45 @@ def _render_home() -> str:
                             </div>
                             <p id="titleKeywordModeSummary" class="input-help compact-help">
                                 선택: 단일 + V1
+                            </p>
+                        </div>
+
+                        <div class="field-block field-block-wide">
+                            <span class="field-label field-label-row">
+                                <span>제목 영역 및 개수</span>
+                                {title_surface_help}
+                            </span>
+                            <div class="title-surface-grid" id="titleSurfaceGrid">
+                                <label class="title-surface-card">
+                                    <span class="check-chip"><input id="titleSurfaceHome" type="checkbox" checked />홈판</span>
+                                    <select id="titleSurfaceHomeCount" class="title-surface-count">
+                                        <option value="1">1개</option>
+                                        <option value="2" selected>2개</option>
+                                        <option value="3">3개</option>
+                                        <option value="4">4개</option>
+                                    </select>
+                                </label>
+                                <label class="title-surface-card">
+                                    <span class="check-chip"><input id="titleSurfaceBlog" type="checkbox" checked />블로그형</span>
+                                    <select id="titleSurfaceBlogCount" class="title-surface-count">
+                                        <option value="1">1개</option>
+                                        <option value="2" selected>2개</option>
+                                        <option value="3">3개</option>
+                                        <option value="4">4개</option>
+                                    </select>
+                                </label>
+                                <label class="title-surface-card">
+                                    <span class="check-chip"><input id="titleSurfaceHybrid" type="checkbox" />둘다</span>
+                                    <select id="titleSurfaceHybridCount" class="title-surface-count">
+                                        <option value="1" selected>1개</option>
+                                        <option value="2">2개</option>
+                                        <option value="3">3개</option>
+                                        <option value="4">4개</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <p id="titleSurfaceSummary" class="input-help compact-help">
+                                선택: 홈판 2개 + 블로그형 2개
                             </p>
                         </div>
 
@@ -2595,31 +2681,7 @@ def _render_home() -> str:
                 </div>
 
             </section>
-
-            <section class="panel results-panel" id="section-results">
-                <div class="panel-head">
-                    <div>
-                        <p class="panel-kicker">작업대</p>
-                        <h2>키워드 작업대</h2>
-                    </div>
-                </div>
-                <div class="results-panel-tools">
-                    <button type="button" class="ghost-chip" id="resultsExportCollectedCsvButton">수집 CSV</button>
-                    <button type="button" class="ghost-chip" id="resultsExportCollectedTxtButton">수집 TXT</button>
-                    <button type="button" class="ghost-chip" id="resultsExportExpandedCsvButton">확장 CSV</button>
-                    <button type="button" class="ghost-chip" id="resultsExportExpandedTxtButton">확장 TXT</button>
-                    <button type="button" class="ghost-chip" id="resultsExportAnalyzedCsvButton">분석 CSV</button>
-                    <button type="button" class="ghost-chip" id="resultsExportAnalyzedTxtButton">분석 TXT</button>
-                    <button type="button" class="ghost-chip" id="resultsExportSelectedCsvButton">선별 CSV</button>
-                    <button type="button" class="ghost-chip" id="resultsExportSelectedTxtButton">선별 TXT</button>
-                    <button type="button" class="ghost-chip" data-utility-open="history" aria-pressed="false">실행 기록</button>
-                    <button type="button" class="ghost-chip" data-utility-open="vault" aria-pressed="false">키워드 보관함</button>
-                    <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">오류 / 진단</button>
-                    <button type="button" class="ghost-chip" data-utility-open="logs" aria-pressed="false">실행 로그</button>
-                    <button type="button" class="ghost-chip" id="exportTitleCsvButton">제목 결과 CSV</button>
-                </div>
-                <div id="resultsGrid" class="results-grid"></div>
-            </section>
+            </div>
         </main>
         <div id="utilityDrawer" class="utility-drawer" hidden>
             <button type="button" class="utility-drawer-backdrop" id="utilityDrawerBackdrop" aria-label="보조 패널 닫기"></button>
