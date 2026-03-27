@@ -177,6 +177,7 @@ function normalizeLongtailOptionalSuffixKeys(values) {
         .map((value) => normalizeLongtailOptionalSuffixKey(value))
         .filter((value) => value && !seen.has(value) && seen.add(value));
 }
+window.normalizeLongtailOptionalSuffixKeys = normalizeLongtailOptionalSuffixKeys;
 
 function getLongtailOptionalSuffixKeys(selectedResult = null) {
     if (!Array.isArray(state.longtailOptionalSuffixKeys)) {
@@ -199,6 +200,19 @@ function buildLongtailOptionsPayload(selectedResult = null) {
     };
 }
 window.buildLongtailOptionsPayload = buildLongtailOptionsPayload;
+
+function selectionOptionKeysMatch(expectedKeys, actualKeys) {
+    const normalizedExpected = normalizeLongtailOptionalSuffixKeys(expectedKeys || []);
+    const normalizedActual = normalizeLongtailOptionalSuffixKeys(actualKeys || []);
+    return normalizedExpected.length === normalizedActual.length
+        && normalizedExpected.every((key) => normalizedActual.includes(key));
+}
+
+function hasSelectionSnapshot(result = null) {
+    const selectedResult = result || state.results.selected || null;
+    return countItems(selectedResult?.selected_keywords || []) > 0
+        || countItems(selectedResult?.longtail_suggestions || []) > 0;
+}
 
 function hasPendingLongtailOptionChanges(selectedResult = null) {
     const currentKeys = buildLongtailOptionsPayload(selectedResult).optional_suffix_keys;
@@ -359,6 +373,39 @@ function resolveSelectionPresetLabel(presetKey) {
     return getSelectionPresetConfig(presetKey)?.label || "사용자 정의";
 }
 
+function buildSelectionPresetSummary(profitabilityGrades, attackabilityGrades) {
+    const presetKey = resolveSelectionPresetKey(profitabilityGrades, attackabilityGrades);
+    const presetLabel = resolveSelectionPresetLabel(presetKey);
+    if (presetKey === "all") {
+        return `${presetLabel} · 전체 조합`;
+    }
+    if (presetKey && presetKey !== "custom" && presetLabel) {
+        return `${presetLabel} · ${buildGradeRunLabel(profitabilityGrades, attackabilityGrades)}`;
+    }
+    return buildGradeRunLabel(profitabilityGrades, attackabilityGrades);
+}
+
+function buildSelectionPresetDescription(presetKey, profitabilityGrades, attackabilityGrades) {
+    const preset = getSelectionPresetConfig(presetKey);
+    const presetDescription = String(preset?.description || "").trim();
+    if (presetDescription) {
+        return presetDescription;
+    }
+    if (presetKey === "all") {
+        return "수익성과 노출도 전체 조합을 열어두고 분석된 후보를 넓게 검토합니다.";
+    }
+
+    const gradeRunLabel = buildGradeRunLabel(profitabilityGrades, attackabilityGrades);
+    if (presetKey === "custom") {
+        return gradeRunLabel
+            ? `${gradeRunLabel} 조합만 선별합니다.`
+            : "수익성과 노출도 축을 직접 조합해 선별합니다.";
+    }
+    return gradeRunLabel
+        ? `${gradeRunLabel} 조합을 중심으로 선별합니다.`
+        : "선택한 조합을 중심으로 선별합니다.";
+}
+
 function hasEditorialSupportSelection(items) {
     return (items || []).some((item) => String(item?.selection_mode || "").trim() === "editorial_support");
 }
@@ -382,8 +429,15 @@ function buildSelectionResultTitle(items, profile) {
     if (profile?.mode === "default" && hasEditorialSupportSelection(items)) {
         return "글감 후보";
     }
-    if (profile?.mode === "combo_filter" && profile?.preset_key === "longtail_explore") {
-        return "롱테일 탐색 후보";
+    if (profile?.mode === "combo_filter") {
+        const presetKey = String(profile?.preset_key || "").trim();
+        const presetLabel = String(profile?.preset_label || resolveSelectionPresetLabel(presetKey)).trim();
+        if (presetKey && presetKey !== "all" && presetKey !== "custom" && presetLabel) {
+            return `${presetLabel} 후보`;
+        }
+        if (presetKey === "all") {
+            return "전체 조합 후보";
+        }
     }
     return "선별 키워드";
 }
@@ -396,13 +450,18 @@ function buildSelectionResultSubtitle(items, profile) {
     if (profile.mode === "combo_filter") {
         const presetKey = String(profile.preset_key || "").trim();
         const presetLabel = String(profile.preset_label || resolveSelectionPresetLabel(presetKey)).trim();
+        const presetDescription = buildSelectionPresetDescription(
+            presetKey,
+            profile.allowed_profitability_grades || [],
+            profile.allowed_attackability_grades || [],
+        );
         if (presetKey === "all") {
-            return "전체 조합을 그대로 통과시켜 하위 키워드와 글감 후보를 함께 정리한 결과입니다.";
+            return presetDescription;
         }
         if (presetKey && presetKey !== "custom" && presetKey !== "all" && presetLabel) {
-            return `${presetLabel} 프리셋으로 ${buildGradeRunLabel(profile.allowed_profitability_grades || [], profile.allowed_attackability_grades || [])} 조합을 선별한 결과입니다.`;
+            return `${presetLabel} 프리셋입니다. ${presetDescription}`;
         }
-        return `${buildGradeRunLabel(profile.allowed_profitability_grades || [], profile.allowed_attackability_grades || [])} 조합으로 선별한 결과입니다.`;
+        return presetDescription;
     }
 
     const grades = Array.isArray(profile.allowed_grades) ? profile.allowed_grades.filter(Boolean) : [];
@@ -453,7 +512,15 @@ function updateGradeFilterUI() {
 
     if (elements.gradeSelectSummary) {
         elements.gradeSelectSummary.textContent = selectedProfitability.length && selectedAttackability.length
-            ? buildGradeRunLabel(selectedProfitability, selectedAttackability)
+            ? buildSelectionPresetSummary(selectedProfitability, selectedAttackability)
+            : "수익성과 노출도를 1개 이상 선택하세요.";
+    }
+    if (elements.gradeSelectDescription) {
+        const presetKey = selectedProfitability.length && selectedAttackability.length
+            ? resolveSelectionPresetKey(selectedProfitability, selectedAttackability)
+            : "custom";
+        elements.gradeSelectDescription.textContent = selectedProfitability.length && selectedAttackability.length
+            ? buildSelectionPresetDescription(presetKey, selectedProfitability, selectedAttackability)
             : "수익성과 노출도를 1개 이상 선택하세요.";
     }
 
@@ -519,7 +586,7 @@ function resolveAttackabilityGrade(item) {
 
 function resolveComboGrade(item) {
     const directCombo = String(item?.combo_grade || "").trim().toUpperCase();
-    if (/^[ABCD][1-4]$/.test(directCombo)) {
+    if (/^[A-F][1-6]$/.test(directCombo)) {
         return directCombo;
     }
     const profitabilityGrade = resolveProfitabilityGrade(item);
@@ -542,18 +609,18 @@ function formatGoldenBucketLabel(bucket) {
 }
 
 function renderProfitabilityBadge(grade) {
-    const safeGrade = normalizeProfitabilityValue(grade) || "D";
+    const safeGrade = normalizeProfitabilityValue(grade) || "F";
     return `<span class="axis-badge profitability-${escapeHtml(safeGrade.toLowerCase())}">${escapeHtml(safeGrade)}</span>`;
 }
 
 function renderAttackabilityBadge(grade) {
-    const safeGrade = normalizeAttackabilityValue(grade) || "4";
+    const safeGrade = normalizeAttackabilityValue(grade) || "6";
     return `<span class="axis-badge attackability-${escapeHtml(safeGrade)}">${escapeHtml(safeGrade)}</span>`;
 }
 
 function renderComboBadge(comboGrade) {
     const safeCombo = String(comboGrade || "-").trim().toUpperCase() || "-";
-    const tone = /^[ABCD][1-4]$/.test(safeCombo) ? safeCombo.charAt(0).toLowerCase() : "d";
+    const tone = /^[A-F][1-6]$/.test(safeCombo) ? safeCombo.charAt(0).toLowerCase() : "f";
     return `<span class="combo-badge combo-${escapeHtml(tone)}">${escapeHtml(safeCombo)}</span>`;
 }
 
@@ -693,17 +760,27 @@ function getForwardSelectOptions() {
 }
 window.getForwardSelectOptions = getForwardSelectOptions;
 
-function hasMatchingSelectionProfile(allowedProfitabilityGrades, allowedAttackabilityGrades) {
+function hasMatchingSelectionProfile(allowedProfitabilityGrades, allowedAttackabilityGrades, longtailOptionKeys = []) {
     const normalizedProfitability = normalizeProfitabilityList(allowedProfitabilityGrades || []);
     const normalizedAttackability = normalizeAttackabilityList(allowedAttackabilityGrades || []);
     const profile = state.results.selected?.selection_profile || null;
+    const normalizedLongtailKeys = normalizeLongtailOptionalSuffixKeys(longtailOptionKeys || []);
+
+    if (!profile) {
+        return !hasSelectionSnapshot();
+    }
+
+    const profileLongtailKeys = normalizeLongtailOptionalSuffixKeys(profile?.longtail_option_keys || []);
+    if (!selectionOptionKeysMatch(normalizedLongtailKeys, profileLongtailKeys)) {
+        return false;
+    }
 
     if (!normalizedProfitability.length && !normalizedAttackability.length) {
-        return !profile || profile.mode === "default" || profile.mode !== "combo_filter";
+        return profile.mode === "default";
     }
 
     if (!hasExplicitAxisFilterSelection(normalizedProfitability, normalizedAttackability)) {
-        return !profile || profile.mode === "default" || profile.mode !== "combo_filter";
+        return profile.mode === "default";
     }
 
     const profileProfitability = normalizeProfitabilityList(profile?.allowed_profitability_grades || []);
@@ -713,6 +790,41 @@ function hasMatchingSelectionProfile(allowedProfitabilityGrades, allowedAttackab
         && profileAttackability.length === normalizedAttackability.length
         && normalizedProfitability.every((grade) => profileProfitability.includes(grade))
         && normalizedAttackability.every((grade) => profileAttackability.includes(grade));
+}
+
+function canReuseCurrentSelection({
+    allowedProfitabilityGrades = [],
+    allowedAttackabilityGrades = [],
+    longtailOptionKeys = [],
+    selectionCandidateCount = 0,
+}) {
+    if (!hasSelectionSnapshot()) {
+        return false;
+    }
+    if (!hasMatchingSelectionProfile(
+        allowedProfitabilityGrades,
+        allowedAttackabilityGrades,
+        longtailOptionKeys,
+    )) {
+        return false;
+    }
+
+    const candidateCount = Number(state.results.selected?.selection_profile?.candidate_count || 0);
+    if (candidateCount > 0 && selectionCandidateCount > 0 && candidateCount !== selectionCandidateCount) {
+        return false;
+    }
+    return true;
+}
+
+function isRetryableSelectionNetworkError(error) {
+    return String(error?.code || "").trim() === "network_error"
+        && Number(error?.statusCode || 0) === 0;
+}
+
+function waitForSelectionRetry(delayMs = 350) {
+    return new Promise((resolve) => {
+        window.setTimeout(resolve, Math.max(0, Number(delayMs || 0)));
+    });
 }
 
 async function runSelectStage(options = {}) {
@@ -730,6 +842,7 @@ async function runSelectStage(options = {}) {
     );
     const analyzedKeywords = state.results.analyzed?.analyzed_keywords || [];
     const longtailOptions = buildLongtailOptionsPayload(state.results.selected || {});
+    const longtailOptionKeys = normalizeLongtailOptionalSuffixKeys(longtailOptions.optional_suffix_keys || []);
     const selectionCandidates = hasExplicitFilters
         ? analyzedKeywords.filter((item) => (
             allowedProfitabilityGrades.includes(resolveProfitabilityGrade(item))
@@ -748,48 +861,193 @@ async function runSelectStage(options = {}) {
         });
     }
 
+    if (canReuseCurrentSelection({
+        allowedProfitabilityGrades,
+        allowedAttackabilityGrades,
+        longtailOptionKeys,
+        selectionCandidateCount: selectionCandidates.length,
+    })) {
+        const reusedResult = state.results.selected;
+        const reusedCount = countItems(reusedResult?.selected_keywords || []);
+        const finishedAt = Date.now();
+        const startedAt = state.stageStatus.selected?.startedAt || finishedAt;
+        state.stageStatus.selected = {
+            state: "success",
+            message: `${reusedCount}건 유지`,
+            startedAt,
+            finishedAt,
+            durationMs: finishedAt - startedAt,
+        };
+        addLog(
+            hasExplicitFilters
+                ? `선별 재사용: ${buildSelectionPresetRunLabel(allowedProfitabilityGrades, allowedAttackabilityGrades)} 기준의 기존 ${reusedCount}건 결과를 그대로 사용합니다.`
+                : `선별 재사용: 이미 계산된 ${reusedCount}건 결과를 그대로 사용합니다.`,
+            "success",
+        );
+        renderAll();
+        return reusedResult;
+    }
+
     addLog(
         hasExplicitFilters
             ? `선별 시작: ${buildSelectionPresetRunLabel(allowedProfitabilityGrades, allowedAttackabilityGrades)} 기준으로 ${countItems(selectionCandidates)}건에 조합 기준을 적용합니다.`
             : "선별 시작: 자동 선별 기준으로 수익형 후보와 글감 후보를 함께 정리합니다.",
     );
-    clearStageAndDownstream("selected");
-    const result = await executeStage({
-        stageKey: "selected",
-        endpoint: "/select",
-        inputData: {
-            ...buildTitleExportRequestContext(),
-            analyzed_keywords: selectionCandidates,
-            select_options: {
-                ...(hasExplicitFilters
-                    ? {
-                        allowed_profitability_grades: allowedProfitabilityGrades,
-                        allowed_attackability_grades: allowedAttackabilityGrades,
-                        mode: "combo_filter",
-                    }
-                    : {}),
-                longtail_options: longtailOptions,
-            },
+    const previousSelectedResult = state.results.selected;
+    const requestInputData = {
+        ...buildTitleExportRequestContext(),
+        analyzed_keywords: selectionCandidates,
+        select_options: {
+            ...(hasExplicitFilters
+                ? {
+                    allowed_profitability_grades: allowedProfitabilityGrades,
+                    allowed_attackability_grades: allowedAttackabilityGrades,
+                    mode: "combo_filter",
+                }
+                : {}),
+            longtail_options: longtailOptions,
         },
-    });
+    };
+    clearStageAndDownstream("selected");
+    let result;
+    try {
+        result = await executeStage({
+            stageKey: "selected",
+            endpoint: "/select",
+            inputData: requestInputData,
+        });
+    } catch (error) {
+        if (!isRetryableSelectionNetworkError(error)) {
+            throw error;
+        }
+
+        addLog("선별 요청이 잠시 끊겨 한 번 더 시도합니다.", "error");
+        await waitForSelectionRetry();
+        try {
+            result = await executeStage({
+                stageKey: "selected",
+                endpoint: "/select",
+                inputData: requestInputData,
+            });
+        } catch (retryError) {
+            if (
+                !isRetryableSelectionNetworkError(retryError)
+                || !previousSelectedResult
+                || !hasSelectionSnapshot(previousSelectedResult)
+            ) {
+                throw retryError;
+            }
+
+            state.results.selected = previousSelectedResult;
+            state.longtailOptionalSuffixKeys = normalizeLongtailOptionalSuffixKeys(
+                previousSelectedResult.longtail_options?.optional_suffix_keys || longtailOptionKeys,
+            );
+            const finishedAt = Date.now();
+            const startedAt = state.stageStatus.selected?.startedAt || finishedAt;
+            state.stageStatus.selected = {
+                state: "success",
+                message: `${countItems(previousSelectedResult.selected_keywords || [])}건 유지`,
+                startedAt,
+                finishedAt,
+                durationMs: finishedAt - startedAt,
+            };
+            state.diagnostics.selected = {
+                stageKey: "selected",
+                stageLabel: getStage("selected").label,
+                status: "success",
+                endpoint: "/select",
+                requestId: "",
+                startedAt: new Date(startedAt).toISOString(),
+                durationMs: finishedAt - startedAt,
+                request: sanitizeSensitiveData(requestInputData),
+                responseSummary: buildResponseSummary("selected", previousSelectedResult),
+                error: normalizeError(retryError, {
+                    stageKey: "selected",
+                    endpoint: "/select",
+                    request: requestInputData,
+                    startedAt: new Date(startedAt).toISOString(),
+                    durationMs: finishedAt - startedAt,
+                }),
+                note: "Kept the previous selection snapshot after a repeated network failure.",
+            };
+            addLog("선별 재요청이 끊겨 기존 선별 결과를 유지했습니다.", "error");
+            renderAll();
+            return previousSelectedResult;
+        }
+    }
 
     state.longtailOptionalSuffixKeys = normalizeLongtailOptionalSuffixKeys(
         result.longtail_options?.optional_suffix_keys || longtailOptions.optional_suffix_keys,
     );
-    state.results.selected = {
-        ...result,
-        selection_profile: {
+    const resultProfile = result.selection_profile && typeof result.selection_profile === "object"
+        ? { ...result.selection_profile }
+        : {
             mode: hasExplicitFilters ? "combo_filter" : "default",
             allowed_profitability_grades: allowedProfitabilityGrades,
             allowed_attackability_grades: allowedAttackabilityGrades,
             candidate_count: selectionCandidates.length,
-            preset_key: hasExplicitFilters ? resolveSelectionPresetKey(allowedProfitabilityGrades, allowedAttackabilityGrades) : "auto",
-            preset_label: hasExplicitFilters
-                ? resolveSelectionPresetLabel(resolveSelectionPresetKey(allowedProfitabilityGrades, allowedAttackabilityGrades))
+            longtail_option_keys: [...longtailOptionKeys],
+        };
+    if (!Array.isArray(resultProfile.allowed_profitability_grades) && hasExplicitFilters) {
+        resultProfile.allowed_profitability_grades = [...allowedProfitabilityGrades];
+    }
+    if (!Array.isArray(resultProfile.allowed_attackability_grades) && hasExplicitFilters) {
+        resultProfile.allowed_attackability_grades = [...allowedAttackabilityGrades];
+    }
+    if (!Array.isArray(resultProfile.longtail_option_keys)) {
+        resultProfile.longtail_option_keys = [...longtailOptionKeys];
+    }
+    resultProfile.mode = String(resultProfile.mode || (hasExplicitFilters ? "combo_filter" : "default")).trim()
+        || (hasExplicitFilters ? "combo_filter" : "default");
+    resultProfile.candidate_count = Math.max(
+        0,
+        Number(resultProfile.candidate_count ?? selectionCandidates.length ?? 0) || 0,
+    );
+    resultProfile.has_editorial_support = hasEditorialSupportSelection(result.selected_keywords || []);
+    if (resultProfile.mode === "combo_filter") {
+        resultProfile.preset_key = resolveSelectionPresetKey(
+            resultProfile.allowed_profitability_grades || allowedProfitabilityGrades,
+            resultProfile.allowed_attackability_grades || allowedAttackabilityGrades,
+        );
+        resultProfile.preset_label = resolveSelectionPresetLabel(resultProfile.preset_key);
+    } else if (!String(resultProfile.preset_label || "").trim()) {
+        resultProfile.preset_key = "auto";
+        resultProfile.preset_label = "auto";
+    }
+    state.results.selected = {
+        ...result,
+        selection_profile: resultProfile, /*
                 : "자동 선별",
             has_editorial_support: hasEditorialSupportSelection(result.selected_keywords || []),
-        },
+        */
     };
+    if (false && canReuseCurrentSelection({
+        allowedProfitabilityGrades,
+        allowedAttackabilityGrades,
+        longtailOptionKeys,
+        selectionCandidateCount: selectionCandidates.length,
+    })) {
+        const reusedResult = state.results.selected;
+        const reusedCount = countItems(reusedResult?.selected_keywords || []);
+        const finishedAt = Date.now();
+        const startedAt = state.stageStatus.selected?.startedAt || finishedAt;
+        state.stageStatus.selected = {
+            state: "success",
+            message: `${reusedCount}건 유지`,
+            startedAt,
+            finishedAt,
+            durationMs: finishedAt - startedAt,
+        };
+        addLog(
+            hasExplicitFilters
+                ? `선별 재사용: ${buildSelectionPresetRunLabel(allowedProfitabilityGrades, allowedAttackabilityGrades)} 기준의 기존 ${reusedCount}건 결과를 그대로 사용합니다.`
+                : `선별 재사용: 이미 계산된 ${reusedCount}건 결과를 그대로 사용합니다.`,
+            "success",
+        );
+        renderAll();
+        return reusedResult;
+    }
+
     addLog(
         hasExplicitFilters
             ? `선별 완료 (${buildSelectionPresetRunLabel(allowedProfitabilityGrades, allowedAttackabilityGrades)}): ${countItems(result.selected_keywords)}건`
@@ -819,6 +1077,7 @@ async function runTitleStage() {
         || !hasMatchingSelectionProfile(
             forwardSelectOptions.allowedProfitabilityGrades || [],
             forwardSelectOptions.allowedAttackabilityGrades || [],
+            buildLongtailOptionsPayload(state.results.selected || {}).optional_suffix_keys || [],
         )
     ) {
         await runSelectStage(forwardSelectOptions);
@@ -2126,7 +2385,7 @@ function renderAnalyzedGradeBoard(items, visibleItems = null) {
                 <strong>2축 개수 및 즉시 필터</strong>
                 <span>${escapeHtml(
                     hasExplicitFilters
-                        ? `${buildGradeRunLabel(selectedProfitability, selectedAttackability)} ${selectedCount}건이 현재 테이블에 반영됩니다.`
+                        ? `${buildSelectionPresetSummary(selectedProfitability, selectedAttackability)} ${selectedCount}건이 현재 테이블에 반영됩니다.`
                         : `전체 조합 ${countItems(items)}건이 현재 테이블에 반영되고 있습니다.`,
                 )}</span>
             </div>
@@ -2234,7 +2493,7 @@ function renderAnalyzedList(items) {
             </div>
             <div class="analysis-filter-tip">
                 <strong>선별 프리셋</strong>
-                <span>균형형은 A~C · 1~3, 수익형은 A~B · 1~4, 롱테일 탐색형은 B~D · 1~3 조합입니다. 자동 선별은 황금 조합이 부족할 때 글감 후보까지 함께 남깁니다.</span>
+                <span>균형형은 A~D · 1~4, 황금형은 A~C · 1~3, 수익형은 A~C · 1~6, 노출형은 A~F · 1~3, 롱테일 탐색형은 C~F · 1~4 조합입니다. 자동 선별은 상위 조합이 부족할 때 글감 후보까지 함께 남깁니다.</span>
             </div>
             <div class="queue-form-actions result-inline-actions">
                 <span class="queue-inline-meta">표시 목록 ${filteredItems.length}건</span>
@@ -3330,8 +3589,8 @@ function renderWorkbenchAside(expandedItems, analyzedItems) {
                 `).join("")}
             </div>
             <div class="workbench-guide-note">
-                <strong>${renderComboBadge("A1")} · ${renderComboBadge("A2")} · ${renderComboBadge("B1")}</strong>는 진짜 황금 조합입니다.<br />
-                <strong>${renderGoldenBucketPill("promising")}</strong>에는 A3, B2, B3, C1, C2가 들어갑니다.
+                <strong>${renderGoldenBucketPill("gold")}</strong>는 수익성과 노출도가 모두 최상위권인 조합입니다.<br />
+                <strong>${renderGoldenBucketPill("promising")}</strong>은 한 축이 아주 강하거나, 두 축이 모두 상위권인 후보입니다.
             </div>
         </section>
     `;

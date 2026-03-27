@@ -4149,6 +4149,16 @@ body.utility-drawer-open {
     background: rgba(20, 32, 51, 0.14);
     color: var(--text);
 }
+.axis-badge.profitability-e,
+.combo-badge.combo-e {
+    background: rgba(120, 53, 15, 0.16);
+    color: #9a3412;
+}
+.axis-badge.profitability-f,
+.combo-badge.combo-f {
+    background: rgba(127, 29, 29, 0.16);
+    color: #b91c1c;
+}
 .axis-badge.attackability-1 {
     background: linear-gradient(135deg, #0f766e, #14b8a6);
     color: #fff;
@@ -4164,6 +4174,14 @@ body.utility-drawer-open {
 .axis-badge.attackability-4 {
     background: rgba(20, 32, 51, 0.14);
     color: var(--text);
+}
+.axis-badge.attackability-5 {
+    background: rgba(120, 53, 15, 0.16);
+    color: #9a3412;
+}
+.axis-badge.attackability-6 {
+    background: rgba(127, 29, 29, 0.16);
+    color: #b91c1c;
 }
 .axis-score-cell {
     display: inline-flex;

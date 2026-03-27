@@ -2122,22 +2122,27 @@ def _render_home() -> str:
                     <div class="grade-select-head">
                         <div>
                             <span class="field-label">2축 선별</span>
-                            <p class="grade-select-summary" id="gradeSelectSummary">수익성 전체 · 노출도 전체</p>
+                            <p class="grade-select-summary" id="gradeSelectSummary">전체 · 전체 조합</p>
                         </div>
-                        <p class="input-help compact-help">수익성 A~D와 노출도 1~4를 조합해 선별합니다. 균형형은 A~C · 1~3, 수익형은 A~B · 1~4, 롱테일 탐색형은 B~D · 1~3 조합입니다.</p>
+                        <p class="input-help compact-help">수익성 A~F와 노출도 1~6을 조합해 선별합니다. 6단계로 더 잘게 나눠서, 황금형과 롱테일 탐색형 사이를 더 세밀하게 고를 수 있습니다.</p>
                     </div>
                     <div class="grade-select-presets">
                         <button type="button" class="ghost-chip" data-selection-preset="all">전체</button>
                         <button type="button" class="ghost-chip" data-selection-preset="balanced">균형형</button>
+                        <button type="button" class="ghost-chip" data-selection-preset="golden_core">황금형</button>
                         <button type="button" class="ghost-chip" data-selection-preset="profit_focus">수익형</button>
+                        <button type="button" class="ghost-chip" data-selection-preset="exposure_focus">노출형</button>
                         <button type="button" class="ghost-chip" data-selection-preset="longtail_explore">롱테일 탐색형</button>
                     </div>
+                    <p class="input-help compact-help" id="gradeSelectDescription">수익성과 노출도 전체 조합을 열어두고 분석된 후보를 넓게 검토합니다.</p>
                     <div class="grade-select-row grade-select-axis-row">
                         <span class="grade-select-axis-label">수익성</span>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="A">A</button>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="B">B</button>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="C">C</button>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="D">D</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="E">E</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-profitability-toggle="F">F</button>
                     </div>
                     <div class="grade-select-row grade-select-axis-row">
                         <span class="grade-select-axis-label">노출도</span>
@@ -2145,6 +2150,8 @@ def _render_home() -> str:
                         <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="2">2</button>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="3">3</button>
                         <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="4">4</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="5">5</button>
+                        <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="6">6</button>
                         <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">선택 조합 적용</button>
                     </div>
                 </section>

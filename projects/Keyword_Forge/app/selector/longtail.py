@@ -6,6 +6,8 @@ from typing import Any
 from app.analyzer.config import DEFAULT_CONFIG
 from app.analyzer.main import analyzer_module
 from app.analyzer.scorer import (
+    ATTACKABILITY_GRADE_ORDER,
+    PROFITABILITY_GRADE_ORDER,
     classify_attackability_grade,
     classify_golden_bucket,
     classify_profitability_grade,
@@ -40,8 +42,8 @@ _ALL_INTENT_TERMS = {
     if normalize_key(term)
 }
 _STOPWORDS = {"추천", "비교", "정리", "가이드", "방법", "사용법", "뜻", "의미"}
-_PROFITABILITY_ORDER = ["A", "B", "C", "D"]
-_ATTACKABILITY_ORDER = ["1", "2", "3", "4"]
+_PROFITABILITY_ORDER = list(PROFITABILITY_GRADE_ORDER)
+_ATTACKABILITY_ORDER = list(ATTACKABILITY_GRADE_ORDER)
 _LOW_SIGNAL_LONGTAIL_PATTERNS = (
     "추천 기준",
     "고를 때 체크",
@@ -738,7 +740,7 @@ def _resolve_intent_key(keyword: str) -> str:
 
 def _project_profitability_grade(base_grade: str, *, intent_key: str) -> str:
     if base_grade not in _PROFITABILITY_ORDER:
-        return "C"
+        return "D"
     index = _PROFITABILITY_ORDER.index(base_grade)
     if intent_key in {"commercial", "action"}:
         return base_grade
@@ -749,7 +751,7 @@ def _project_profitability_grade(base_grade: str, *, intent_key: str) -> str:
 
 def _project_attackability_grade(base_grade: str, longtail_keyword: str, representative_keyword: str) -> str:
     if base_grade not in _ATTACKABILITY_ORDER:
-        return "2"
+        return "3"
     index = _ATTACKABILITY_ORDER.index(base_grade)
     token_bonus = 1 if len(tokenize_text(longtail_keyword)) > len(tokenize_text(representative_keyword)) else 0
     improved_index = max(0, index - token_bonus)
@@ -765,8 +767,22 @@ def _project_longtail_score(
     representative_keyword: str,
 ) -> float:
     base_score = float(representative_item.get("score", 0.0) or 0.0)
-    profitability_bonus = {"A": 7.0, "B": 4.0, "C": 1.0, "D": -3.0}.get(projected_profitability, 0.0)
-    attackability_bonus = {"1": 8.0, "2": 4.0, "3": 0.0, "4": -4.0}.get(projected_attackability, 0.0)
+    profitability_bonus = {
+        "A": 8.0,
+        "B": 6.0,
+        "C": 3.0,
+        "D": 0.0,
+        "E": -3.0,
+        "F": -6.0,
+    }.get(projected_profitability, 0.0)
+    attackability_bonus = {
+        "1": 8.0,
+        "2": 6.0,
+        "3": 3.0,
+        "4": 0.0,
+        "5": -3.0,
+        "6": -6.0,
+    }.get(projected_attackability, 0.0)
     specificity_bonus = 2.0 if len(tokenize_text(longtail_keyword)) > len(tokenize_text(representative_keyword)) else 0.0
     return round(max(0.0, min(100.0, base_score * 0.78 + profitability_bonus + attackability_bonus + specificity_bonus)), 1)
 

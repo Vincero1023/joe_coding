@@ -725,6 +725,7 @@ def _build_selection_stream_payload(selected_result: dict[str, Any]) -> dict[str
         "longtail_options",
         "cannibalization_report",
         "selection_export",
+        "selection_profile",
     ):
         if key in selected_result:
             payload[key] = selected_result.get(key)

@@ -142,6 +142,9 @@ _MODIFIER_TERMS: tuple[str, ...] = (
     "조회",
 )
 
+PROFITABILITY_GRADE_ORDER: tuple[str, ...] = ("A", "B", "C", "D", "E", "F")
+ATTACKABILITY_GRADE_ORDER: tuple[str, ...] = ("1", "2", "3", "4", "5", "6")
+
 
 def calculate_profit(top_bid: float, estimated_clicks: float) -> float:
     if top_bid <= 0 or estimated_clicks <= 0:
@@ -206,7 +209,7 @@ def calculate_attackability_score(
     )
     rounded_score = float(math.floor(weighted_score + 0.5))
     if volume_score < 25.0:
-        return min(rounded_score, config.attackability_2_threshold)
+        return min(rounded_score, config.attackability_3_threshold)
     if volume_score < 60.0:
         return min(rounded_score, config.attackability_1_threshold + 4.0)
     return rounded_score
@@ -222,7 +225,11 @@ def classify_profitability_grade(
         return "B"
     if score >= config.profitability_c_threshold:
         return "C"
-    return "D"
+    if score >= config.profitability_d_threshold:
+        return "D"
+    if score >= config.profitability_e_threshold:
+        return "E"
+    return "F"
 
 
 def classify_attackability_grade(
@@ -235,19 +242,36 @@ def classify_attackability_grade(
         return "2"
     if score >= config.attackability_3_threshold:
         return "3"
-    return "4"
+    if score >= config.attackability_4_threshold:
+        return "4"
+    if score >= config.attackability_5_threshold:
+        return "5"
+    return "6"
 
 
 def classify_golden_bucket(
     profitability_grade: str,
     attackability_grade: str,
 ) -> str:
-    combo_grade = f"{profitability_grade}{attackability_grade}"
-    if combo_grade in {"A1", "A2", "B1"}:
+    profitability_rank = _resolve_axis_rank(
+        profitability_grade,
+        PROFITABILITY_GRADE_ORDER,
+    )
+    attackability_rank = _resolve_axis_rank(
+        attackability_grade,
+        ATTACKABILITY_GRADE_ORDER,
+        descending=False,
+    )
+    if not profitability_rank or not attackability_rank:
+        return "hold"
+
+    combined_rank = profitability_rank + attackability_rank
+    weakest_axis = min(profitability_rank, attackability_rank)
+    if weakest_axis >= 5 and combined_rank >= 11:
         return "gold"
-    if combo_grade in {"A3", "B2", "B3", "C1", "C2"}:
+    if weakest_axis >= 4 and combined_rank >= 9:
         return "promising"
-    if combo_grade in {"C3", "D1", "D2"}:
+    if weakest_axis >= 2 and combined_rank >= 7:
         return "experimental"
     return "hold"
 
@@ -272,6 +296,26 @@ def classify_grade(score: float) -> str:
     if score >= 25:
         return "D"
     return "F"
+
+
+def _resolve_axis_rank(
+    grade: str,
+    order: tuple[str, ...],
+    *,
+    descending: bool = True,
+) -> int:
+    normalized_grade = str(grade or "").strip().upper()
+    if not normalized_grade:
+        return 0
+
+    normalized_order = [str(item).strip().upper() for item in order]
+    if normalized_grade not in normalized_order:
+        return 0
+
+    index = normalized_order.index(normalized_grade)
+    if descending:
+        return len(normalized_order) - index
+    return len(normalized_order) - index
 
 
 def analyze_items(

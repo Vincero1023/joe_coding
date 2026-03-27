@@ -88,6 +88,9 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "titleCommunityCustomDomains" in response.text
     assert "data-title-community-source" in response.text
     assert "자동 선별" in response.text
+    assert "황금형" in response.text
+    assert "노출형" in response.text
+    assert "gradeSelectDescription" in response.text
     assert "롱테일 탐색형" in response.text
     assert "data-queue-category" in response.text
     assert "localCookieStatus" in response.text

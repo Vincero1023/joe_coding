@@ -118,8 +118,8 @@ def test_dual_axis_labels_are_attached_to_analyzed_keywords() -> None:
 
     analyzed = result["analyzed_keywords"]
     assert len(analyzed) == 1
-    assert analyzed[0]["profitability_grade"] in {"A", "B", "C", "D"}
-    assert analyzed[0]["attackability_grade"] in {"1", "2", "3", "4"}
+    assert analyzed[0]["profitability_grade"] in {"A", "B", "C", "D", "E", "F"}
+    assert analyzed[0]["attackability_grade"] in {"1", "2", "3", "4", "5", "6"}
     assert analyzed[0]["combo_grade"] == (
         f"{analyzed[0]['profitability_grade']}{analyzed[0]['attackability_grade']}"
     )

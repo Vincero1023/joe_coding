@@ -227,31 +227,47 @@ const KEYWORD_STATUS_PRIORITY = {
     published: 4,
 };
 const GRADE_ORDER = ["S", "A", "B", "C", "D", "F"];
-const PROFITABILITY_ORDER = ["A", "B", "C", "D"];
-const ATTACKABILITY_ORDER = ["1", "2", "3", "4"];
+const PROFITABILITY_ORDER = ["A", "B", "C", "D", "E", "F"];
+const ATTACKABILITY_ORDER = ["1", "2", "3", "4", "5", "6"];
 const GRADE_PRESET_MAP = {
     all: {
         label: "전체",
         profitability: [...PROFITABILITY_ORDER],
         attackability: [...ATTACKABILITY_ORDER],
+        description: "수익성과 노출도 전체 조합을 열어두고 분석된 후보를 넓게 검토합니다.",
     },
     balanced: {
         label: "균형형",
+        profitability: ["A", "B", "C", "D"],
+        attackability: ["1", "2", "3", "4"],
+        description: "수익성과 노출도 모두 중상위 조합을 우선 보며 무난하게 시작합니다.",
+    },
+    golden_core: {
+        label: "황금형",
         profitability: ["A", "B", "C"],
         attackability: ["1", "2", "3"],
+        description: "수익성과 진입성이 모두 강한 핵심 황금 키워드만 더 단단하게 추립니다.",
     },
     profit_focus: {
         label: "수익형",
-        profitability: ["A", "B"],
+        profitability: ["A", "B", "C"],
         attackability: [...ATTACKABILITY_ORDER],
+        description: "광고 단가와 수익성이 높은 축을 우선 열고, 노출도는 넓게 허용합니다.",
+    },
+    exposure_focus: {
+        label: "노출형",
+        profitability: [...PROFITABILITY_ORDER],
+        attackability: ["1", "2", "3"],
+        description: "진입 난이도가 낮은 조합을 우선 보며 빠르게 노출 가능한 후보를 찾습니다.",
     },
     longtail_explore: {
         label: "롱테일 탐색형",
-        profitability: ["B", "C", "D"],
-        attackability: ["1", "2", "3"],
+        profitability: ["C", "D", "E", "F"],
+        attackability: ["1", "2", "3", "4"],
+        description: "롱테일과 보조 주제를 넓게 보되, 너무 어려운 진입 난도는 제외합니다.",
     },
 };
-const SELECTION_PRESET_ORDER = ["all", "balanced", "profit_focus", "longtail_explore"];
+const SELECTION_PRESET_ORDER = ["all", "balanced", "golden_core", "profit_focus", "exposure_focus", "longtail_explore"];
 const TITLE_RESULT_MODE_FILTER_OPTIONS = [
     { value: "all", label: "전체" },
     { value: "single", label: "핵심키워드" },
@@ -1712,19 +1728,42 @@ function buildAutoSelectionOptions() {
 function buildSelectionProfileForResult(selectedResult, analyzedCount) {
     const selectOptions = buildAutoSelectionOptions();
     const selectedKeywords = Array.isArray(selectedResult?.selected_keywords) ? selectedResult.selected_keywords : [];
-    const profile = {
+    const rawIncomingProfile = selectedResult?.selection_profile;
+    const incomingProfile = rawIncomingProfile && typeof rawIncomingProfile === "object"
+        ? { ...rawIncomingProfile }
+        : null;
+    const normalizeLongtailKeys = typeof window.normalizeLongtailOptionalSuffixKeys === "function"
+        ? window.normalizeLongtailOptionalSuffixKeys
+        : (values) => Array.isArray(values)
+            ? [...new Set(values.map((value) => String(value || "").trim().toLowerCase()).filter(Boolean))]
+            : [];
+    const fallbackLongtailOptionKeys = normalizeLongtailKeys(
+        selectedResult?.longtail_options?.optional_suffix_keys
+        || selectOptions.longtail_options?.optional_suffix_keys
+        || [],
+    );
+    const profile = incomingProfile || {
         mode: String(selectOptions.mode || "default").trim() || "default",
         candidate_count: Math.max(0, Number(analyzedCount || 0)),
     };
 
-    if (Array.isArray(selectOptions.allowed_profitability_grades)) {
+    profile.mode = String(profile.mode || selectOptions.mode || "default").trim() || "default";
+    profile.candidate_count = Math.max(
+        0,
+        Number(profile.candidate_count ?? analyzedCount ?? 0) || 0,
+    );
+
+    if (!Array.isArray(profile.allowed_profitability_grades) && Array.isArray(selectOptions.allowed_profitability_grades)) {
         profile.allowed_profitability_grades = [...selectOptions.allowed_profitability_grades];
     }
-    if (Array.isArray(selectOptions.allowed_attackability_grades)) {
+    if (!Array.isArray(profile.allowed_attackability_grades) && Array.isArray(selectOptions.allowed_attackability_grades)) {
         profile.allowed_attackability_grades = [...selectOptions.allowed_attackability_grades];
     }
-    if (Array.isArray(selectOptions.allowed_grades)) {
+    if (!Array.isArray(profile.allowed_grades) && Array.isArray(selectOptions.allowed_grades)) {
         profile.allowed_grades = [...selectOptions.allowed_grades];
+    }
+    if (!Array.isArray(profile.longtail_option_keys) && fallbackLongtailOptionKeys.length) {
+        profile.longtail_option_keys = [...fallbackLongtailOptionKeys];
     }
 
     if (profile.mode === "combo_filter") {
@@ -3920,7 +3959,7 @@ function applySelectionStreamEvent(eventPayload, startedAt) {
     if (
         previousSelectedCount === 0
         && selectedCount > 0
-        && normalizeResultViewKey(state.activeResultView) === "analyzed"
+        && ["", "expanded", "analyzed"].includes(normalizeResultViewKey(state.activeResultView))
     ) {
         setActiveResultView("selected");
     }
@@ -4432,6 +4471,7 @@ function bindElements() {
     elements.attackabilityToggleButtons = Array.from(document.querySelectorAll("[data-attackability-toggle]"));
     elements.runGradeSelectButton = document.getElementById("runGradeSelectButton");
     elements.gradeSelectSummary = document.getElementById("gradeSelectSummary");
+    elements.gradeSelectDescription = document.getElementById("gradeSelectDescription");
     elements.titleMode = document.getElementById("titleMode");
     elements.titleModeSingle = document.getElementById("titleModeSingle");
     elements.titleModeLongtailSelected = document.getElementById("titleModeLongtailSelected");

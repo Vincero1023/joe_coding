@@ -235,6 +235,9 @@ def test_selector_combo_filter_returns_matching_two_axis_keywords() -> None:
                 "mode": "combo_filter",
                 "allowed_profitability_grades": ["A", "B", "C"],
                 "allowed_attackability_grades": ["1", "2", "3"],
+                "longtail_options": {
+                    "optional_suffix_keys": ["guide"],
+                },
             },
         }
     )
@@ -242,6 +245,59 @@ def test_selector_combo_filter_returns_matching_two_axis_keywords() -> None:
     assert len(result["selected_keywords"]) == 1
     assert result["selected_keywords"][0]["keyword"] == "true_gold"
     assert result["selected_keywords"][0]["selection_mode"] == "combo_filter"
+    assert result["selection_profile"] == {
+        "mode": "combo_filter",
+        "candidate_count": 2,
+        "selected_count": 1,
+        "longtail_option_keys": ["guide"],
+        "has_editorial_support": False,
+        "allowed_profitability_grades": ["A", "B", "C"],
+        "allowed_attackability_grades": ["1", "2", "3"],
+    }
+
+
+def test_selector_default_selection_response_includes_profile() -> None:
+    result = run(
+        {
+            "analyzed_keywords": [
+                {
+                    "keyword": "insurance compare",
+                    "profitability_grade": "A",
+                    "attackability_grade": "2",
+                    "combo_grade": "A2",
+                    "golden_bucket": "gold",
+                    "score": 74.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.92,
+                    "metrics": {
+                        "volume": 12500.0,
+                        "cpc": 420.0,
+                        "competition": 0.42,
+                        "bid": 310.0,
+                        "profit": 26.0,
+                        "opportunity": 2.4,
+                        "monetization_score": 60.0,
+                        "rarity_score": 38.0,
+                        "search_volume_score": 90.0,
+                        "total_clicks": 84.0,
+                    },
+                },
+            ],
+            "select_options": {
+                "longtail_options": {
+                    "optional_suffix_keys": ["checklist"],
+                },
+            },
+        }
+    )
+
+    assert result["selection_profile"] == {
+        "mode": "default",
+        "candidate_count": 1,
+        "selected_count": 1,
+        "longtail_option_keys": ["checklist"],
+        "has_editorial_support": False,
+    }
 
 
 def test_selector_grade_filter_uses_score_when_grade_is_missing() -> None:

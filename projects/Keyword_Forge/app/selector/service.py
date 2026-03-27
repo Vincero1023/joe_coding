@@ -6,6 +6,8 @@ from typing import Any
 
 from app.analyzer.config import DEFAULT_CONFIG
 from app.analyzer.scorer import (
+    ATTACKABILITY_GRADE_ORDER,
+    PROFITABILITY_GRADE_ORDER,
     calculate_attackability_score,
     calculate_profitability_score,
     classify_attackability_grade,
@@ -112,6 +114,13 @@ class SelectorService:
                     longtail_options=select_options.get("longtail_options"),
                     input_data=input_data,
                 )
+                _attach_selection_profile(
+                    payload,
+                    source_items=items,
+                    selected=selected,
+                    select_options=select_options,
+                    mode="combo_filter",
+                )
                 return _attach_selector_debug(
                     payload,
                     api_usage_snapshot=api_usage.snapshot(),
@@ -130,6 +139,13 @@ class SelectorService:
                     selected,
                     longtail_options=select_options.get("longtail_options"),
                     input_data=input_data,
+                )
+                _attach_selection_profile(
+                    payload,
+                    source_items=items,
+                    selected=selected,
+                    select_options=select_options,
+                    mode="grade_filter",
                 )
                 return _attach_selector_debug(
                     payload,
@@ -151,6 +167,13 @@ class SelectorService:
                 selected,
                 longtail_options=select_options.get("longtail_options"),
                 input_data=input_data,
+            )
+            _attach_selection_profile(
+                payload,
+                source_items=items,
+                selected=selected,
+                select_options=select_options,
+                mode="default",
             )
             return _attach_selector_debug(
                 payload,
@@ -187,6 +210,53 @@ def _build_selected_payload(
     if export_payload:
         payload["selection_export"] = export_payload
     return payload
+
+
+def _attach_selection_profile(
+    payload: dict[str, Any],
+    *,
+    source_items: list[dict[str, Any]],
+    selected: list[dict[str, Any]],
+    select_options: dict[str, Any] | None = None,
+    mode: str = "default",
+) -> None:
+    normalized_mode = str(mode or "default").strip().lower() or "default"
+    raw_select_options = select_options if isinstance(select_options, dict) else {}
+    resolved_longtail_options = (
+        payload.get("longtail_options")
+        if isinstance(payload.get("longtail_options"), dict)
+        else resolve_longtail_options(raw_select_options.get("longtail_options"))
+    )
+    allowed_profitability_grades = [
+        grade
+        for grade in PROFITABILITY_GRADE_ORDER
+        if grade in _normalize_allowed_profitability_grades(raw_select_options.get("allowed_profitability_grades"))
+    ]
+    allowed_attackability_grades = [
+        grade
+        for grade in ATTACKABILITY_GRADE_ORDER
+        if grade in _normalize_allowed_attackability_grades(raw_select_options.get("allowed_attackability_grades"))
+    ]
+    allowed_grades = sorted(_normalize_allowed_grades(raw_select_options.get("allowed_grades")))
+
+    profile: dict[str, Any] = {
+        "mode": normalized_mode,
+        "candidate_count": len(source_items),
+        "selected_count": len(selected),
+        "longtail_option_keys": list(resolved_longtail_options.get("optional_suffix_keys", [])),
+        "has_editorial_support": any(
+            str(item.get("selection_mode") or "").strip().lower() == "editorial_support"
+            for item in selected
+            if isinstance(item, dict)
+        ),
+    }
+    if allowed_profitability_grades:
+        profile["allowed_profitability_grades"] = allowed_profitability_grades
+    if allowed_attackability_grades:
+        profile["allowed_attackability_grades"] = allowed_attackability_grades
+    if allowed_grades:
+        profile["allowed_grades"] = allowed_grades
+    payload["selection_profile"] = profile
 
 
 def _attach_selector_debug(
@@ -271,12 +341,12 @@ def _normalize_allowed_grades(grades: Any) -> set[str]:
 
 def _normalize_profitability_grade(value: Any) -> str:
     grade = str(value or "").strip().upper()
-    return grade if grade in {"A", "B", "C", "D"} else ""
+    return grade if grade in PROFITABILITY_GRADE_ORDER else ""
 
 
 def _normalize_attackability_grade(value: Any) -> str:
     grade = str(value or "").strip()
-    return grade if grade in {"1", "2", "3", "4"} else ""
+    return grade if grade in ATTACKABILITY_GRADE_ORDER else ""
 
 
 def _normalize_allowed_profitability_grades(grades: Any) -> set[str]:
@@ -434,7 +504,7 @@ def _select_fallback_candidates(
         for item in ranked_items
         if _is_measured_candidate(item)
         and _resolve_golden_bucket(item) == "hold"
-        and _resolve_attackability_grade(item) in {"1", "2", "3"}
+        and _resolve_attackability_grade(item) in {"1", "2", "3", "4"}
         and float(item.get("score", 0.0) or 0.0) >= 30.0
     ]
     measured = [
@@ -532,12 +602,10 @@ def _fallback_candidate_sort_key(item: dict[str, Any]) -> tuple[float, float, fl
         "promising": 0.5,
         "gold": 0.0,
     }.get(_resolve_golden_bucket(item), 0.0)
-    attackability_rank = {
-        "1": 4.0,
-        "2": 3.0,
-        "3": 2.0,
-        "4": 1.0,
-    }.get(_resolve_attackability_grade(item), 0.0)
+    attackability_grade = _resolve_attackability_grade(item)
+    attackability_rank = float(
+        len(ATTACKABILITY_GRADE_ORDER) - ATTACKABILITY_GRADE_ORDER.index(attackability_grade)
+    ) if attackability_grade in ATTACKABILITY_GRADE_ORDER else 0.0
     specificity = float(len(tokenize_text(normalize_text(item.get("keyword")))))
     confidence = float(item.get("confidence", item.get("metrics", {}).get("confidence", 0.0)) or 0.0)
     score = float(item.get("score", 0.0) or 0.0)

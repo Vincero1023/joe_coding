@@ -257,6 +257,15 @@ def test_run_with_analysis_progress_emits_incremental_selection_snapshots() -> N
             "cannibalization_report": {
                 "summary": {"issue_group_count": 0},
             },
+            "selection_profile": {
+                "mode": "combo_filter",
+                "candidate_count": len(items),
+                "selected_count": len(items),
+                "longtail_option_keys": ["guide"],
+                "allowed_profitability_grades": ["A"],
+                "allowed_attackability_grades": ["2"],
+                "has_editorial_support": False,
+            },
             "debug": {
                 "api_usage": {"summary": {"total_calls": 0}, "services": []},
                 "selection_summary": {
@@ -296,6 +305,7 @@ def test_run_with_analysis_progress_emits_incremental_selection_snapshots() -> N
         "analysis_completed",
     ]
     assert [event["total_selected"] for event in selection_events] == [1, 2]
+    assert selection_events[-1]["selection_profile"]["mode"] == "combo_filter"
     assert [item["keyword"] for item in result["analyzed_keywords"]] == [
         "보험 추천",
         "카드 추천",
@@ -304,5 +314,6 @@ def test_run_with_analysis_progress_emits_incremental_selection_snapshots() -> N
         "보험 추천",
         "카드 추천",
     ]
+    assert result["selection_profile"]["longtail_option_keys"] == ["guide"]
     assert result["longtail_summary"]["suggestion_count"] == 2
     assert result["debug"]["analysis_summary"]["analysis_batch_count"] == 2
