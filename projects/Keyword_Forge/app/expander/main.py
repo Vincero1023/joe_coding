@@ -26,6 +26,7 @@ from app.expander.utils.filtering import (
     limit_total_expansions,
 )
 from app.expander.utils.tokenizer import normalize_key, normalize_text
+from app.selector.main import selector_module
 
 
 _MAX_DEPTH = 3
@@ -234,67 +235,214 @@ def run_with_analysis_progress(
     *,
     progress_callback: ExpansionProgressCallback | None = None,
     analysis_callback: ExpansionProgressCallback | None = None,
+    selection_callback: ExpansionProgressCallback | None = None,
     stop_event: Event | None = None,
 ) -> dict:
+    analyzed_by_keyword: dict[str, dict[str, Any]] = {}
+    analyzed_candidate_keys: set[str] = set()
+    analysis_debug_snapshots: list[dict[str, Any]] = []
+    selection_debug_snapshots: list[dict[str, Any]] = []
+    latest_selected_result = _build_empty_selected_result()
+    total_candidates = 0
+    analysis_batch_count = 0
+    analysis_started = False
+
+    def emit_analysis_batch(expanded_batch: list[dict[str, Any]]) -> None:
+        nonlocal latest_selected_result
+        nonlocal total_candidates
+        nonlocal analysis_batch_count
+        nonlocal analysis_started
+
+        batch = _collect_new_analysis_candidates(expanded_batch, analyzed_candidate_keys)
+        if not batch or _is_stop_requested(stop_event):
+            return
+
+        total_candidates += len(batch)
+        if analysis_callback is not None and not analysis_started:
+            analysis_callback(
+                {
+                    "type": "analysis_started",
+                    "total_candidates": total_candidates,
+                    "mode": "incremental",
+                }
+            )
+            analysis_started = True
+
+        analyzed_result = analyzer_module.run(_build_analyzer_input(input_data, batch))
+        analyzed_batch = [
+            item
+            for item in analyzed_result.get("analyzed_keywords", [])
+            if isinstance(item, dict)
+        ]
+        analyzed_debug = analyzed_result.get("debug") if isinstance(analyzed_result.get("debug"), dict) else {}
+        analysis_debug_snapshots.append(analyzed_debug)
+        analysis_batch_count += 1
+
+        for item in analyzed_batch:
+            keyword_key = normalize_key(item.get("keyword"))
+            if keyword_key:
+                analyzed_by_keyword[keyword_key] = item
+
+        cumulative_analyzed = list(analyzed_by_keyword.values())
+        if analysis_callback is not None:
+            analysis_callback(
+                {
+                    "type": "analysis_progress",
+                    "items": analyzed_batch,
+                    "batch_count": len(analyzed_batch),
+                    "total_candidates": total_candidates,
+                    "total_analyzed": len(cumulative_analyzed),
+                    "analysis_batch_count": analysis_batch_count,
+                }
+            )
+
+        selected_result = _run_selector_snapshot(
+            input_data,
+            cumulative_analyzed,
+            enable_export=False,
+        )
+        latest_selected_result = selected_result
+        selected_debug = selected_result.get("debug") if isinstance(selected_result.get("debug"), dict) else {}
+        selection_debug_snapshots.append(selected_debug)
+        if selection_callback is not None:
+            selection_callback(
+                {
+                    "type": "selection_progress",
+                    "total_analyzed": len(cumulative_analyzed),
+                    "total_selected": len(selected_result.get("selected_keywords", []))
+                    if isinstance(selected_result.get("selected_keywords"), list)
+                    else 0,
+                    **_build_selection_stream_payload(selected_result),
+                }
+            )
+
     def forward_progress(event: dict[str, Any]) -> None:
         if progress_callback is not None:
             progress_callback(event)
+        event_type = str(event.get("type") or "").strip()
+        if event_type == "keyword_results":
+            emit_analysis_batch(
+                event.get("accepted_items")
+                if isinstance(event.get("accepted_items"), list)
+                else event.get("items")
+                if isinstance(event.get("items"), list)
+                else [],
+            )
+        elif event_type == "depth_completed":
+            emit_analysis_batch(event.get("items") if isinstance(event.get("items"), list) else [])
 
-    expanded_result = run_with_progress(
-        input_data,
-        progress_callback=forward_progress,
-        stop_event=stop_event,
-    )
-    expanded_debug = expanded_result.get("debug") if isinstance(expanded_result.get("debug"), dict) else {}
+    with capture_api_usage() as expander_api_usage:
+        analysis_data = load_analysis_data(input_data.get("analysis_json_path"))
+        expanded_result = _run_expander_internal(
+            input_data,
+            analysis_data,
+            progress_callback=forward_progress,
+            stop_event=stop_event,
+        )
     expanded_keywords = [
         item
         for item in expanded_result.get("expanded_keywords", [])
         if isinstance(item, dict)
     ]
-    if _is_stop_requested(stop_event):
-        return {
-            "expanded_keywords": expanded_keywords,
-            "analyzed_keywords": [],
-            "stopped": True,
-            "debug": expanded_debug,
-        }
-    if analysis_callback is not None:
-        analysis_callback(
-            {
-                "type": "analysis_started",
-                "total_candidates": len(expanded_keywords),
-            }
-        )
-    analyzed_result = analyzer_module.run(_build_analyzer_input(input_data, expanded_keywords))
-    analyzed_keywords = [
+    stopped = bool(expanded_result.get("stopped")) or _is_stop_requested(stop_event)
+    expanded_api_usage = expander_api_usage.snapshot()
+    expanded_debug = {
+        "stage": "expander",
+        "summary": expanded_api_usage.get("summary", {}),
+        "api_usage": expanded_api_usage,
+        "expansion_summary": {
+            "expanded_keyword_count": len(expanded_keywords),
+            "stopped": stopped,
+        },
+    }
+    final_expanded_keyword_keys = {
+        normalize_key(item.get("keyword"))
+        for item in expanded_keywords
+        if isinstance(item, dict) and normalize_key(item.get("keyword"))
+    }
+    missing_final_batch = [
         item
-        for item in analyzed_result.get("analyzed_keywords", [])
-        if isinstance(item, dict)
+        for item in expanded_keywords
+        if isinstance(item, dict) and normalize_key(item.get("keyword")) not in analyzed_by_keyword
     ]
-    analyzed_debug = analyzed_result.get("debug") if isinstance(analyzed_result.get("debug"), dict) else {}
+    if missing_final_batch and not stopped:
+        emit_analysis_batch(missing_final_batch)
+
+    analyzed_keywords = [
+        analyzed_by_keyword[key]
+        for key in [
+            normalize_key(item.get("keyword"))
+            for item in expanded_keywords
+            if isinstance(item, dict) and normalize_key(item.get("keyword"))
+        ]
+        if key in final_expanded_keyword_keys and key in analyzed_by_keyword
+    ]
+    final_selected_result = latest_selected_result
+    if analyzed_keywords and not stopped:
+        final_selected_result = _run_selector_snapshot(
+            input_data,
+            analyzed_keywords,
+            enable_export=True,
+        )
+        final_selected_debug = (
+            final_selected_result.get("debug")
+            if isinstance(final_selected_result.get("debug"), dict)
+            else {}
+        )
+        selection_debug_snapshots.append(final_selected_debug)
+
+    analyzed_api_usage = merge_api_usage_snapshots(
+        *[
+            snapshot.get("api_usage")
+            for snapshot in analysis_debug_snapshots
+            if isinstance(snapshot, dict)
+        ]
+    )
+    selected_debug = final_selected_result.get("debug") if isinstance(final_selected_result.get("debug"), dict) else {}
+    selected_api_usage = merge_api_usage_snapshots(
+        *[
+            snapshot.get("api_usage")
+            for snapshot in selection_debug_snapshots
+            if isinstance(snapshot, dict)
+        ]
+    )
     merged_api_usage = merge_api_usage_snapshots(
         expanded_debug.get("api_usage"),
-        analyzed_debug.get("api_usage"),
+        analyzed_api_usage,
+        selected_api_usage,
     )
-    if analysis_callback is not None:
+    if analysis_callback is not None and analysis_started:
         analysis_callback(
             {
                 "type": "analysis_completed",
+                "total_candidates": total_candidates,
                 "total_analyzed": len(analyzed_keywords),
+                "analysis_batch_count": analysis_batch_count,
             }
         )
     return {
         "expanded_keywords": expanded_keywords,
         "analyzed_keywords": analyzed_keywords,
-        "stopped": False,
+        **_build_selection_stream_payload(final_selected_result),
+        "stopped": stopped,
         "debug": {
-            "stage": "expand_analyze",
+            "stage": "expand_analyze_select",
             "summary": merged_api_usage.get("summary", {}),
             "api_usage": merged_api_usage,
             "stage_api_usage": {
                 "expander": expanded_debug.get("api_usage", {}),
-                "analyzer": analyzed_debug.get("api_usage", {}),
+                "analyzer": analyzed_api_usage,
+                "selector": selected_api_usage,
             },
+            "expansion_summary": expanded_debug.get("expansion_summary", {}),
+            "analysis_summary": {
+                "input_keyword_count": len(expanded_keywords),
+                "analyzed_keyword_count": len(analyzed_keywords),
+                "analysis_batch_count": analysis_batch_count,
+            },
+            "selection_summary": selected_debug.get("selection_summary", {})
+            if isinstance(selected_debug.get("selection_summary"), dict)
+            else {},
         },
     }
 
@@ -372,6 +520,12 @@ def _run_expander_internal(
             )
             if progress_callback is not None:
                 preview_results = deduplicate_expansions(filter_expansions(node_results))
+                preview_accepted_results = _build_preview_accepted_results(
+                    depth_expanded + node_results,
+                    total_counts=total_counts,
+                    current_total_results=len(results),
+                    max_results=request.max_results,
+                )
                 if preview_results:
                     progress_callback(
                         {
@@ -382,6 +536,7 @@ def _run_expander_internal(
                             "keyword": node.current_keyword,
                             "origin": node.root_origin,
                             "items": preview_results,
+                            "accepted_items": preview_accepted_results,
                         }
                     )
             depth_expanded.extend(node_results)
@@ -554,6 +709,106 @@ def _build_analyzer_input(input_data: dict[str, Any], expanded_keywords: list[di
         "naver_search_client_id": input_data.get("naver_search_client_id", ""),
         "naver_search_client_secret": input_data.get("naver_search_client_secret", ""),
     }
+
+
+def _build_selection_stream_payload(selected_result: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(selected_result, dict):
+        return _build_empty_selected_result()
+
+    payload = _build_empty_selected_result()
+    for key in (
+        "selected_keywords",
+        "keyword_clusters",
+        "content_map_summary",
+        "longtail_suggestions",
+        "longtail_summary",
+        "longtail_options",
+        "cannibalization_report",
+        "selection_export",
+    ):
+        if key in selected_result:
+            payload[key] = selected_result.get(key)
+    return payload
+
+
+def _build_empty_selected_result() -> dict[str, Any]:
+    return {
+        "selected_keywords": [],
+        "keyword_clusters": [],
+        "content_map_summary": {},
+        "longtail_suggestions": [],
+        "longtail_summary": {},
+        "longtail_options": {},
+        "cannibalization_report": {},
+    }
+
+
+def _run_selector_snapshot(
+    input_data: dict[str, Any],
+    analyzed_keywords: list[dict[str, Any]],
+    *,
+    enable_export: bool,
+) -> dict[str, Any]:
+    payload = dict(input_data) if isinstance(input_data, dict) else {}
+    payload["analyzed_keywords"] = analyzed_keywords
+    raw_export = payload.get("selection_export") if isinstance(payload.get("selection_export"), dict) else {}
+    payload["selection_export"] = {
+        **raw_export,
+        "enabled": bool(enable_export and _is_enabled_flag(raw_export.get("enabled"))),
+    }
+    result = selector_module.run(payload)
+    return result if isinstance(result, dict) else _build_empty_selected_result()
+
+
+def _is_enabled_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower()
+    return normalized in {"1", "true", "yes", "on"}
+
+
+def _collect_new_analysis_candidates(
+    expanded_batch: list[dict[str, Any]] | Any,
+    seen_keys: set[str],
+) -> list[dict[str, Any]]:
+    batch: list[dict[str, Any]] = []
+    for item in expanded_batch if isinstance(expanded_batch, list) else []:
+        if not isinstance(item, dict):
+            continue
+        keyword_key = normalize_key(item.get("keyword"))
+        if not keyword_key or keyword_key in seen_keys:
+            continue
+        seen_keys.add(keyword_key)
+        batch.append(item)
+    return batch
+
+
+def _build_preview_accepted_results(
+    depth_expanded: list[dict[str, Any]],
+    *,
+    total_counts: dict[str, int],
+    current_total_results: int,
+    max_results: int | None,
+) -> list[dict[str, Any]]:
+    filtered_results = filter_expansions(depth_expanded)
+    deduplicated_results = deduplicate_expansions(filtered_results)
+    depth_limited_results = limit_expansions_per_origin(
+        deduplicated_results,
+        max_per_origin=_MAX_PER_ORIGIN_PER_DEPTH,
+    )
+    preview_totals = dict(total_counts)
+    accepted_results = limit_total_expansions(
+        depth_limited_results,
+        totals=preview_totals,
+        max_total_per_origin=_MAX_TOTAL_PER_ORIGIN,
+    )
+    if max_results is not None:
+        remaining_slots = max_results - current_total_results
+        if remaining_slots <= 0:
+            return []
+        if len(accepted_results) > remaining_slots:
+            return accepted_results[:remaining_slots]
+    return accepted_results
 
 
 def _coerce_bool(*values: Any, default: bool) -> bool:

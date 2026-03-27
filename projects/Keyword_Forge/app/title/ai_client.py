@@ -824,9 +824,9 @@ def _extract_provider_token_usage(provider: str, response: dict[str, Any]) -> di
     normalized_provider = str(provider or "").strip().lower()
     if normalized_provider == "openai":
         usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
-        prompt_tokens = _coerce_int(usage.get("prompt_tokens"))
-        completion_tokens = _coerce_int(usage.get("completion_tokens"))
-        total_tokens = _coerce_int(usage.get("total_tokens")) or (prompt_tokens + completion_tokens)
+        prompt_tokens = _coerce_int(usage.get("prompt_tokens"), default=0, minimum=0, maximum=1_000_000)
+        completion_tokens = _coerce_int(usage.get("completion_tokens"), default=0, minimum=0, maximum=1_000_000)
+        total_tokens = _coerce_int(usage.get("total_tokens"), default=0, minimum=0, maximum=1_000_000) or (prompt_tokens + completion_tokens)
         return {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -835,9 +835,24 @@ def _extract_provider_token_usage(provider: str, response: dict[str, Any]) -> di
 
     if normalized_provider in {"gemini", "vertex"}:
         usage = response.get("usageMetadata") if isinstance(response.get("usageMetadata"), dict) else {}
-        prompt_tokens = _coerce_int(usage.get("promptTokenCount") or usage.get("inputTokenCount"))
-        completion_tokens = _coerce_int(usage.get("candidatesTokenCount") or usage.get("outputTokenCount"))
-        total_tokens = _coerce_int(usage.get("totalTokenCount")) or (prompt_tokens + completion_tokens)
+        prompt_tokens = _coerce_int(
+            usage.get("promptTokenCount") or usage.get("inputTokenCount"),
+            default=0,
+            minimum=0,
+            maximum=1_000_000,
+        )
+        completion_tokens = _coerce_int(
+            usage.get("candidatesTokenCount") or usage.get("outputTokenCount"),
+            default=0,
+            minimum=0,
+            maximum=1_000_000,
+        )
+        total_tokens = _coerce_int(
+            usage.get("totalTokenCount"),
+            default=0,
+            minimum=0,
+            maximum=1_000_000,
+        ) or (prompt_tokens + completion_tokens)
         return {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -846,9 +861,9 @@ def _extract_provider_token_usage(provider: str, response: dict[str, Any]) -> di
 
     if normalized_provider == "anthropic":
         usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
-        prompt_tokens = _coerce_int(usage.get("input_tokens"))
-        completion_tokens = _coerce_int(usage.get("output_tokens"))
-        total_tokens = _coerce_int(usage.get("total_tokens")) or (prompt_tokens + completion_tokens)
+        prompt_tokens = _coerce_int(usage.get("input_tokens"), default=0, minimum=0, maximum=1_000_000)
+        completion_tokens = _coerce_int(usage.get("output_tokens"), default=0, minimum=0, maximum=1_000_000)
+        total_tokens = _coerce_int(usage.get("total_tokens"), default=0, minimum=0, maximum=1_000_000) or (prompt_tokens + completion_tokens)
         return {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,

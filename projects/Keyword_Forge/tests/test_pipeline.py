@@ -396,3 +396,112 @@ def test_pipeline_passes_title_ai_options_to_title_stage(tmp_path: Path) -> None
     assert "clien.net" in requested_options.community_sources
     assert Path(result["title_generation_meta"]["export_artifact"]["path"]).exists()
     assert [item["format"] for item in result["title_generation_meta"]["export_artifacts"]] == ["csv"]
+
+
+def test_pipeline_debug_aggregates_stage_api_usage() -> None:
+    def build_snapshot(stage: str, service: str, calls: int) -> dict:
+        return {
+            "summary": {
+                "service_count": 1,
+                "total_calls": calls,
+                "successful_calls": calls,
+                "failed_calls": 0,
+                "cached_calls": 0,
+                "total_requested_units": 0,
+                "llm_calls": calls if service == "title_generation" else 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            },
+            "services": [
+                {
+                    "stage": stage,
+                    "service": service,
+                    "provider": "openai" if service == "title_generation" else "",
+                    "model": "gpt-4o-mini" if service == "title_generation" else "",
+                    "endpoint": f"/{service}",
+                    "calls": calls,
+                    "successful_calls": calls,
+                    "failed_calls": 0,
+                    "cached_calls": 0,
+                    "requested_units": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                }
+            ],
+        }
+
+    with patch(
+        "app.pipeline.service.collector_module.run",
+        return_value={
+            "collected_keywords": [{"keyword": INSURANCE, "source": "seed_input_fallback", "raw": INSURANCE}],
+            "debug": {
+                "stage": "collector",
+                "summary": build_snapshot("collector", "naver_autocomplete", 1)["summary"],
+                "api_usage": build_snapshot("collector", "naver_autocomplete", 1),
+            },
+        },
+    ), patch(
+        "app.pipeline.service.expander_module.run",
+        return_value={
+            "expanded_keywords": [{"keyword": INSURANCE, "origin": INSURANCE, "type": "autocomplete"}],
+            "debug": {
+                "stage": "expander",
+                "summary": build_snapshot("expander", "naver_related", 2)["summary"],
+                "api_usage": build_snapshot("expander", "naver_related", 2),
+            },
+        },
+    ), patch(
+        "app.pipeline.service.analyzer_module.run",
+        return_value={
+            "analyzed_keywords": [{"keyword": INSURANCE, "score": 80.0}],
+            "debug": {
+                "stage": "analyzer",
+                "summary": build_snapshot("analyzer", "searchad_keyword_tool", 3)["summary"],
+                "api_usage": build_snapshot("analyzer", "searchad_keyword_tool", 3),
+            },
+        },
+    ), patch(
+        "app.pipeline.service.selector_module.run",
+        return_value={
+            "selected_keywords": [{"keyword": INSURANCE, "score": 80.0}],
+            "keyword_clusters": [{"cluster_id": "cluster-01", "representative_keyword": INSURANCE}],
+            "longtail_suggestions": [],
+            "longtail_options": {},
+            "content_map_summary": {},
+            "longtail_summary": {},
+            "cannibalization_report": {},
+            "selection_export": {},
+            "debug": {
+                "stage": "selector",
+                "summary": build_snapshot("selector", "selector", 0)["summary"],
+                "api_usage": build_snapshot("selector", "selector", 0),
+            },
+        },
+    ), patch(
+        "app.pipeline.service.title_generator_module.run",
+        return_value={
+            "generated_titles": [
+                {
+                    "keyword": INSURANCE,
+                    "titles": {
+                        "naver_home": [INSURANCE, INSURANCE],
+                        "blog": [INSURANCE, INSURANCE],
+                    },
+                }
+            ],
+            "generation_meta": {},
+            "debug": {
+                "stage": "title",
+                "summary": build_snapshot("title", "title_generation", 4)["summary"],
+                "api_usage": build_snapshot("title", "title_generation", 4),
+            },
+        },
+    ):
+        result = run({"debug": True})
+
+    assert result["debug"]["stage_api_usage"]["collector"]["summary"]["total_calls"] == 1
+    assert result["debug"]["stage_api_usage"]["title_gen"]["summary"]["total_calls"] == 4
+    assert result["debug"]["summary"]["total_calls"] == 10
+    assert result["debug"]["stages"]["analyzer"]["api_usage"]["summary"]["total_calls"] == 3

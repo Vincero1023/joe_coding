@@ -55,6 +55,7 @@ def expand_analyze_keywords_stream(payload: ModuleRequest, request: Request) -> 
             payload.input_data,
             progress_callback=lambda progress_payload: publish({"event": "progress", "data": progress_payload}),
             analysis_callback=lambda analysis_payload: publish({"event": "analysis", "data": analysis_payload}),
+            selection_callback=lambda selection_payload: publish({"event": "selection", "data": selection_payload}),
             stop_event=stop_event,
         ),
     )

@@ -101,6 +101,7 @@ class NaverTrendClient:
     ) -> None:
         self._json_fetcher = json_fetcher or self._fetch_json
         self._timeout = timeout
+        self._suppress_auth_error_reporting = False
 
     def collect_category_keywords(
         self,
@@ -160,6 +161,145 @@ class NaverTrendClient:
             raise last_auth_error
         raise NaverTrendAuthError("Creator Advisor 인증 쿠키가 필요합니다.")
 
+    def validate_session(
+        self,
+        *,
+        options: NaverTrendOptions,
+    ) -> dict[str, Any]:
+        checked_at = datetime.now(_KST).isoformat(timespec="seconds")
+        has_inline_cookie = bool(str(options.auth_cookie or "").strip())
+        auth_candidates = _build_auth_cookie_candidates(options.auth_cookie)
+        checked_sources = [
+            _resolve_auth_source(index, has_inline_cookie=has_inline_cookie)
+            for index, _ in enumerate(auth_candidates)
+        ]
+        base_payload = {
+            "valid": False,
+            "service": options.service,
+            "content_type": options.content_type,
+            "checked_at": checked_at,
+            "checked_sources": checked_sources,
+            "auth_source": "none",
+            "topic_group_count": 0,
+            "topic_count": 0,
+        }
+
+        if not auth_candidates:
+            return {
+                **base_payload,
+                "status": "missing_session",
+                "message": (
+                    "확인할 Creator Advisor 세션이 없습니다. "
+                    "현재 브라우저 쿠키 읽기 또는 전용 로그인 브라우저 열기로 세션을 준비해 주세요."
+                ),
+            }
+
+        return self._validate_session_candidates(
+            options=options,
+            has_inline_cookie=has_inline_cookie,
+            auth_candidates=auth_candidates,
+            checked_sources=checked_sources,
+            base_payload=base_payload,
+        )
+
+        previous_suppress_state = self._suppress_auth_error_reporting
+        self._suppress_auth_error_reporting = True
+        last_auth_error = ""
+
+        for index, auth_cookie in enumerate(auth_candidates):
+            auth_source = _resolve_auth_source(index, has_inline_cookie=has_inline_cookie)
+            try:
+                payload = self._json_fetcher(
+                    f"/accounts/preferred-category/{options.service}",
+                    {"contentType": options.content_type},
+                    auth_cookie,
+                )
+                group_count, topic_count = _summarize_category_tree(payload)
+                return {
+                    **base_payload,
+                    "valid": True,
+                    "status": "authenticated",
+                    "auth_source": auth_source,
+                    "topic_group_count": group_count,
+                    "topic_count": topic_count,
+                    "message": _build_session_validation_success_message(auth_source),
+                }
+            except NaverTrendAuthError as exc:
+                last_auth_error = str(exc).strip() or _default_http_error_message(401)
+                continue
+            except NaverTrendError as exc:
+                return {
+                    **base_payload,
+                    "status": "error",
+                    "auth_source": auth_source,
+                    "message": f"Creator Advisor 로그인 상태를 확인하지 못했습니다. {str(exc).strip() or ''}".strip(),
+                }
+
+        return {
+            **base_payload,
+            "status": "unauthorized",
+            "message": _build_session_validation_failure_message(
+                has_inline_cookie=has_inline_cookie,
+                checked_sources=checked_sources,
+                detail_message=last_auth_error,
+            ),
+        }
+
+    def _validate_session_candidates(
+        self,
+        *,
+        options: NaverTrendOptions,
+        has_inline_cookie: bool,
+        auth_candidates: tuple[str, ...],
+        checked_sources: list[str],
+        base_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        previous_suppress_state = self._suppress_auth_error_reporting
+        self._suppress_auth_error_reporting = True
+        try:
+            last_auth_error = ""
+
+            for index, auth_cookie in enumerate(auth_candidates):
+                auth_source = _resolve_auth_source(index, has_inline_cookie=has_inline_cookie)
+                try:
+                    payload = self._json_fetcher(
+                        f"/accounts/preferred-category/{options.service}",
+                        {"contentType": options.content_type},
+                        auth_cookie,
+                    )
+                    group_count, topic_count = _summarize_category_tree(payload)
+                    return {
+                        **base_payload,
+                        "valid": True,
+                        "status": "authenticated",
+                        "auth_source": auth_source,
+                        "topic_group_count": group_count,
+                        "topic_count": topic_count,
+                        "message": _build_session_validation_success_message(auth_source),
+                    }
+                except NaverTrendAuthError as exc:
+                    last_auth_error = str(exc).strip() or _default_http_error_message(401)
+                    continue
+                except NaverTrendError as exc:
+                    return {
+                        **base_payload,
+                        "status": "error",
+                        "auth_source": auth_source,
+                        "message": f"Creator Advisor 로그인 상태를 확인하지 못했습니다. {str(exc).strip() or ''}".strip(),
+                    }
+
+            return {
+                **base_payload,
+                "status": "unauthorized",
+                "message": _build_session_validation_failure_message(
+                    has_inline_cookie=has_inline_cookie,
+                    checked_sources=checked_sources,
+                    detail_message=last_auth_error,
+                ),
+            }
+        finally:
+            self._suppress_auth_error_reporting = previous_suppress_state
+
     def _fetch_json(
         self,
         endpoint: str,
@@ -216,7 +356,8 @@ class NaverTrendClient:
                 success=False,
             )
             if exc.code in {401, 403}:
-                report_naver_auth_error(message)
+                if not self._suppress_auth_error_reporting:
+                    report_naver_auth_error(message)
                 raise NaverTrendAuthError(message) from exc
             raise NaverTrendResponseError(message) from exc
         except URLError as exc:
@@ -324,6 +465,28 @@ def _extract_keywords(payload: Any, topic_id: str) -> tuple[NaverTrendKeyword, .
     return tuple(keywords)
 
 
+def _summarize_category_tree(payload: Any) -> tuple[int, int]:
+    root = _unwrap_payload(payload)
+    category_tree = root.get("categoryTree")
+    if not isinstance(category_tree, list):
+        raise NaverTrendResponseError("Creator Advisor categoryTree 응답 형식이 올바르지 않습니다.")
+
+    group_count = 0
+    topic_count = 0
+    for group in category_tree:
+        categories = group.get("categories") if isinstance(group, dict) else None
+        if not isinstance(categories, list):
+            continue
+        group_count += 1
+        topic_count += sum(
+            1
+            for category in categories
+            if isinstance(category, dict) and category.get("id") and category.get("name")
+        )
+
+    return group_count, topic_count
+
+
 def _unwrap_payload(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise NaverTrendResponseError("Creator Advisor 응답 형식이 올바르지 않습니다.")
@@ -371,6 +534,38 @@ def _build_auth_cookie_candidates(primary_cookie: str) -> tuple[str, ...]:
         candidates.append(cached_cookie)
 
     return tuple(candidates)
+
+
+def _resolve_auth_source(index: int, *, has_inline_cookie: bool) -> str:
+    if has_inline_cookie:
+        return "inline" if index == 0 else "cached_fallback"
+    return "cached"
+
+
+def _build_session_validation_success_message(auth_source: str) -> str:
+    if auth_source == "inline":
+        return "현재 입력된 Creator Advisor 세션이 유효합니다."
+    if auth_source == "cached_fallback":
+        return "현재 입력된 세션은 유효하지 않지만, 저장된 전용 Creator Advisor 세션은 유효합니다."
+    return "저장된 전용 Creator Advisor 세션이 유효합니다."
+
+
+def _build_session_validation_failure_message(
+    *,
+    has_inline_cookie: bool,
+    checked_sources: list[str],
+    detail_message: str,
+) -> str:
+    if has_inline_cookie and "cached_fallback" in checked_sources:
+        base_message = "현재 입력된 세션과 저장된 전용 세션 모두 로그인 상태가 아닙니다. 다시 로그인해 주세요."
+    elif has_inline_cookie:
+        base_message = "현재 입력된 Creator Advisor 세션이 만료됐거나 로그아웃 상태입니다. 다시 로그인해 주세요."
+    else:
+        base_message = "저장된 전용 Creator Advisor 세션이 만료됐거나 로그아웃 상태입니다. 전용 로그인 브라우저를 다시 열어 주세요."
+
+    if detail_message:
+        return f"{base_message} {detail_message}".strip()
+    return base_message
 
 
 def _iter_trend_date_candidates(base_date: str, *, lookback_days: int = 3) -> tuple[str, ...]:

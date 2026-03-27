@@ -3,6 +3,7 @@ from threading import Event
 from unittest.mock import patch
 
 from app.expander.main import run as expand_run
+from app.expander.main import run_with_analysis_progress
 from app.expander.main import run_with_progress
 from app.expander.sources.naver_related import (
     _extract_qra_api_url,
@@ -186,3 +187,122 @@ def test_expander_stop_event_returns_partial_results() -> None:
     assert result["stopped"] is True
     assert result["expanded_keywords"]
     assert "keyword_results" in progress_types
+
+
+def test_run_with_analysis_progress_emits_incremental_selection_snapshots() -> None:
+    analysis_events: list[dict[str, object]] = []
+    selection_events: list[dict[str, object]] = []
+
+    def fake_autocomplete(query: str) -> list[str]:
+        fake_map = {
+            "보험": ["보험 추천"],
+            "카드": ["카드 추천"],
+        }
+        return fake_map.get(query, [])
+
+    def fake_analyzer(input_data: dict[str, object]) -> dict[str, object]:
+        items = [
+            item
+            for item in input_data.get("expanded_keywords", [])
+            if isinstance(item, dict)
+        ]
+        analyzed = [
+            {
+                "keyword": str(item.get("keyword") or "").strip(),
+                "profitability_grade": "A",
+                "attackability_grade": "2",
+                "combo_grade": "A2",
+                "golden_bucket": "gold",
+                "score": 74.0,
+                "metrics": {"volume": 320.0, "cpc": 180.0},
+            }
+            for item in items
+            if str(item.get("keyword") or "").strip()
+        ]
+        return {
+            "analyzed_keywords": analyzed,
+            "debug": {
+                "api_usage": {"summary": {"total_calls": 0}, "services": []},
+            },
+        }
+
+    def fake_selector(input_data: dict[str, object]) -> dict[str, object]:
+        items = [
+            item
+            for item in input_data.get("analyzed_keywords", [])
+            if isinstance(item, dict)
+        ]
+        return {
+            "selected_keywords": items,
+            "keyword_clusters": [],
+            "content_map_summary": {
+                "keyword_count": len(items),
+                "cluster_count": 0,
+                "article_count": 0,
+                "split_cluster_count": 0,
+            },
+            "longtail_suggestions": [
+                {
+                    "suggestion_id": f"longtail-{index + 1:02d}",
+                    "longtail_keyword": f"{item['keyword']} 가이드",
+                }
+                for index, item in enumerate(items)
+            ],
+            "longtail_summary": {
+                "suggestion_count": len(items),
+            },
+            "longtail_options": {
+                "optional_suffix_keys": ["guide"],
+            },
+            "cannibalization_report": {
+                "summary": {"issue_group_count": 0},
+            },
+            "debug": {
+                "api_usage": {"summary": {"total_calls": 0}, "services": []},
+                "selection_summary": {
+                    "input_keyword_count": len(items),
+                    "selected_keyword_count": len(items),
+                },
+            },
+        }
+
+    with patch(
+        "app.expander.engines.autocomplete_engine.get_naver_autocomplete",
+        side_effect=fake_autocomplete,
+    ), patch(
+        "app.expander.engines.related_engine.get_naver_related_queries",
+        return_value=[],
+    ), patch(
+        "app.expander.main.analyzer_module.run",
+        side_effect=fake_analyzer,
+    ), patch(
+        "app.expander.main.selector_module.run",
+        side_effect=fake_selector,
+    ):
+        result = run_with_analysis_progress(
+            {
+                "keywords_text": "보험\n카드",
+                "analysis_json_path": str(expander_sample_dir / "site_analysis.json"),
+                "enable_seed_filter": False,
+            },
+            analysis_callback=analysis_events.append,
+            selection_callback=selection_events.append,
+        )
+
+    assert [event["type"] for event in analysis_events] == [
+        "analysis_started",
+        "analysis_progress",
+        "analysis_progress",
+        "analysis_completed",
+    ]
+    assert [event["total_selected"] for event in selection_events] == [1, 2]
+    assert [item["keyword"] for item in result["analyzed_keywords"]] == [
+        "보험 추천",
+        "카드 추천",
+    ]
+    assert [item["keyword"] for item in result["selected_keywords"]] == [
+        "보험 추천",
+        "카드 추천",
+    ]
+    assert result["longtail_summary"]["suggestion_count"] == 2
+    assert result["debug"]["analysis_summary"]["analysis_batch_count"] == 2

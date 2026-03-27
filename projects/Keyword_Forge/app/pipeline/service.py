@@ -6,6 +6,7 @@ from typing import Any
 
 from app.analyzer.main import analyzer_module
 from app.collector.main import collector_module
+from app.core.api_usage import merge_api_usage_snapshots
 from app.expander.main import expander_module
 from app.selector.main import selector_module
 from app.title_gen.main import title_generator_module
@@ -59,6 +60,13 @@ class PipelineService:
             stage_name="title_gen",
             runner=lambda: title_generator_module.run(_build_title_input(input_data, selected_result, analyzed_result)),
         )
+        stage_results = {
+            "collector": collected_result,
+            "expander": expanded_result,
+            "analyzer": analyzed_result,
+            "selector": selected_result,
+            "title_gen": titled_result,
+        }
 
         result = {
             "collected_keywords": _get_list(collected_result, "collected_keywords"),
@@ -89,6 +97,8 @@ class PipelineService:
         }
 
         if pipeline_debug is not None:
+            stage_api_usage, stage_summaries = _collect_stage_debug_rollups(stage_results)
+            merged_api_usage = merge_api_usage_snapshots(*stage_api_usage.values())
             pipeline_debug["duration_ms"] = _elapsed_ms(pipeline_debug["perf_started_at"])
             pipeline_debug["counts"] = {
                 "collected_keywords": len(result["collected_keywords"]),
@@ -99,6 +109,10 @@ class PipelineService:
                 "longtail_suggestions": len(result["longtail_suggestions"]),
                 "generated_titles": len(result["generated_titles"]),
             }
+            pipeline_debug["summary"] = merged_api_usage.get("summary", {})
+            pipeline_debug["api_usage"] = merged_api_usage
+            pipeline_debug["stage_api_usage"] = stage_api_usage
+            pipeline_debug["stage_summaries"] = stage_summaries
             pipeline_debug.pop("perf_started_at", None)
             result["debug"] = pipeline_debug
 
@@ -252,13 +266,36 @@ def _run_stage(
 
     if pipeline_debug is not None:
         payload = result if isinstance(result, dict) else {}
+        debug_payload = payload.get("debug") if isinstance(payload.get("debug"), dict) else {}
         pipeline_debug["stages"][stage_name] = {
             "duration_ms": _elapsed_ms(started_at),
             "result_keys": sorted(payload.keys()),
-            "debug": payload.get("debug"),
+            "summary": debug_payload.get("summary", {}) if isinstance(debug_payload.get("summary"), dict) else {},
+            "api_usage": debug_payload.get("api_usage", {}) if isinstance(debug_payload.get("api_usage"), dict) else {},
+            "debug": debug_payload,
         }
 
     return result if isinstance(result, dict) else {}
+
+
+def _collect_stage_debug_rollups(
+    stage_results: dict[str, dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    stage_api_usage: dict[str, dict[str, Any]] = {}
+    stage_summaries: dict[str, dict[str, Any]] = {}
+
+    for stage_name, payload in stage_results.items():
+        debug_payload = payload.get("debug") if isinstance(payload.get("debug"), dict) else {}
+        api_usage = (
+            debug_payload.get("api_usage")
+            if isinstance(debug_payload.get("api_usage"), dict)
+            else {"summary": {}, "services": []}
+        )
+        summary = debug_payload.get("summary") if isinstance(debug_payload.get("summary"), dict) else {}
+        stage_api_usage[stage_name] = api_usage
+        stage_summaries[stage_name] = summary
+
+    return stage_api_usage, stage_summaries
 
 
 def _elapsed_ms(started_at: float) -> int:

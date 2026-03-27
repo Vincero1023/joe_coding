@@ -12,6 +12,7 @@ from app.analyzer.scorer import (
     classify_golden_bucket,
     classify_profitability_grade,
 )
+from app.core.api_usage import capture_api_usage
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
 from app.selector.cannibalization import build_cannibalization_report
 from app.selector.content_map import build_content_map
@@ -82,64 +83,80 @@ def is_golden_keyword(item: dict[str, Any]) -> bool:
 
 class SelectorService:
     def run(self, input_data: Any) -> Any:
-        items = _coerce_input_items(input_data)
-        select_options = _coerce_select_options(input_data)
-        allowed_grades = _normalize_allowed_grades(select_options.get("allowed_grades"))
-        allowed_profitability_grades = _normalize_allowed_profitability_grades(
-            select_options.get("allowed_profitability_grades")
-        )
-        allowed_attackability_grades = _normalize_allowed_attackability_grades(
-            select_options.get("allowed_attackability_grades")
-        )
-        mode = str(select_options.get("mode") or "").strip().lower()
+        with capture_api_usage() as api_usage:
+            items = _coerce_input_items(input_data)
+            select_options = _coerce_select_options(input_data)
+            allowed_grades = _normalize_allowed_grades(select_options.get("allowed_grades"))
+            allowed_profitability_grades = _normalize_allowed_profitability_grades(
+                select_options.get("allowed_profitability_grades")
+            )
+            allowed_attackability_grades = _normalize_allowed_attackability_grades(
+                select_options.get("allowed_attackability_grades")
+            )
+            mode = str(select_options.get("mode") or "").strip().lower()
 
-        if mode == "combo_filter" and (allowed_profitability_grades or allowed_attackability_grades):
-            selected = [
-                _decorate_combo_selected_item(item)
-                for item in items
-                if _matches_combo_filter(
-                    item,
-                    allowed_profitability_grades=allowed_profitability_grades,
-                    allowed_attackability_grades=allowed_attackability_grades,
+            if mode == "combo_filter" and (allowed_profitability_grades or allowed_attackability_grades):
+                selected = [
+                    _decorate_combo_selected_item(item)
+                    for item in items
+                    if _matches_combo_filter(
+                        item,
+                        allowed_profitability_grades=allowed_profitability_grades,
+                        allowed_attackability_grades=allowed_attackability_grades,
+                    )
+                ]
+                if isinstance(input_data, list):
+                    return selected
+                payload = _build_selected_payload(
+                    selected,
+                    longtail_options=select_options.get("longtail_options"),
+                    input_data=input_data,
                 )
-            ]
+                return _attach_selector_debug(
+                    payload,
+                    api_usage_snapshot=api_usage.snapshot(),
+                    input_keyword_count=len(items),
+                )
+
+            if mode == "grade_filter" and allowed_grades:
+                selected = [
+                    _decorate_grade_selected_item(item)
+                    for item in items
+                    if _resolve_grade(item) in allowed_grades
+                ]
+                if isinstance(input_data, list):
+                    return selected
+                payload = _build_selected_payload(
+                    selected,
+                    longtail_options=select_options.get("longtail_options"),
+                    input_data=input_data,
+                )
+                return _attach_selector_debug(
+                    payload,
+                    api_usage_snapshot=api_usage.snapshot(),
+                    input_keyword_count=len(items),
+                )
+
+            selected = [_decorate_default_selected_item(item) for item in items if is_golden_keyword(item)]
+            target_count = _resolve_default_selection_target_count(items)
+            if len(selected) < target_count:
+                selected = _top_up_default_selection(selected, items, target_count=target_count)
+            if not selected:
+                selected = _select_fallback_candidates(items)
+            selected = _inject_seed_anchor_candidate(selected, input_data, items)
+
             if isinstance(input_data, list):
                 return selected
-            return _build_selected_payload(
+            payload = _build_selected_payload(
                 selected,
                 longtail_options=select_options.get("longtail_options"),
                 input_data=input_data,
             )
-
-        if mode == "grade_filter" and allowed_grades:
-            selected = [
-                _decorate_grade_selected_item(item)
-                for item in items
-                if _resolve_grade(item) in allowed_grades
-            ]
-            if isinstance(input_data, list):
-                return selected
-            return _build_selected_payload(
-                selected,
-                longtail_options=select_options.get("longtail_options"),
-                input_data=input_data,
+            return _attach_selector_debug(
+                payload,
+                api_usage_snapshot=api_usage.snapshot(),
+                input_keyword_count=len(items),
             )
-
-        selected = [_decorate_default_selected_item(item) for item in items if is_golden_keyword(item)]
-        target_count = _resolve_default_selection_target_count(items)
-        if len(selected) < target_count:
-            selected = _top_up_default_selection(selected, items, target_count=target_count)
-        if not selected:
-            selected = _select_fallback_candidates(items)
-        selected = _inject_seed_anchor_candidate(selected, input_data, items)
-
-        if isinstance(input_data, list):
-            return selected
-        return _build_selected_payload(
-            selected,
-            longtail_options=select_options.get("longtail_options"),
-            input_data=input_data,
-        )
 
 
 def _build_selected_payload(
@@ -169,6 +186,32 @@ def _build_selected_payload(
     export_payload = export_selected_keywords(input_data, selected)
     if export_payload:
         payload["selection_export"] = export_payload
+    return payload
+
+
+def _attach_selector_debug(
+    payload: dict[str, Any],
+    *,
+    api_usage_snapshot: dict[str, Any],
+    input_keyword_count: int,
+) -> dict[str, Any]:
+    payload["debug"] = {
+        "stage": "selector",
+        "summary": api_usage_snapshot.get("summary", {}),
+        "api_usage": api_usage_snapshot,
+        "selection_summary": {
+            "input_keyword_count": max(0, int(input_keyword_count or 0)),
+            "selected_keyword_count": len(payload.get("selected_keywords", []))
+            if isinstance(payload.get("selected_keywords"), list)
+            else 0,
+            "keyword_cluster_count": len(payload.get("keyword_clusters", []))
+            if isinstance(payload.get("keyword_clusters"), list)
+            else 0,
+            "longtail_suggestion_count": len(payload.get("longtail_suggestions", []))
+            if isinstance(payload.get("longtail_suggestions"), list)
+            else 0,
+        },
+    }
     return payload
 
 

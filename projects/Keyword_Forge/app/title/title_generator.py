@@ -1625,12 +1625,13 @@ def _collect_slot_candidate_keywords(
     slot_candidates: list[dict[str, Any]],
     accepted_slot_ids: list[str] | None = None,
 ) -> list[str]:
+    accepted_slot_filter_enabled = accepted_slot_ids is not None
     accepted_lookup = {normalize_text(slot_id) for slot_id in (accepted_slot_ids or []) if normalize_text(slot_id)}
     keywords: list[str] = []
     seen: set[str] = set()
     for candidate in slot_candidates:
         slot_id = normalize_text(candidate.get("slot_id"))
-        if accepted_lookup and slot_id not in accepted_lookup:
+        if accepted_slot_filter_enabled and slot_id not in accepted_lookup:
             continue
         keyword = normalize_text(candidate.get("keyword"))
         if not keyword or keyword in seen:

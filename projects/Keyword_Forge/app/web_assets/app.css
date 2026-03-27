@@ -970,6 +970,62 @@ body.utility-drawer-open {
     font-size: 0.84rem;
     line-height: 1.6;
 }
+.settings-action-guide {
+    white-space: pre-line;
+}
+.user-notice-stack {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 80;
+    display: grid;
+    gap: 10px;
+    width: min(360px, calc(100vw - 32px));
+    pointer-events: none;
+}
+.user-notice-toast {
+    display: grid;
+    gap: 6px;
+    padding: 14px 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(20, 32, 51, 0.12);
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 20px 44px rgba(20, 32, 51, 0.18);
+    color: var(--text);
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+    transition: opacity 180ms ease, transform 180ms ease;
+}
+.user-notice-toast.is-visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+.user-notice-toast.is-info {
+    border-color: rgba(15, 118, 110, 0.18);
+}
+.user-notice-toast.is-success {
+    border-color: rgba(23, 114, 69, 0.2);
+    background: linear-gradient(180deg, rgba(240, 253, 244, 0.96), rgba(255, 255, 255, 0.96));
+}
+.user-notice-toast.is-warning {
+    border-color: rgba(217, 119, 6, 0.22);
+    background: linear-gradient(180deg, rgba(255, 251, 235, 0.96), rgba(255, 255, 255, 0.96));
+}
+.user-notice-toast.is-error {
+    border-color: rgba(194, 65, 12, 0.24);
+    background: linear-gradient(180deg, rgba(255, 237, 213, 0.96), rgba(255, 255, 255, 0.96));
+}
+.user-notice-label {
+    font-size: 0.74rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+.user-notice-message {
+    font-size: 0.9rem;
+    line-height: 1.55;
+    word-break: keep-all;
+}
 .operation-custom-panel[hidden] {
     display: none !important;
 }
@@ -4472,6 +4528,13 @@ body.utility-drawer-open {
 
     .settings-form-grid {
         grid-template-columns: 1fr;
+    }
+
+    .user-notice-stack {
+        top: 14px;
+        right: 14px;
+        left: 14px;
+        width: auto;
     }
 
     .action-row {

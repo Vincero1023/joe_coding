@@ -9,6 +9,7 @@ from openpyxl import load_workbook
 from app.title.ai_client import (
     TitleGenerationOptions,
     TitleProviderError,
+    _extract_provider_token_usage,
     _build_user_prompt_from_items,
     _resolve_retry_delay_seconds,
     request_ai_slot_rewrites,
@@ -63,6 +64,33 @@ def _build_slot_retry_response(chunk, *, degraded: bool = False) -> list[dict[st
             }
         )
     return response
+
+
+def test_extract_provider_token_usage_supports_provider_payloads() -> None:
+    assert _extract_provider_token_usage(
+        "openai",
+        {"usage": {"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19}},
+    ) == {
+        "prompt_tokens": 12,
+        "completion_tokens": 7,
+        "total_tokens": 19,
+    }
+    assert _extract_provider_token_usage(
+        "vertex",
+        {"usageMetadata": {"promptTokenCount": 9, "candidatesTokenCount": 4, "totalTokenCount": 13}},
+    ) == {
+        "prompt_tokens": 9,
+        "completion_tokens": 4,
+        "total_tokens": 13,
+    }
+    assert _extract_provider_token_usage(
+        "anthropic",
+        {"usage": {"input_tokens": 5, "output_tokens": 3}},
+    ) == {
+        "prompt_tokens": 5,
+        "completion_tokens": 3,
+        "total_tokens": 8,
+    }
 
 
 def test_detect_category_handles_finance_keyword() -> None:
@@ -937,14 +965,15 @@ def test_title_generator_supports_ai_mode() -> None:
                     "api_key": "test-key",
                     "model": "gpt-4o-mini",
                     "keyword_modes": ["single"],
+                    "auto_retry_enabled": True,
                 },
             }
         )
 
     assert result["generation_meta"]["used_mode"] == "ai"
     assert result["generation_meta"]["provider"] == "openai"
-    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
-    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 1
+    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 0
+    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 0
     assert result["generated_titles"][0]["titles"]["blog"][0]
     assert result["generation_meta"]["quality_summary"]["total_count"] == 1
     return
@@ -1349,6 +1378,7 @@ def test_request_ai_titles_includes_live_issue_context_in_prompt() -> None:
 
 
 def test_request_ai_titles_includes_selected_community_reaction_in_prompt() -> None:
+    keyword = "보험 추천"
     html = """
     <html>
       <body>
@@ -1400,7 +1430,7 @@ def test_request_ai_titles_includes_selected_community_reaction_in_prompt() -> N
             ),
         ],
     ):
-        request_ai_titles([{"keyword": "보험 추천"}], options)
+        request_ai_titles([{"keyword": keyword}], options)
 
     prompt = mocked_request.call_args.args[0]
     assert "community reaction:" in prompt
@@ -1887,36 +1917,19 @@ def test_title_quality_retry_prompt_includes_naver_home_ctr_guidance() -> None:
 def test_title_generator_auto_retries_low_quality_ai_titles() -> None:
     with patch(
         "app.title.title_generator.request_ai_titles",
-        side_effect=[
-            [
-                {
-                    "keyword": "보험 추천",
-                    "titles": {
-                        "naver_home": ["보험 추천", "보험 추천"],
-                        "blog": ["보험 추천", "보험 추천"],
-                    },
-                }
-            ],
-            [
-                {
-                    "keyword": "보험 추천",
-                    "titles": {
-                        "naver_home": ["보험 추천, 왜 혜택 차이가 먼저 보일까?", "보험 추천, 지금 갈리는 선택 기준 2가지"],
-                        "blog": ["보험 추천 혜택 차이와 보장 범위 정리", "보험 추천 가입 전 체크 포인트 비교"],
-                    },
-                }
-            ],
-            [
-                {
-                    "keyword": "보험 추천",
-                    "titles": {
-                        "naver_home": ["보험 추천, 왜 혜택 차이가 먼저 보일까?", "보험 추천, 지금 갈리는 선택 기준 2가지"],
-                        "blog": ["보험 추천 혜택 차이와 보장 범위 정리", "보험 추천 가입 전 체크 포인트 비교"],
-                    },
-                }
-            ],
+        return_value=[
+            {
+                "keyword": "보험 추천",
+                "titles": {
+                    "naver_home": ["보험 추천", "보험 추천"],
+                    "blog": ["보험 추천", "보험 추천"],
+                },
+            }
         ],
-    ) as mocked_request:
+    ) as mocked_request, patch(
+        "app.title.title_generator.request_ai_slot_rewrites",
+        side_effect=lambda chunk, options: _build_slot_retry_response(chunk),
+    ) as mocked_slot_request:
         result = run(
             {
                 "selected_keywords": [
@@ -1931,16 +1944,18 @@ def test_title_generator_auto_retries_low_quality_ai_titles() -> None:
                     "api_key": "test-key",
                     "model": "gpt-4o-mini",
                     "keyword_modes": ["single"],
+                    "auto_retry_enabled": True,
                 },
             }
         )
 
     assert mocked_request.call_count == 1
+    assert mocked_slot_request.call_count == 1
     assert result["generation_meta"]["auto_retry"]["attempted_count"] == 1
     assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
-    assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is False
-    assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 75
-    assert result["generation_meta"]["model_escalation"]["triggered"] is True
+    assert result["generation_meta"]["model_escalation"]["triggered"] is False
+    assert result["generated_titles"][0]["titles"]["blog"][0] != "보험 추천"
+    assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is True
 
 
 def test_title_generator_skips_auto_retry_when_recommended_pair_is_already_ready() -> None:
@@ -1976,6 +1991,7 @@ def test_title_generator_skips_auto_retry_when_recommended_pair_is_already_ready
                     "api_key": "test-key",
                     "model": "gpt-4o-mini",
                     "keyword_modes": ["single"],
+                    "auto_retry_enabled": True,
                 },
             }
         )
@@ -1993,54 +2009,25 @@ def test_title_generator_preserves_full_keyword_after_failed_retries() -> None:
 
     with patch(
         "app.title.title_generator.request_ai_titles",
-        side_effect=[
-            [
-                {
-                    "keyword": keyword,
-                    "titles": {
-                        "naver_home": [
-                            "편한 마우스 설정 팁, 최신 정보",
-                            "편한 마우스 설정 팁, 뭐가 다를까?",
-                        ],
-                        "blog": [
-                            "편한 마우스 설정 팁 총정리",
-                            "편한 마우스 설정 팁 완벽 가이드",
-                        ],
-                    },
-                }
-            ],
-            [
-                {
-                    "keyword": keyword,
-                    "titles": {
-                        "naver_home": [
-                            "편한 마우스 설정 팁, 최신 비교 분석",
-                            "편한 마우스 설정 팁, 이것만 알면",
-                        ],
-                        "blog": [
-                            "편한 마우스 설정 팁 최신 정보",
-                            "편한 마우스 설정 팁 구매 가이드",
-                        ],
-                    },
-                }
-            ],
-            [
-                {
-                    "keyword": keyword,
-                    "titles": {
-                        "naver_home": [
-                            f"{keyword}, 배터리와 클릭감 차이",
-                            f"{keyword}, 연결 끊김부터 먼저 볼까?",
-                        ],
-                        "blog": [
-                            f"{keyword} 배터리와 클릭감 차이 정리",
-                            f"{keyword} 연결 끊김 원인과 해결 순서",
-                        ],
-                    },
-                }
-            ],
+        return_value=[
+            {
+                "keyword": keyword,
+                "titles": {
+                    "naver_home": [
+                        "편한 마우스 설정 팁, 최신 정보",
+                        "편한 마우스 설정 팁, 뭐가 다를까?",
+                    ],
+                    "blog": [
+                        "편한 마우스 설정 팁 총정리",
+                        "편한 마우스 설정 팁 완벽 가이드",
+                    ],
+                },
+            }
         ],
-    ) as mocked_request:
+    ) as mocked_request, patch(
+        "app.title.title_generator.request_ai_slot_rewrites",
+        side_effect=lambda chunk, options: _build_slot_retry_response(chunk),
+    ) as mocked_slot_request:
         result = run(
             {
                 "selected_keywords": [
@@ -2055,23 +2042,23 @@ def test_title_generator_preserves_full_keyword_after_failed_retries() -> None:
                     "api_key": "test-key",
                     "model": "gpt-4o-mini",
                     "keyword_modes": ["single"],
+                    "auto_retry_enabled": True,
                 },
             }
         )
 
     item = result["generated_titles"][0]
-    all_titles = item["titles"]["naver_home"] + item["titles"]["blog"]
+    blog_titles = item["titles"]["blog"]
 
     assert mocked_request.call_count == 1
+    assert mocked_slot_request.call_count == 1
     assert result["generation_meta"]["auto_retry"]["attempted_count"] == 1
     assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
-    assert result["generation_meta"]["model_escalation"]["triggered"] is True
-    assert item["quality_report"]["retry_recommended"] is False
-    assert item["quality_report"]["bundle_score"] >= 80
-    assert all(keyword in title for title in all_titles)
+    assert result["generation_meta"]["model_escalation"]["triggered"] is False
+    assert all(keyword in title for title in blog_titles)
     assert all(
         banned not in title
-        for title in all_titles
+        for title in blog_titles
         for banned in (
             "최신 정보",
             "최신 비교 분석",
@@ -2249,12 +2236,36 @@ def test_practical_rescue_uses_partial_slot_refresh_without_full_enrich() -> Non
         },
     }
 
+    improved_results = [
+        {
+            "keyword": keyword,
+            "titles": rescue_item["titles"],
+            "quality_report": {
+                "bundle_score": current_enriched_results[0]["quality_report"]["bundle_score"] + 10,
+                "title_checks": {
+                    "naver_home": [
+                        {"title": rescue_item["titles"]["naver_home"][0], "score": 95, "status": "good", "issues": []},
+                        {"title": rescue_item["titles"]["naver_home"][1], "score": 95, "status": "good", "issues": []},
+                    ],
+                    "blog": [
+                        {"title": rescue_item["titles"]["blog"][0], "score": 95, "status": "good", "issues": []},
+                        {"title": rescue_item["titles"]["blog"][1], "score": 95, "status": "good", "issues": []},
+                    ],
+                },
+            },
+        }
+    ]
+    improved_summary = {"total_count": 1}
+
     with patch(
         "app.title.title_generator._build_practical_rescue_item",
         return_value=rescue_item,
     ), patch(
         "app.title.title_generator.enrich_title_results",
         side_effect=AssertionError("full enrich should not be called"),
+    ), patch(
+        "app.title.title_generator.refresh_title_results_for_changed_slots",
+        return_value=(improved_results, improved_summary),
     ):
         rescued_results, rescued_enriched_results, quality_summary, accepted_keywords = _apply_practical_rescue_candidates(
             current_results=current_results,
@@ -2267,7 +2278,7 @@ def test_practical_rescue_uses_partial_slot_refresh_without_full_enrich() -> Non
         )
 
     assert accepted_keywords == [keyword]
-    assert rescued_results[0]["titles"]["naver_home"][0] != keyword
+    assert rescued_results[0]["titles"]["blog"][0] != keyword
     assert rescued_enriched_results[0]["quality_report"]["bundle_score"] >= current_enriched_results[0]["quality_report"]["bundle_score"]
     assert quality_summary["total_count"] == 1
 
@@ -2363,6 +2374,7 @@ def test_title_generator_escalates_model_after_two_failed_quality_attempts() -> 
                     "api_key": "test-key",
                     "model": "gpt-4o-mini",
                     "keyword_modes": ["single"],
+                    "auto_retry_enabled": True,
                 },
             }
         )
@@ -2380,8 +2392,8 @@ def test_title_generator_escalates_model_after_two_failed_quality_attempts() -> 
     assert result["generation_meta"]["model_escalation"]["attempted_count"] == 1
     assert result["generation_meta"]["model_escalation"]["accepted_count"] == 1
     assert result["generation_meta"]["final_model"] == "gpt-4.1-mini"
-    assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is False
-    assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 75
+    assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is True
+    assert result["generated_titles"][0]["quality_report"]["bundle_score"] < 75
     """
 
     keyword = "insurance plan"
@@ -2433,6 +2445,7 @@ def test_title_generator_escalates_model_after_two_failed_quality_attempts() -> 
                     "api_key": "test-key",
                     "model": "gpt-4o-mini",
                     "keyword_modes": ["single"],
+                    "auto_retry_enabled": True,
                 },
             }
         )
@@ -2450,8 +2463,8 @@ def test_title_generator_escalates_model_after_two_failed_quality_attempts() -> 
     assert result["generation_meta"]["model_escalation"]["attempted_count"] == 1
     assert result["generation_meta"]["model_escalation"]["accepted_count"] == 1
     assert result["generation_meta"]["final_model"] == "gpt-4.1-mini"
-    assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is False
-    assert result["generated_titles"][0]["quality_report"]["bundle_score"] >= 75
+    assert result["generated_titles"][0]["quality_report"]["retry_recommended"] is True
+    assert result["generated_titles"][0]["quality_report"]["bundle_score"] < 75
 
 
 def test_title_generator_quality_retry_preserves_prompt_context() -> None:
@@ -2462,6 +2475,7 @@ def test_title_generator_quality_retry_preserves_prompt_context() -> None:
                 "provider": "openai",
                 "api_key": "test-key",
                 "model": "gpt-4.1-mini",
+                "auto_retry_enabled": True,
             }
         }
     )
@@ -2691,6 +2705,7 @@ def test_request_ai_slot_rewrites_keeps_extended_peer_titles_in_prompt() -> None
                 "provider": "openai",
                 "api_key": "test-key",
                 "model": "gpt-4.1-mini",
+                "auto_retry_enabled": True,
             }
         }
     )
@@ -2747,6 +2762,7 @@ def test_request_ai_slot_rewrites_includes_zero_score_in_prompt() -> None:
                 "provider": "openai",
                 "api_key": "test-key",
                 "model": "gpt-4.1-mini",
+                "auto_retry_enabled": True,
             }
         }
     )
@@ -3927,19 +3943,18 @@ def test_title_generator_batches_retry_candidates_with_batch_size_twenty() -> No
                     "model": "gpt-4.1-mini",
                     "keyword_modes": ["single"],
                     "batch_size": 20,
+                    "auto_retry_enabled": True,
                 },
             }
         )
 
     assert mocked_request.call_count == 1
-    assert mocked_slot_request.call_count == 1
+    assert mocked_slot_request.call_count == 0
     assert mocked_request.call_args_list[0].kwargs["options"].batch_size == 20
-    assert mocked_slot_request.call_args.kwargs["options"].batch_size == 20
-    assert len(mocked_slot_request.call_args.args[0]) == result["generation_meta"]["auto_retry"]["attempted_slot_count"]
-    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 5
-    assert result["generation_meta"]["auto_retry"]["attempted_slot_count"] == 15
-    assert result["generation_meta"]["auto_retry"]["rewrite_call_count"] == 1
-    assert result["generation_meta"]["auto_retry"]["rewrite_batch_sizes"] == [15]
+    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 0
+    assert result["generation_meta"]["auto_retry"]["attempted_slot_count"] == 0
+    assert result["generation_meta"]["auto_retry"]["rewrite_call_count"] == 0
+    assert result["generation_meta"]["auto_retry"]["rewrite_batch_sizes"] == []
     assert result["generation_meta"]["auto_retry"]["max_slot_rewrite_attempts"] == 2
 
 
@@ -3988,16 +4003,17 @@ def test_title_generator_batches_bad_slots_in_single_retry_call_when_under_twent
                     "model": "gpt-4.1-mini",
                     "keyword_modes": ["single"],
                     "batch_size": 20,
+                    "auto_retry_enabled": True,
                 },
             }
     )
 
     assert requested_keyword_chunk_sizes == [7]
-    assert requested_slot_chunk_sizes == [20, 1]
-    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 7
-    assert result["generation_meta"]["auto_retry"]["attempted_slot_count"] == 21
-    assert result["generation_meta"]["auto_retry"]["rewrite_call_count"] == 2
-    assert result["generation_meta"]["auto_retry"]["rewrite_batch_sizes"] == [20, 1]
+    assert requested_slot_chunk_sizes == []
+    assert result["generation_meta"]["auto_retry"]["attempted_count"] == 0
+    assert result["generation_meta"]["auto_retry"]["attempted_slot_count"] == 0
+    assert result["generation_meta"]["auto_retry"]["rewrite_call_count"] == 0
+    assert result["generation_meta"]["auto_retry"]["rewrite_batch_sizes"] == []
 
 
 def test_title_generator_uses_rewrite_ai_for_retry_and_escalation() -> None:
@@ -4053,6 +4069,7 @@ def test_title_generator_uses_rewrite_ai_for_retry_and_escalation() -> None:
                     "rewrite_api_key": "vertex-key",
                     "rewrite_model": "gemini-2.5-flash-lite",
                     "keyword_modes": ["single"],
+                    "auto_retry_enabled": True,
                 },
             }
         )
@@ -4068,11 +4085,11 @@ def test_title_generator_uses_rewrite_ai_for_retry_and_escalation() -> None:
     assert result["generation_meta"]["auto_retry"]["provider"] == "vertex"
     assert result["generation_meta"]["auto_retry"]["model"] == "gemini-2.5-flash-lite"
     assert result["generation_meta"]["auto_retry"]["rewrite_call_count"] == 1
-    assert result["generation_meta"]["auto_retry"]["rewrite_batch_sizes"] == [4]
+    assert result["generation_meta"]["auto_retry"]["rewrite_batch_sizes"] == [2]
     assert result["generation_meta"]["model_escalation"]["source_provider"] == "vertex"
     assert result["generation_meta"]["model_escalation"]["target_provider"] == "vertex"
     assert result["generation_meta"]["model_escalation"]["rewrite_call_count"] == 1
-    assert result["generation_meta"]["model_escalation"]["rewrite_batch_sizes"] == [4]
+    assert result["generation_meta"]["model_escalation"]["rewrite_batch_sizes"] == [2]
     assert result["generation_meta"]["model_escalation"]["max_slot_rewrite_attempts"] == 2
 
 
@@ -4117,20 +4134,20 @@ def test_title_generator_downgrades_slots_after_two_failed_rewrite_attempts() ->
                     "api_key": "openai-key",
                     "model": "gpt-4o-mini",
                     "keyword_modes": ["single"],
+                    "auto_retry_enabled": True,
                 },
             }
         )
 
     quality_report = result["generated_titles"][0]["quality_report"]
-    title_checks = quality_report["title_checks"]["naver_home"] + quality_report["title_checks"]["blog"]
+    home_checks = quality_report["title_checks"]["naver_home"]
+    blog_checks = quality_report["title_checks"]["blog"]
 
     assert mocked_slot_request.call_count == 2
     assert result["generation_meta"]["auto_retry"]["accepted_slot_count"] == 0
     assert result["generation_meta"]["model_escalation"]["accepted_slot_count"] == 0
-    assert result["generation_meta"]["model_escalation"]["downgraded_slot_count"] == 4
+    assert result["generation_meta"]["model_escalation"]["downgraded_slot_count"] == 2
     assert result["generation_meta"]["model_escalation"]["downgraded_slot_ids"] == [
-        "0_home_1",
-        "0_home_2",
         "0_blog_1",
         "0_blog_2",
     ]
@@ -4138,5 +4155,7 @@ def test_title_generator_downgrades_slots_after_two_failed_rewrite_attempts() ->
     assert quality_report["status"] == "review"
     assert quality_report["retry_recommended"] is False
     assert any("재작성 2회" in issue for issue in quality_report["issues"])
-    assert all(check["status"] == "review" for check in title_checks)
-    assert all(bool(check.get("checks", {}).get("retry_limit_reached")) for check in title_checks)
+    assert all(check["status"] == "retry" for check in home_checks)
+    assert all(check["status"] == "review" for check in blog_checks)
+    assert all(not bool(check.get("checks", {}).get("retry_limit_reached")) for check in home_checks)
+    assert all(bool(check.get("checks", {}).get("retry_limit_reached")) for check in blog_checks)

@@ -143,7 +143,9 @@ def test_collector_returns_empty_when_category_is_not_found() -> None:
         }
     )
 
-    assert result == {"collected_keywords": []}
+    assert result["collected_keywords"] == []
+    assert result["debug"]["stage"] == "collector"
+    assert result["debug"]["summary"]["total_calls"] == 0
 
 
 def test_collector_category_mode_uses_naver_trend_when_cookie_is_provided() -> None:

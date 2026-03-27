@@ -198,6 +198,7 @@ function buildLongtailOptionsPayload(selectedResult = null) {
         optional_suffix_keys: getLongtailOptionalSuffixKeys(selectedResult),
     };
 }
+window.buildLongtailOptionsPayload = buildLongtailOptionsPayload;
 
 function hasPendingLongtailOptionChanges(selectedResult = null) {
     const currentKeys = buildLongtailOptionsPayload(selectedResult).optional_suffix_keys;
@@ -361,6 +362,9 @@ function resolveSelectionPresetLabel(presetKey) {
 function hasEditorialSupportSelection(items) {
     return (items || []).some((item) => String(item?.selection_mode || "").trim() === "editorial_support");
 }
+window.resolveSelectionPresetKey = resolveSelectionPresetKey;
+window.resolveSelectionPresetLabel = resolveSelectionPresetLabel;
+window.hasEditorialSupportSelection = hasEditorialSupportSelection;
 
 function buildSelectionPresetRunLabel(profitabilityGrades, attackabilityGrades) {
     const presetKey = resolveSelectionPresetKey(profitabilityGrades, attackabilityGrades);
@@ -687,6 +691,7 @@ function getForwardSelectOptions() {
         ? { allowedProfitabilityGrades, allowedAttackabilityGrades }
         : {};
 }
+window.getForwardSelectOptions = getForwardSelectOptions;
 
 function hasMatchingSelectionProfile(allowedProfitabilityGrades, allowedAttackabilityGrades) {
     const normalizedProfitability = normalizeProfitabilityList(allowedProfitabilityGrades || []);
@@ -805,6 +810,7 @@ async function runSelectStage(options = {}) {
     renderAll();
     return state.results.selected;
 }
+window.runSelectStage = runSelectStage;
 
 async function runTitleStage() {
     const forwardSelectOptions = getForwardSelectOptions();

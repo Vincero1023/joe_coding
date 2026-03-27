@@ -85,6 +85,39 @@ def test_auth_guard_locked_returns_clear_423_message() -> None:
     assert payload["detail"]["auth_lock_message"] == "Unauthorized: no user logged in"
 
 
+def test_runtime_settings_update_clears_auth_lock() -> None:
+    report_naver_auth_error("Unauthorized: no user logged in")
+
+    response = client.post(
+        "/settings/runtime",
+        json={
+            "mode": "custom",
+            "naver_request_gap_seconds": 7,
+            "daily_operation_limit": 11,
+            "daily_naver_request_limit": 120,
+            "max_continuous_minutes": 30,
+            "stop_on_auth_error": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["operation_settings"]
+    assert payload["settings"]["mode"] == "custom"
+    assert payload["state"]["auth_lock_active"] is False
+    assert payload["state"]["auth_lock_message"] == ""
+
+
+def test_runtime_settings_reset_guards_endpoint_clears_auth_lock() -> None:
+    report_naver_auth_error("Unauthorized: no user logged in")
+
+    response = client.post("/settings/runtime/reset-guards")
+
+    assert response.status_code == 200
+    payload = response.json()["operation_settings"]
+    assert payload["state"]["auth_lock_active"] is False
+    assert payload["state"]["auth_lock_message"] == ""
+
+
 def test_title_prompt_settings_endpoint_reads_and_writes_repo_backed_settings(tmp_path) -> None:
     response = client.get("/settings/title-prompt")
 

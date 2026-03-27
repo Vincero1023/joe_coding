@@ -128,39 +128,6 @@ class CollectorService:
         self._trend_client = trend_client or NaverTrendClient()
 
     def run(self, input_data: dict) -> dict:
-        request = CollectorRequest.from_dict(input_data)
-        debug = self._start_debug_context(request) if request.debug else None
-        started_at = time.perf_counter()
-
-        resolved_category = resolve_category_name(request.category)
-        if debug:
-            debug.resolved_category = resolved_category
-
-        if request.mode == "category":
-            if not resolved_category:
-                _record_warning(
-                    debug,
-                    code="category_not_found",
-                    message="요청한 카테고리를 찾지 못했습니다.",
-                    detail={"requested_category": request.category},
-                )
-                return self._build_result([], debug, started_at)
-
-            raw_entries = self._collect_category_entries(
-                category=resolved_category,
-                request=request,
-                debug=debug,
-            )
-            return self._build_result(raw_entries, debug, started_at)
-
-        raw_entries = self._collect_by_seed(
-            seed_input=request.seed_input,
-            options=request.options,
-            debug=debug,
-        )
-        return self._build_result(raw_entries, debug, started_at)
-
-    def run(self, input_data: dict) -> dict:
         with capture_api_usage() as api_usage:
             request = CollectorRequest.from_dict(input_data)
             debug = self._start_debug_context(request) if request.debug else None
@@ -702,24 +669,6 @@ class CollectorService:
             matches.append(text)
 
         return list(dict.fromkeys(matches[:20]))
-
-    def _build_result(
-        self,
-        raw_entries: list[dict[str, Any]],
-        debug: CollectorDebugContext | None,
-        started_at: float,
-    ) -> dict[str, Any]:
-        deduped = _dedupe_keyword_entries(raw_entries)
-        result: dict[str, Any] = {"collected_keywords": deduped}
-
-        if debug is None:
-            return result
-
-        debug.raw_keyword_count = len(raw_entries)
-        debug.deduped_keyword_count = len(deduped)
-        debug.duration_ms = _elapsed_ms(started_at)
-        result["debug"] = _build_debug_payload(debug)
-        return result
 
     def _build_result(
         self,

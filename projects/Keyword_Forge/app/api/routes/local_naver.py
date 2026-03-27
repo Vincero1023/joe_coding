@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.api.schemas import ModuleRequest, ModuleResponse
+from app.collector.naver_trend import NaverTrendClient, NaverTrendOptions
 from app.local.naver_login_browser import (
     LocalLoginBrowserError,
     LocalNaverLoginBrowserService,
@@ -13,6 +14,7 @@ from app.local.naver_session import LocalBrowserCookieError, LocalNaverSessionSe
 router = APIRouter()
 service = LocalNaverSessionService()
 login_browser_service = LocalNaverLoginBrowserService()
+session_validator = NaverTrendClient()
 
 
 @router.post("/local/naver-session", response_model=ModuleResponse)
@@ -68,3 +70,9 @@ def load_cached_local_naver_session(payload: ModuleRequest) -> ModuleResponse:
                 **exc.to_detail(),
             },
         ) from exc
+
+
+@router.post("/local/naver-session/validate", response_model=ModuleResponse)
+def validate_local_naver_session(payload: ModuleRequest) -> ModuleResponse:
+    options = NaverTrendOptions.from_dict(payload.input_data)
+    return ModuleResponse(result=session_validator.validate_session(options=options))

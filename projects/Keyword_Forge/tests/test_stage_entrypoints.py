@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -122,7 +123,15 @@ def test_expand_analyze_stream_endpoint_emits_analysis_and_result() -> None:
     assert response.status_code == 200
     assert any('"event": "progress"' in line for line in lines)
     assert any('"event": "analysis"' in line for line in lines)
+    assert any('"event": "selection"' in line for line in lines)
     assert any('"event": "completed"' in line for line in lines)
+    completed_payload = next(
+        json.loads(line)
+        for line in lines
+        if '"event": "completed"' in line
+    )
+    assert "selected_keywords" in completed_payload["result"]
+    assert "longtail_suggestions" in completed_payload["result"]
 
 
 def test_generate_title_stream_endpoint_emits_progress_and_result() -> None:

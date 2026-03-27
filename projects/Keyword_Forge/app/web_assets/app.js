@@ -58,6 +58,9 @@ const STREAM_SESSION_LOG_LIMIT = 60;
 const LIVE_TABLE_PREVIEW_LIMIT = 120;
 const HEAVY_TABLE_DOM_LIMIT = 300;
 const TITLE_PROMPT_PREVIEW_LIMIT = 160;
+const USER_NOTICE_DEFAULT_DURATION_MS = 3200;
+const USER_NOTICE_ERROR_DURATION_MS = 5200;
+const USER_NOTICE_TRANSITION_MS = 180;
 const OPERATION_MODE_DEFAULT = "always_on_slow";
 const OPERATION_MODE_PRESET_FALLBACKS = [
     {
@@ -284,7 +287,10 @@ const state = {
     operationModePresets: [...OPERATION_MODE_PRESET_FALLBACKS],
     operationCustomPresetKey: "balanced",
     operationLastCustomSettings: null,
+    operationSettingsRefreshPending: false,
+    operationSettingsSavePending: false,
     operationGuardResetPending: false,
+    trendSessionValidationPending: false,
     operationGuardStatusMessage: "",
     keywordWorkHistory: null,
     keywordStatusRegistry: null,
@@ -300,6 +306,7 @@ let titlePromptSettingsSyncSequence = 0;
 
 document.addEventListener("DOMContentLoaded", () => {
     bindElements();
+    elements.validateTrendSessionButton = elements.validateTrendSessionButton || document.getElementById("validateTrendSessionButton");
     loadTrendSettings();
     void loadTrendSessionCacheStatus({ silent: true });
     loadTitleSettings();
@@ -320,167 +327,6 @@ document.addEventListener("DOMContentLoaded", () => {
     renderAll();
 });
 
-function bindElements() {
-    elements.layoutGrid = document.querySelector(".layout-grid");
-    elements.categoryInput = document.getElementById("categoryInput");
-    elements.categorySourceInput = document.getElementById("categorySourceInput");
-    elements.seedInput = document.getElementById("seedInput");
-    elements.trendServiceInput = document.getElementById("trendServiceInput");
-    elements.trendDateInput = document.getElementById("trendDateInput");
-    elements.trendBrowserInput = document.getElementById("trendBrowserInput");
-    elements.trendCookieInput = document.getElementById("trendCookieInput");
-    elements.trendFallbackInput = document.getElementById("trendFallbackInput");
-    elements.trendSourceHelp = document.getElementById("trendSourceHelp");
-    elements.launchLoginBrowserButton = document.getElementById("launchLoginBrowserButton");
-    elements.loadLocalCookieButton = document.getElementById("loadLocalCookieButton");
-    elements.localCookieStatus = document.getElementById("localCookieStatus");
-    elements.expanderAnalysisPath = document.getElementById("expanderAnalysisPath");
-    elements.optionRelated = document.getElementById("optionRelated");
-    elements.optionAutocomplete = document.getElementById("optionAutocomplete");
-    elements.optionBulk = document.getElementById("optionBulk");
-    elements.optionDebug = document.getElementById("optionDebug");
-    elements.expandInputSource = document.getElementById("expandInputSource");
-    elements.expandManualInput = document.getElementById("expandManualInput");
-    elements.analyzeInputSource = document.getElementById("analyzeInputSource");
-    elements.analyzeManualInput = document.getElementById("analyzeManualInput");
-    elements.selectedCollectedCount = document.getElementById("selectedCollectedCount");
-    elements.manualAnalyzeCount = document.getElementById("manualAnalyzeCount");
-    elements.titleMode = document.getElementById("titleMode");
-    elements.titleProvider = document.getElementById("titleProvider");
-    elements.titleModel = document.getElementById("titleModel");
-    elements.titleApiKey = document.getElementById("titleApiKey");
-    elements.titleTemperature = document.getElementById("titleTemperature");
-    elements.titleFallback = document.getElementById("titleFallback");
-    elements.titleSystemPrompt = document.getElementById("titleSystemPrompt");
-    elements.titlePromptProfilePicker = document.getElementById("titlePromptProfilePicker");
-    elements.titlePromptSummary = document.getElementById("titlePromptSummary");
-    elements.openTitlePromptEditorButton = document.getElementById("openTitlePromptEditorButton");
-    elements.clearTitlePromptButton = document.getElementById("clearTitlePromptButton");
-    elements.titleModeBadge = document.getElementById("titleModeBadge");
-    elements.statusList = document.getElementById("statusList");
-    elements.resultsRailPanel = document.getElementById("resultsRailPanel");
-    elements.resultsRail = document.getElementById("resultsRail");
-    elements.resultStageDock = document.getElementById("resultStageDock");
-    elements.resultsSection = document.getElementById("section-results");
-    elements.resultsGrid = document.getElementById("resultsGrid");
-    elements.activityLog = document.getElementById("activityLog");
-    elements.pipelineStatus = document.getElementById("pipelineStatus");
-    elements.progressBar = document.getElementById("progressBar");
-    elements.progressText = document.getElementById("progressText");
-    elements.progressDetail = document.getElementById("progressDetail");
-    elements.errorConsole = document.getElementById("errorConsole");
-    elements.debugPanels = document.getElementById("debugPanels");
-    elements.actionButtons = Array.from(document.querySelectorAll("button"));
-}
-
-function bindEvents() {
-    document.querySelectorAll("input[name='collectorMode']").forEach((element) => {
-        element.addEventListener("change", renderInputState);
-    });
-    document.getElementById("runCollectButton").addEventListener("click", () => {
-        runWithGuard(runCollectFromScratch, "수집 단계 실행 중");
-    });
-    document.getElementById("runExpandButton").addEventListener("click", () => {
-        runWithGuard(runThroughExpand, "확장 단계 실행 중");
-    });
-    document.getElementById("runAnalyzeButton").addEventListener("click", () => {
-        runWithGuard(runThroughAnalyze, "분석 단계 실행 중");
-    });
-    document.getElementById("runSelectButton").addEventListener("click", () => {
-        runWithGuard(runThroughSelect, "선별 단계 실행 중");
-    });
-    elements.gradePresetButtons.forEach((button) => {
-        button.addEventListener("click", () => {
-            applyGradePreset(button.dataset.selectionPreset || "");
-        });
-    });
-    elements.gradeToggleButtons.forEach((button) => {
-        button.addEventListener("click", () => {
-            toggleGradeFilter(button.dataset.gradeToggle || "");
-        });
-    });
-    elements.runGradeSelectButton?.addEventListener("click", () => {
-        const grades = getSelectedGradeFilters();
-        runWithGuard(
-            () => runThroughGradeSelect(grades),
-            grades.length ? `${buildGradeRunLabel(grades)} 선별 실행 중` : "등급별 선별 실행 중",
-        );
-    });
-    document.getElementById("runTitleButton").addEventListener("click", () => {
-        runWithGuard(runThroughTitle, "제목 생성 단계 실행 중");
-    });
-    document.getElementById("runFullButton").addEventListener("click", () => {
-        runWithGuard(runFullFlow, "전체 파이프라인 실행 중");
-    });
-    document.getElementById("resetButton").addEventListener("click", resetAll);
-    document.getElementById("clearDebugButton").addEventListener("click", clearDiagnostics);
-    elements.resultsGrid.addEventListener("click", handleResultsGridClick);
-    elements.resultsGrid.addEventListener("change", handleResultsGridChange);
-    elements.expandManualInput.addEventListener("input", renderInputState);
-    elements.analyzeManualInput.addEventListener("input", renderInputState);
-    elements.expandInputSource.addEventListener("change", renderInputState);
-    elements.analyzeInputSource.addEventListener("change", renderInputState);
-    [
-        elements.categorySourceInput,
-        elements.trendServiceInput,
-        elements.trendDateInput,
-        elements.trendBrowserInput,
-        elements.trendCookieInput,
-        elements.trendFallbackInput,
-    ].forEach((element) => {
-        element.addEventListener("input", handleTrendSettingsChange);
-        element.addEventListener("change", handleTrendSettingsChange);
-    });
-    elements.loadLocalCookieButton.addEventListener("click", () => {
-        runWithGuard(importLocalNaverCookie, "로컬 네이버 세션을 읽는 중");
-    });
-    elements.launchLoginBrowserButton.addEventListener("click", () => {
-        runWithGuard(openDedicatedLoginBrowser, "전용 로그인 브라우저를 여는 중");
-    });
-    [
-        elements.titleMode,
-        elements.titleProvider,
-        elements.titleModel,
-        elements.titleApiKey,
-        elements.titleTemperature,
-        elements.titleFallback,
-    ].forEach((element) => {
-        element.addEventListener("input", handleTitleSettingsChange);
-        element.addEventListener("change", handleTitleSettingsChange);
-    });
-
-    document.querySelectorAll("[data-preset]").forEach((button) => {
-        button.addEventListener("click", () => applyPreset(button.dataset.preset || "finance"));
-    });
-}
-
-async function runWithGuard(task, runningMessage) {
-    if (state.isBusy) {
-        addLog("이미 다른 작업이 실행 중입니다. 현재 단계가 끝난 뒤 다시 시도해 주세요.", "error");
-        return;
-    }
-
-    state.isBusy = true;
-    state.lastError = null;
-    setGlobalStatus(runningMessage, "running");
-    syncBusyButtons();
-    renderAll();
-
-    try {
-        await task();
-        setGlobalStatus("실행 완료", "success");
-    } catch (error) {
-        const normalizedError = normalizeError(error);
-        state.lastError = normalizedError;
-        setGlobalStatus("오류 발생", "error");
-        addLog(buildErrorHeadline(normalizedError), "error");
-    } finally {
-        state.isBusy = false;
-        syncBusyButtons();
-        renderAll();
-        void loadOperationSettings({ forceServer: true });
-    }
-}
 
 async function runFullFlow() {
     await runCollectStage();
@@ -581,79 +427,8 @@ async function runExpandStage() {
     return result;
 }
 
-async function runAnalyzeStage() {
-    const source = elements.analyzeInputSource.value;
-    if (source !== "manual_text" && !state.results.expanded) {
-        await runExpandStage();
-    }
 
-    const inputData = buildAnalyzeInput();
-    addLog(`분석 시작: ${describeAnalyzeSource(inputData)}`);
-    clearStageAndDownstream("analyzed");
-    const result = await executeStage({
-        stageKey: "analyzed",
-        endpoint: "/analyze",
-        inputData,
-    });
 
-    state.results.analyzed = result;
-    addLog(`분석 완료: ${countItems(result.analyzed_keywords)}건`, "success");
-    renderAll();
-    return result;
-}
-
-async function runSelectStage() {
-    if (!state.results.analyzed) {
-        await runAnalyzeStage();
-    }
-
-    addLog("선별 시작: 골든 키워드 기준을 적용합니다.");
-    clearStageAndDownstream("selected");
-    const result = await executeStage({
-        stageKey: "selected",
-        endpoint: "/select",
-        inputData: {
-            analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
-        },
-    });
-
-    state.results.selected = result;
-    addLog(`선별 완료: ${countItems(result.selected_keywords)}건`, "success");
-    renderAll();
-    return result;
-}
-
-async function runTitleStage() {
-    if (!state.results.selected) {
-        await runSelectStage();
-    }
-
-    const titleOptions = buildTitleOptions();
-    addLog(
-        titleOptions.mode === "ai"
-            ? `제목 생성 시작: ${titleOptions.provider} / ${titleOptions.model} 모델을 사용합니다.`
-            : "제목 생성 시작: 템플릿 규칙 기반 제목을 생성합니다.",
-    );
-    clearStageAndDownstream("titled");
-    const result = await executeStage({
-        stageKey: "titled",
-        endpoint: "/generate-title",
-        inputData: {
-            selected_keywords: state.results.selected?.selected_keywords || [],
-            keyword_clusters: state.results.selected?.keyword_clusters || [],
-            longtail_suggestions: state.results.selected?.longtail_suggestions || [],
-            longtail_options: state.results.selected?.longtail_options || null,
-            analyzed_keywords: state.results.analyzed?.analyzed_keywords || [],
-            serp_competition_summary: state.results.selected?.serp_competition_summary || null,
-            title_options: titleOptions,
-        },
-    });
-
-    state.results.titled = result;
-    addLog(`제목 생성 완료: ${countItems(result.generated_titles)}세트`, "success");
-    renderAll();
-    return result;
-}
 
 async function executeStage({ stageKey, endpoint, inputData }) {
     const stage = getStage(stageKey);
@@ -757,96 +532,6 @@ async function executeStage({ stageKey, endpoint, inputData }) {
     }
 }
 
-async function executeExpandStageStream(inputData) {
-    const stageKey = "expanded";
-    const stage = getStage(stageKey);
-    const startedAt = Date.now();
-    const startedAtLabel = new Date(startedAt).toISOString();
-
-    state.stageStatus[stageKey] = {
-        state: "running",
-        message: `${stage.label} ?ㅽ뻾 以?`,
-        startedAt,
-        finishedAt: null,
-        durationMs: null,
-    };
-    state.results.expanded = {
-        expanded_keywords: [],
-        stream_meta: {
-            phase: "starting",
-            currentKeyword: "",
-            depth: 0,
-            totalResults: 0,
-            queueSize: 0,
-            totalOrigins: 0,
-            maxDepth: 0,
-        },
-    };
-    renderAll();
-
-    try {
-        const response = await postModuleStream("/expand/stream", inputData, (eventPayload) => {
-            applyExpandStreamEvent(eventPayload, startedAt);
-        });
-        const result = response.result || {};
-        result.expanded_keywords = mergeExpandedKeywords(
-            state.results.expanded?.expanded_keywords || [],
-            result.expanded_keywords || [],
-        );
-
-        const durationMs = Date.now() - startedAt;
-        state.stageStatus[stageKey] = {
-            state: "success",
-            message: `${result.expanded_keywords.length}嫄??꾨즺`,
-            startedAt,
-            finishedAt: Date.now(),
-            durationMs,
-        };
-        state.diagnostics[stageKey] = {
-            stageKey,
-            stageLabel: stage.label,
-            status: "success",
-            endpoint: "/expand/stream",
-            requestId: response.requestId,
-            startedAt: startedAtLabel,
-            durationMs,
-            request: sanitizeSensitiveData(inputData),
-            responseSummary: buildResponseSummary(stageKey, result),
-            backendDebug: result.debug || null,
-        };
-
-        return result;
-    } catch (error) {
-        const normalizedError = normalizeError(error, {
-            stageKey,
-            endpoint: "/expand/stream",
-            request: inputData,
-            startedAt: startedAtLabel,
-            durationMs: Date.now() - startedAt,
-        });
-
-        state.stageStatus[stageKey] = {
-            state: "error",
-            message: normalizedError.message,
-            startedAt,
-            finishedAt: Date.now(),
-            durationMs: normalizedError.durationMs,
-        };
-        state.diagnostics[stageKey] = {
-            stageKey,
-            stageLabel: stage.label,
-            status: "error",
-            endpoint: "/expand/stream",
-            requestId: normalizedError.requestId,
-            startedAt: startedAtLabel,
-            durationMs: normalizedError.durationMs,
-            request: sanitizeSensitiveData(inputData),
-            error: normalizedError,
-        };
-        renderAll();
-        throw normalizedError;
-    }
-}
 
 async function postModule(endpoint, inputData, options = {}) {
     const startedAt = Date.now();
@@ -890,175 +575,8 @@ async function postModule(endpoint, inputData, options = {}) {
     };
 }
 
-async function postModuleStream(endpoint, inputData, onEvent) {
-    const startedAt = Date.now();
-    let response;
 
-    try {
-        response = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ input_data: inputData }),
-            signal,
-        });
-    } catch (error) {
-        if (isAbortLikeError(error)) {
-            throw createRequestAbortError(endpoint, startedAt);
-        }
-        const networkError = new Error("?쒕쾭 ?붿껌???ㅽ뙣?덉뒿?덈떎. ?ㅽ듃?뚰겕 ?먮뒗 ?쒕쾭 ?곹깭瑜??뺤씤??二쇱꽭??");
-        networkError.code = "network_error";
-        networkError.endpoint = endpoint;
-        networkError.detail = error instanceof Error ? error.message : String(error);
-        networkError.durationMs = Date.now() - startedAt;
-        throw networkError;
-    }
 
-    const requestId = response.headers.get("X-Request-ID") || "";
-    if (!response.ok) {
-        const rawText = await response.text();
-        const payload = tryParseJson(rawText);
-        throw createApiError({
-            endpoint,
-            requestId,
-            statusCode: response.status,
-            payload,
-            rawText,
-            durationMs: Date.now() - startedAt,
-        });
-    }
-
-    if (!response.body) {
-        return {
-            requestId,
-            result: {},
-            durationMs: Date.now() - startedAt,
-        };
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let finalResult = {};
-
-    while (true) {
-        const { value, done } = await reader.read();
-        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-
-        let newlineIndex = buffer.indexOf("\n");
-        while (newlineIndex !== -1) {
-            const line = buffer.slice(0, newlineIndex).trim();
-            buffer = buffer.slice(newlineIndex + 1);
-
-            if (line) {
-                const payload = tryParseJson(line);
-                if (payload?.event === "error") {
-                    throw createApiError({
-                        endpoint,
-                        requestId,
-                        statusCode: 500,
-                        payload: { error: payload.error || {} },
-                        rawText: line,
-                        durationMs: Date.now() - startedAt,
-                    });
-                }
-                if (payload?.event === "completed") {
-                    finalResult = payload.result || {};
-                }
-                if (payload && typeof onEvent === "function") {
-                    onEvent(payload);
-                }
-            }
-
-            newlineIndex = buffer.indexOf("\n");
-        }
-
-        if (done) {
-            break;
-        }
-    }
-
-    const trailingLine = buffer.trim();
-    if (trailingLine) {
-        const payload = tryParseJson(trailingLine);
-        if (payload?.event === "error") {
-            throw createApiError({
-                endpoint,
-                requestId,
-                statusCode: 500,
-                payload: { error: payload.error || {} },
-                rawText: trailingLine,
-                durationMs: Date.now() - startedAt,
-            });
-        }
-        if (payload?.event === "completed") {
-            finalResult = payload.result || {};
-        }
-        if (payload && typeof onEvent === "function") {
-            onEvent(payload);
-        }
-    }
-
-    return {
-        requestId,
-        result: finalResult,
-        durationMs: Date.now() - startedAt,
-    };
-}
-
-function applyExpandStreamEvent(eventPayload, startedAt) {
-    if (!eventPayload || eventPayload.event !== "progress") {
-        return;
-    }
-
-    const progress = eventPayload.data || {};
-    const currentResult = state.results.expanded || { expanded_keywords: [] };
-    const currentItems = Array.isArray(currentResult.expanded_keywords) ? currentResult.expanded_keywords : [];
-    const currentMeta = currentResult.stream_meta || {};
-
-    if (progress.type === "keyword_results" || progress.type === "depth_completed") {
-        currentResult.expanded_keywords = mergeExpandedKeywords(currentItems, progress.items || []);
-    }
-
-    currentResult.stream_meta = {
-        ...currentMeta,
-        phase: progress.type || currentMeta.phase || "running",
-        currentKeyword: progress.keyword || currentMeta.currentKeyword || "",
-        depth: progress.depth || currentMeta.depth || 0,
-        totalResults: progress.total_results ?? currentResult.expanded_keywords.length,
-        queueSize: progress.queue_size ?? progress.next_queue_size ?? currentMeta.queueSize ?? 0,
-        totalOrigins: progress.total_origins ?? currentMeta.totalOrigins ?? 0,
-        maxDepth: progress.max_depth ?? currentMeta.maxDepth ?? 0,
-        keywordIndex: progress.index ?? currentMeta.keywordIndex ?? 0,
-        keywordTotal: progress.total ?? currentMeta.keywordTotal ?? 0,
-    };
-    state.results.expanded = currentResult;
-
-    if (progress.type === "depth_completed") {
-        addLog(`?뺤옣 ${progress.depth}??④퀎 ?꾨즺: ?꾩쟻 ${currentResult.expanded_keywords.length}嫄?`, "success");
-    }
-
-    state.stageStatus.expanded = {
-        state: "running",
-        message: buildExpandStreamStatusMessage(currentResult.stream_meta),
-        startedAt,
-        finishedAt: null,
-        durationMs: Date.now() - startedAt,
-    };
-    requestStreamRender({ force: progress.type === "depth_completed" });
-}
-
-function buildExpandStreamStatusMessage(streamMeta) {
-    if (!streamMeta) {
-        return "2?④퀎 ?뺤옣 ?ㅽ뻾 以?";
-    }
-    if (streamMeta.currentKeyword) {
-        return `${streamMeta.depth || "?"}??④퀎 쨌 ${streamMeta.currentKeyword} ?뺤옣 以?`;
-    }
-    if (streamMeta.depth) {
-        return `${streamMeta.depth}??④퀎 ?뺤옣 以?`;
-    }
-    return "2?④퀎 ?뺤옣 ?ㅽ뻾 以?";
-}
 
 function createApiError({ endpoint, requestId, statusCode, payload, rawText, durationMs }) {
     const apiError = payload?.error || {};
@@ -1106,12 +624,112 @@ function isUserNoticeError(error) {
     return Boolean(error?.userNotice || error?.code === "user_notice" || error?.code === "empty_selection_notice");
 }
 
+function ensureUserNoticeHost() {
+    let host = document.getElementById("userNoticeStack");
+    if (host) {
+        return host;
+    }
+    if (!document.body) {
+        return null;
+    }
+    host = document.createElement("div");
+    host.id = "userNoticeStack";
+    host.className = "user-notice-stack";
+    host.setAttribute("aria-live", "polite");
+    host.setAttribute("aria-atomic", "false");
+    document.body.appendChild(host);
+    return host;
+}
+
+function resolveUserNoticeTone(error) {
+    const explicitTone = String(error?.type || error?.tone || "").trim().toLowerCase();
+    if (["info", "success", "warning", "error"].includes(explicitTone)) {
+        return explicitTone;
+    }
+    if (Number(error?.statusCode || 0) >= 400) {
+        return "error";
+    }
+    if (error?.code && !["user_notice", "empty_selection_notice", "empty_title_notice"].includes(error.code)) {
+        return "error";
+    }
+    return "info";
+}
+
+function resolveUserNoticeLabel(tone) {
+    if (tone === "success") {
+        return "성공";
+    }
+    if (tone === "warning") {
+        return "주의";
+    }
+    if (tone === "error") {
+        return "오류";
+    }
+    return "안내";
+}
+
+function resolveUserNoticeDuration(error, tone) {
+    const customDuration = Number(error?.noticeDurationMs || 0);
+    if (Number.isFinite(customDuration) && customDuration > 0) {
+        return Math.max(1200, customDuration);
+    }
+    return tone === "error" ? USER_NOTICE_ERROR_DURATION_MS : USER_NOTICE_DEFAULT_DURATION_MS;
+}
+
 function showUserNotice(error) {
     const message = String(error?.message || "").trim();
     if (!message) {
         return;
     }
-    window.alert(message);
+    const host = ensureUserNoticeHost();
+    if (!host) {
+        window.alert(message);
+        return;
+    }
+
+    const tone = resolveUserNoticeTone(error);
+    const toast = document.createElement("div");
+    toast.className = `user-notice-toast is-${tone}`;
+    toast.setAttribute("role", tone === "error" ? "alert" : "status");
+    toast.innerHTML = `
+        <div class="user-notice-label">${escapeHtml(resolveUserNoticeLabel(tone))}</div>
+        <div class="user-notice-message">${escapeHtml(message)}</div>
+    `;
+    host.appendChild(toast);
+
+    while (host.childElementCount > 4) {
+        host.firstElementChild?.remove();
+    }
+
+    window.requestAnimationFrame(() => {
+        toast.classList.add("is-visible");
+    });
+
+    const durationMs = resolveUserNoticeDuration(error, tone);
+    window.setTimeout(() => {
+        toast.classList.remove("is-visible");
+        window.setTimeout(() => {
+            toast.remove();
+        }, USER_NOTICE_TRANSITION_MS);
+    }, durationMs);
+}
+
+function showBlockingResultPopup(message, options = {}) {
+    const normalizedMessage = String(message || "").trim();
+    if (!normalizedMessage || options?.silent) {
+        return;
+    }
+
+    const popupTitle = String(options?.title || "").trim();
+    const popupMessage = popupTitle
+        ? `${popupTitle}\n\n${normalizedMessage}`
+        : normalizedMessage;
+
+    window.setTimeout(() => {
+        if (typeof window !== "undefined" && typeof window.alert === "function") {
+            window.alert(popupMessage);
+        }
+    }, 40);
 }
 
 function buildResponseSummary(stageKey, result) {
@@ -1128,69 +746,6 @@ function buildResponseSummary(stageKey, result) {
     }
 
     return summary;
-}
-
-function buildCollectInput() {
-    const trendSettings = getTrendSettingsFormState();
-    const mode = getCollectorMode();
-
-    return {
-        mode,
-        category: mode === "category" ? elements.categoryInput.value.trim() : "",
-        category_source: elements.categorySourceInput.value.trim() || "naver_trend",
-        seed_input: elements.seedInput.value.trim(),
-        options: {
-            collect_related: elements.optionRelated.checked,
-            collect_autocomplete: elements.optionAutocomplete.checked,
-            collect_bulk: elements.optionBulk.checked,
-        },
-        trend_options: {
-            service: trendSettings.service,
-            content_type: "text",
-            date: trendSettings.date,
-            auth_cookie: trendSettings.auth_cookie,
-            fallback_to_preset_search: trendSettings.fallback_to_preset_search,
-        },
-        debug: elements.optionDebug.checked,
-    };
-}
-
-function buildExpandInput() {
-    const source = elements.expandInputSource.value;
-    const analysisPath = elements.expanderAnalysisPath.value.trim();
-    const category = elements.categoryInput.value.trim();
-
-    if (source === "manual_text") {
-        const keywordsText = elements.expandManualInput.value.trim();
-        const keywords = parseKeywordText(keywordsText);
-        if (keywords.length === 0) {
-            throw new Error("확장할 키워드를 직접 입력해 주세요.");
-        }
-
-        return {
-            keywords_text: keywordsText,
-            category,
-            source: "manual_input",
-            analysis_json_path: analysisPath,
-        };
-    }
-
-    const collectedKeywords = source === "collector_selected"
-        ? getSelectedCollectedItems()
-        : state.results.collected?.collected_keywords || [];
-
-    if (collectedKeywords.length === 0) {
-        throw new Error(
-            source === "collector_selected"
-                ? "확장할 수집 키워드를 최소 1개 선택해 주세요."
-                : "수집 결과가 없습니다. 먼저 수집을 실행해 주세요.",
-        );
-    }
-
-    return {
-        collected_keywords: collectedKeywords,
-        analysis_json_path: analysisPath,
-    };
 }
 
 function buildAnalyzeInput() {
@@ -1383,14 +938,14 @@ function updateTrendBrowserUiCopy() {
         return;
     }
     if (requested === "auto") {
-        elements.loadLocalCookieButton.textContent = "현재 브라우저에서 가져오기";
+        elements.loadLocalCookieButton.textContent = "현재 브라우저 쿠키 읽기";
         return;
     }
     if (selected === "auto" || requested === detected) {
-        elements.loadLocalCookieButton.textContent = `현재 브라우저(${formatTrendBrowserLabel(requested)})에서 가져오기`;
+        elements.loadLocalCookieButton.textContent = `현재 브라우저(${formatTrendBrowserLabel(requested)}) 쿠키 읽기`;
         return;
     }
-    elements.loadLocalCookieButton.textContent = `선택한 브라우저(${formatTrendBrowserLabel(requested)})에서 가져오기`;
+    elements.loadLocalCookieButton.textContent = `선택한 브라우저(${formatTrendBrowserLabel(requested)}) 쿠키 읽기`;
 }
 
 function loadTrendSettings() {
@@ -1537,49 +1092,6 @@ async function restoreCachedDedicatedTrendSession(options = {}) {
     return result;
 }
 
-function renderTrendSettingsState() {
-    const categoryMode = getCollectorMode() === "category";
-    const usesTrendSource = categoryMode && elements.categorySourceInput.value === "naver_trend";
-    const hasInlineCookie = Boolean(elements.trendCookieInput.value.trim());
-    const trendSessionCache = state.trendSessionCache?.available ? state.trendSessionCache : null;
-    const hasCachedSession = Boolean(trendSessionCache);
-    const browserLabel = describeTrendBrowserSelection();
-    const cachedBrowserLabel = formatTrendBrowserLabel(trendSessionCache?.browser || "");
-    const fallbackLabel = elements.trendFallbackInput.checked ? "켜짐" : "꺼짐";
-
-    updateTrendBrowserUiCopy();
-
-    elements.trendServiceInput.disabled = !usesTrendSource;
-    elements.trendDateInput.disabled = !usesTrendSource;
-    elements.trendBrowserInput.disabled = !usesTrendSource;
-    elements.trendCookieInput.disabled = !usesTrendSource;
-    elements.trendFallbackInput.disabled = !categoryMode;
-    elements.launchLoginBrowserButton.disabled = !usesTrendSource;
-    elements.loadLocalCookieButton.disabled = !usesTrendSource;
-
-    if (elements.trendSourceHelp) {
-        if (usesTrendSource) {
-            const service = elements.trendServiceInput.value || "naver_blog";
-            const browser = elements.trendBrowserInput.value || "auto";
-            const fallbackLabel = elements.trendFallbackInput.checked ? "켜짐" : "꺼짐";
-            elements.trendSourceHelp.textContent = hasInlineCookie
-                ? `현재 Creator Advisor ${service} 트렌드를 직접 조회합니다. /naver_blog/... 페이지를 기준으로 볼 때는 service를 naver_blog로 맞춰야 하며, 로컬 브라우저는 ${browser}, fallback은 ${fallbackLabel} 상태입니다.`
-                : hasCachedSession
-                    ? `입력 칸은 비어 있지만 저장된 ${trendSessionCache?.browser || "local"} 전용 로그인 세션을 자동으로 사용합니다. 로컬 브라우저는 ${browser}, fallback은 ${fallbackLabel} 상태입니다.`
-                    : `현재 Creator Advisor ${service} 세션이 비어 있습니다. '전용 로그인 브라우저 열기'로 로컬 세션을 준비해 주세요. 저장된 전용 세션이 없고 fallback이 꺼져 있으면 트렌드 수집은 멈춥니다.`;
-        } else {
-            elements.trendSourceHelp.textContent = "seed 모드이거나 preset_search를 고른 경우에는 기존 공개 검색 수집 경로를 사용합니다.";
-        }
-    }
-
-    if (elements.localCookieStatus && !elements.localCookieStatus.dataset.locked) {
-        elements.localCookieStatus.textContent = hasInlineCookie
-            ? "브라우저에서 불러오거나 직접 붙여넣은 로컬 세션이 준비되어 있습니다."
-            : hasCachedSession
-                ? `저장된 ${trendSessionCache?.browser || "local"} 전용 로그인 세션이 있어 입력 칸이 비어도 수집 시 자동으로 사용합니다.`
-                : "아직 저장된 전용 로그인 세션이 없습니다.";
-    }
-}
 
 function getTrendSettingsFormState() {
     return {
@@ -1643,6 +1155,11 @@ async function importLocalNaverCookie() {
                     addLog(normalizeError(cacheError).message, "error");
                 }
             }
+            showUserNotice({
+                message: buildDirectCookieAccessBlockedMessage(browser, attempts, hint),
+                type: "warning",
+                noticeDurationMs: 5200,
+            });
         }
         if (elements.localCookieStatus) {
             elements.localCookieStatus.dataset.locked = "true";
@@ -1660,6 +1177,18 @@ async function importLocalNaverCookie() {
     }
 }
 
+function buildDirectCookieAccessBlockedMessage(browser, attempts = [], hint = "") {
+    const targetBrowser = formatTrendBrowserLabel(attempts[0]?.browser || browser);
+    const detail = String(attempts[0]?.detail || "").trim();
+    const normalized = `${detail} ${hint}`.toLowerCase();
+    const blockedReason = normalized.includes("requires admin")
+        ? `${targetBrowser} 쿠키 DB 접근이 관리자 권한 문제로 막혔습니다.`
+        : normalized.includes("database is locked") || normalized.includes("unable to read database file")
+            ? `${targetBrowser} 쿠키 DB가 잠겨 있어 직접 읽지 못했습니다.`
+            : `${targetBrowser} 브라우저 쿠키 직접 읽기가 막혔습니다.`;
+    return `${blockedReason} 현재 로그인 탭이 열려 있어도 이 기능은 실행 중 탭이 아니라 로컬 쿠키 DB를 읽습니다. ${targetBrowser} 창을 완전히 종료한 뒤 다시 시도하거나, 더 안정적인 '전용 로그인 브라우저 열기'를 사용해 주세요.`;
+}
+
 function buildLocalCookieFailureMessage(browser, attempts, hint, fallbackMessage, options = {}) {
     const recommendDedicatedLogin = Boolean(options?.recommendDedicatedLogin);
     if (attempts.length > 0) {
@@ -1667,23 +1196,137 @@ function buildLocalCookieFailureMessage(browser, attempts, hint, fallbackMessage
         const base = `${formatTrendBrowserLabel(first.browser || browser)} 브라우저 쿠키를 읽지 못했습니다: ${first.detail || fallbackMessage}`;
         if (first.hint) {
             return recommendDedicatedLogin
-                ? `${base} / ${first.hint} / 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
+                ? `${base} / ${first.hint} / 현재 로그인 탭이 열려 있어도 이 기능은 로컬 쿠키 DB를 읽습니다. 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
                 : `${base} / ${first.hint}`;
         }
         return recommendDedicatedLogin
-            ? `${base} / 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
+            ? `${base} / 현재 로그인 탭이 열려 있어도 이 기능은 로컬 쿠키 DB를 읽습니다. 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
             : base;
     }
 
     if (hint) {
         return recommendDedicatedLogin
-            ? `${fallbackMessage} / ${hint} / 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
+            ? `${fallbackMessage} / ${hint} / 현재 로그인 탭이 열려 있어도 이 기능은 로컬 쿠키 DB를 읽습니다. 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
             : `${fallbackMessage} / ${hint}`;
     }
 
     return recommendDedicatedLogin
-        ? `${fallbackMessage} / 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
+        ? `${fallbackMessage} / 현재 로그인 탭이 열려 있어도 이 기능은 로컬 쿠키 DB를 읽습니다. 현재 브라우저 직접 읽기보다 전용 로그인 브라우저 사용을 권장합니다.`
         : fallbackMessage;
+}
+
+function describeTrendSessionCheckSource(source) {
+    const normalized = String(source || "").trim().toLowerCase();
+    if (normalized === "inline") {
+        return "입력 세션";
+    }
+    if (normalized === "cached") {
+        return "저장된 전용 세션";
+    }
+    if (normalized === "cached_fallback") {
+        return "저장된 전용 세션 fallback";
+    }
+    return "세션";
+}
+
+function buildTrendSessionValidationStatusMessage(result) {
+    const message = String(result?.message || "").trim() || "Creator Advisor 로그인 상태를 확인하지 못했습니다.";
+    const authSourceLabel = describeTrendSessionCheckSource(result?.auth_source);
+    const checkedSources = Array.isArray(result?.checked_sources)
+        ? result.checked_sources.map((source) => describeTrendSessionCheckSource(source))
+        : [];
+    const groupCount = Number.parseInt(String(result?.topic_group_count ?? 0), 10) || 0;
+    const topicCount = Number.parseInt(String(result?.topic_count ?? 0), 10) || 0;
+
+    if (result?.valid) {
+        return `${message} ${authSourceLabel} 기준으로 카테고리 그룹 ${groupCount}개, 주제 ${topicCount}개를 확인했습니다.`;
+    }
+
+    if (checkedSources.length > 0) {
+        return `${message} 확인 소스: ${checkedSources.join(" -> ")}.`;
+    }
+    return message;
+}
+
+async function validateTrendSession() {
+    const trendSettings = getTrendSettingsFormState();
+    const hadAuthLock = Boolean(state.operationSettingsSnapshot?.state?.auth_lock_active);
+    const request = {
+        service: trendSettings.service,
+        content_type: "text",
+        auth_cookie: trendSettings.auth_cookie,
+    };
+
+    state.trendSessionValidationPending = true;
+    if (elements.localCookieStatus) {
+        elements.localCookieStatus.dataset.locked = "true";
+        elements.localCookieStatus.textContent = "Creator Advisor 로그인 상태를 확인하는 중입니다...";
+    }
+    renderTrendSettingsState();
+    showUserNotice({
+        message: "Creator Advisor 로그인 상태를 확인하는 중입니다.",
+        type: "info",
+        noticeDurationMs: 1800,
+    });
+
+    try {
+        const response = await postModule("/local/naver-session/validate", request);
+        const result = response.result || {};
+        const statusMessage = buildTrendSessionValidationStatusMessage(result);
+
+        state.trendSessionValidationPending = false;
+        if (elements.localCookieStatus) {
+            elements.localCookieStatus.dataset.locked = "true";
+            elements.localCookieStatus.textContent = statusMessage;
+        }
+        renderTrendSettingsState();
+
+        if (result.valid) {
+            await resetOperationGuards({
+                silent: true,
+                successMessage: "유효한 Creator Advisor 세션을 확인해 인증 잠금을 해제했습니다.",
+            });
+            const successMessage = hadAuthLock
+                ? `${statusMessage} ?몄쬆 ?좉툑???댁젣?덉뒿?덈떎.`
+                : statusMessage;
+            if (elements.localCookieStatus) {
+                elements.localCookieStatus.dataset.locked = "true";
+                elements.localCookieStatus.textContent = successMessage;
+            }
+            addLog(successMessage, "success");
+            showUserNotice({
+                message: successMessage,
+                type: "success",
+                noticeDurationMs: 4200,
+            });
+        } else {
+            const warningMessage = `${statusMessage} ?대떦 ?뺤씤 ?붿껌???몄쬆 ?좉툑???붾줈 嫄곌? ?딆뒿?덈떎.`;
+            if (elements.localCookieStatus) {
+                elements.localCookieStatus.dataset.locked = "true";
+                elements.localCookieStatus.textContent = warningMessage;
+            }
+            addLog(warningMessage, "error");
+            showUserNotice({
+                message: warningMessage,
+                type: "warning",
+                noticeDurationMs: 5200,
+            });
+        }
+
+        return result;
+    } catch (error) {
+        const normalized = normalizeError(error, {
+            endpoint: "/local/naver-session/validate",
+            request,
+        });
+        state.trendSessionValidationPending = false;
+        if (elements.localCookieStatus) {
+            elements.localCookieStatus.dataset.locked = "true";
+            elements.localCookieStatus.textContent = normalized.message;
+        }
+        renderTrendSettingsState();
+        throw normalized;
+    }
 }
 
 async function openDedicatedLoginBrowser() {
@@ -1760,46 +1403,7 @@ function resolvePreferredTitlePresetKey(storedSettings, resolvedPresetKey) {
     return normalizedResolvedKey || DEFAULT_TITLE_PRESET_KEY;
 }
 
-function loadTitleSettings() {
-    const defaults = {
-        mode: "template",
-        provider: "openai",
-        model: TITLE_PROVIDER_DEFAULT_MODELS.openai,
-        api_key: "",
-        temperature: "0.7",
-        fallback_to_template: true,
-    };
 
-    const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY);
-    const settings = { ...defaults, ...(storedSettings || {}) };
-
-    elements.titleMode.value = settings.mode;
-    elements.titleProvider.value = settings.provider;
-    elements.titleModel.value = settings.model;
-    elements.titleApiKey.value = settings.api_key;
-    elements.titleTemperature.value = String(settings.temperature || "0.7");
-    elements.titleFallback.checked = Boolean(settings.fallback_to_template);
-
-    renderTitleSettingsState();
-}
-
-function handleTitleSettingsChange(event) {
-    if (event?.target === elements.titleProvider && !elements.titleModel.value.trim()) {
-        elements.titleModel.value = TITLE_PROVIDER_DEFAULT_MODELS[elements.titleProvider.value] || "gpt-4o-mini";
-    }
-
-    if (event?.target === elements.titleProvider) {
-        const providerModel = TITLE_PROVIDER_DEFAULT_MODELS[elements.titleProvider.value] || "gpt-4o-mini";
-        const currentModel = elements.titleModel.value.trim();
-        const knownModels = Object.values(TITLE_PROVIDER_DEFAULT_MODELS);
-        if (!currentModel || knownModels.includes(currentModel)) {
-            elements.titleModel.value = providerModel;
-        }
-    }
-
-    persistTitleSettings();
-    renderTitleSettingsState();
-}
 
 function persistTitleSettings() {
     try {
@@ -1857,28 +1461,7 @@ function persistTitleSettings() {
     }
 }
 
-function renderTitleSettingsState() {
-    const isAiMode = elements.titleMode.value === "ai";
 
-    elements.titleProvider.disabled = !isAiMode;
-    elements.titleModel.disabled = !isAiMode;
-    elements.titleApiKey.disabled = !isAiMode;
-    elements.titleTemperature.disabled = !isAiMode;
-    elements.titleFallback.disabled = !isAiMode;
-    elements.titleModeBadge.textContent = isAiMode ? `AI:${elements.titleProvider.value}` : "템플릿";
-}
-
-function getTitleSettingsFormState() {
-    const provider = elements.titleProvider.value;
-    return {
-        mode: elements.titleMode.value,
-        provider,
-        model: elements.titleModel.value.trim() || TITLE_PROVIDER_DEFAULT_MODELS[provider] || "gpt-4o-mini",
-        api_key: elements.titleApiKey.value.trim(),
-        temperature: elements.titleTemperature.value.trim() || "0.7",
-        fallback_to_template: elements.titleFallback.checked,
-    };
-}
 
 function getDefaultTrendDate() {
     return formatDateInputValue(new Date());
@@ -1989,26 +1572,6 @@ function clearPipelineResults(options = {}) {
     }
 }
 
-function resetAll() {
-    clearPipelineResults({
-        preserveGlobalStatus: false,
-        preserveSelectionFilters: false,
-        announce: true,
-        message: "결과와 디버그 정보를 초기화했습니다.",
-    });
-    return;
-    state.results = createEmptyResults();
-    state.stageStatus = createInitialStageStatus();
-    state.diagnostics = createEmptyDiagnostics();
-    state.selectedCollectedKeys = [];
-    state.selectGradeFilters = [...GRADE_ORDER];
-    state.gradeSelectionTouched = false;
-    state.lastError = null;
-    setGlobalStatus("대기 중", "idle");
-    renderAll();
-    addLog("결과와 디버그 정보를 초기화했습니다.");
-}
-
 function clearDiagnostics() {
     state.diagnostics = createEmptyDiagnostics();
     state.lastError = null;
@@ -2026,7 +1589,8 @@ function clearStageAndDownstream(stageKey) {
     }
 
     if (stageKey === "collected" || stageKey === "expanded" || stageKey === "analyzed") {
-        state.selectGradeFilters = [...GRADE_ORDER];
+        state.selectGradeFilters = [...PROFITABILITY_ORDER];
+        state.selectAttackabilityFilters = [...ATTACKABILITY_ORDER];
         state.gradeSelectionTouched = false;
         state.analyzedFilters = createDefaultAnalyzedFilters();
     }
@@ -2036,6 +1600,32 @@ function clearStageAndDownstream(stageKey) {
         state.stageStatus[nextStageKey] = createPendingStatus();
         state.diagnostics[nextStageKey] = null;
     });
+}
+
+function captureSelectionFilterState() {
+    return {
+        selectGradeFilters: Array.isArray(state.selectGradeFilters)
+            ? [...state.selectGradeFilters]
+            : [...PROFITABILITY_ORDER],
+        selectAttackabilityFilters: Array.isArray(state.selectAttackabilityFilters)
+            ? [...state.selectAttackabilityFilters]
+            : [...ATTACKABILITY_ORDER],
+        gradeSelectionTouched: Boolean(state.gradeSelectionTouched),
+    };
+}
+
+function restoreSelectionFilterState(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") {
+        return;
+    }
+
+    state.selectGradeFilters = Array.isArray(snapshot.selectGradeFilters)
+        ? [...snapshot.selectGradeFilters]
+        : [...PROFITABILITY_ORDER];
+    state.selectAttackabilityFilters = Array.isArray(snapshot.selectAttackabilityFilters)
+        ? [...snapshot.selectAttackabilityFilters]
+        : [...ATTACKABILITY_ORDER];
+    state.gradeSelectionTouched = Boolean(snapshot.gradeSelectionTouched);
 }
 
 function createEmptySelectedResult() {
@@ -2058,6 +1648,117 @@ function createEmptySelectedResult() {
             error_count: 0,
         },
         content_map_summary: {},
+    };
+}
+
+function coerceSelectionFilterValues(values) {
+    const uniqueValues = new Set(
+        (Array.isArray(values) ? values : [])
+            .map((value) => String(value || "").trim())
+            .filter(Boolean),
+    );
+    return [...uniqueValues];
+}
+
+function buildAutoSelectionOptions() {
+    const gradeSelectionTouched = Boolean(state.gradeSelectionTouched);
+    const allowedProfitabilityGrades = gradeSelectionTouched
+        ? coerceSelectionFilterValues(state.selectGradeFilters)
+        : [];
+    const allowedAttackabilityGrades = gradeSelectionTouched
+        ? coerceSelectionFilterValues(state.selectAttackabilityFilters)
+        : [];
+    let allowedGrades = [];
+
+    try {
+        if (typeof window.getForwardSelectOptions === "function") {
+            const forwardSelectOptions = window.getForwardSelectOptions() || {};
+            allowedGrades = coerceSelectionFilterValues(forwardSelectOptions.allowedGrades);
+        }
+    } catch (error) {
+        allowedGrades = [];
+    }
+
+    const selectOptions = {};
+
+    if (allowedProfitabilityGrades.length && allowedAttackabilityGrades.length) {
+        selectOptions.mode = "combo_filter";
+        selectOptions.allowed_profitability_grades = allowedProfitabilityGrades;
+        selectOptions.allowed_attackability_grades = allowedAttackabilityGrades;
+    } else if (allowedGrades.length) {
+        selectOptions.mode = "grade_filter";
+        selectOptions.allowed_grades = allowedGrades;
+    }
+
+    try {
+        const buildLongtailOptions = typeof window.buildLongtailOptionsPayload === "function"
+            ? window.buildLongtailOptionsPayload
+            : typeof buildLongtailOptionsPayload === "function"
+                ? buildLongtailOptionsPayload
+                : null;
+        const longtailOptions = typeof buildLongtailOptions === "function"
+            ? buildLongtailOptions(state.results.selected || {})
+            : null;
+        if (longtailOptions && typeof longtailOptions === "object" && Object.keys(longtailOptions).length) {
+            selectOptions.longtail_options = longtailOptions;
+        }
+    } catch (error) {
+        // Keep streaming selection usable even if optional longtail helpers are unavailable.
+    }
+
+    return selectOptions;
+}
+
+function buildSelectionProfileForResult(selectedResult, analyzedCount) {
+    const selectOptions = buildAutoSelectionOptions();
+    const selectedKeywords = Array.isArray(selectedResult?.selected_keywords) ? selectedResult.selected_keywords : [];
+    const profile = {
+        mode: String(selectOptions.mode || "default").trim() || "default",
+        candidate_count: Math.max(0, Number(analyzedCount || 0)),
+    };
+
+    if (Array.isArray(selectOptions.allowed_profitability_grades)) {
+        profile.allowed_profitability_grades = [...selectOptions.allowed_profitability_grades];
+    }
+    if (Array.isArray(selectOptions.allowed_attackability_grades)) {
+        profile.allowed_attackability_grades = [...selectOptions.allowed_attackability_grades];
+    }
+    if (Array.isArray(selectOptions.allowed_grades)) {
+        profile.allowed_grades = [...selectOptions.allowed_grades];
+    }
+
+    if (profile.mode === "combo_filter") {
+        try {
+            if (typeof window.resolveSelectionPresetKey === "function") {
+                profile.preset_key = window.resolveSelectionPresetKey(
+                    profile.allowed_profitability_grades || [],
+                    profile.allowed_attackability_grades || [],
+                );
+            }
+            if (typeof window.resolveSelectionPresetLabel === "function") {
+                profile.preset_label = window.resolveSelectionPresetLabel(profile.preset_key || "");
+            }
+        } catch (error) {
+            // Preset labels are optional UI sugar for live selection snapshots.
+        }
+    }
+
+    try {
+        if (typeof window.hasEditorialSupportSelection === "function") {
+            profile.has_editorial_support = window.hasEditorialSupportSelection(selectedKeywords);
+        }
+    } catch (error) {
+        profile.has_editorial_support = false;
+    }
+
+    return profile;
+}
+
+function decorateSelectedResult(selectedResult, analyzedCount) {
+    return {
+        ...createEmptySelectedResult(),
+        ...(selectedResult && typeof selectedResult === "object" ? selectedResult : {}),
+        selection_profile: buildSelectionProfileForResult(selectedResult, analyzedCount),
     };
 }
 
@@ -2410,47 +2111,6 @@ function renderQuickStartState() {
     }
 }
 
-function renderInputState() {
-    const selectedCount = getSelectedCollectedItems().length;
-    const expandCount = parseKeywordText(elements.expandManualInput?.value || "").length;
-    const analyzeCount = parseKeywordText(elements.analyzeManualInput?.value || "").length;
-    const expandUsesManual = elements.expandInputSource?.value === "manual_text";
-    const analyzeUsesManual = elements.analyzeInputSource?.value === "manual_text";
-    const categoryMode = getCollectorMode() === "category";
-    const usesTrendSource = categoryMode && elements.categorySourceInput?.value === "naver_trend";
-
-    if (elements.selectedCollectedCount) {
-        elements.selectedCollectedCount.textContent = expandUsesManual
-            ? `직접 입력 ${expandCount}건`
-            : `선택 ${selectedCount}건`;
-    }
-    if (elements.manualAnalyzeCount) {
-        elements.manualAnalyzeCount.textContent = `직접 입력 ${analyzeCount}건`;
-    }
-    if (elements.expandManualInput) {
-        elements.expandManualInput.disabled = !expandUsesManual;
-    }
-    if (elements.analyzeManualInput) {
-        elements.analyzeManualInput.disabled = !analyzeUsesManual;
-    }
-    if (elements.categoryInput) {
-        elements.categoryInput.disabled = !categoryMode;
-        elements.categoryInput.title = categoryMode ? "" : "seed 모드에서는 카테고리를 사용하지 않습니다.";
-    }
-    if (elements.categorySourceInput) {
-        elements.categorySourceInput.disabled = !categoryMode;
-    }
-    if (elements.optionRelated) {
-        elements.optionRelated.title = usesTrendSource ? "트렌드 실패 후 preset fallback에서만 적용됩니다." : "";
-    }
-    if (elements.optionAutocomplete) {
-        elements.optionAutocomplete.title = usesTrendSource ? "트렌드 실패 후 preset fallback에서만 적용됩니다." : "";
-    }
-    if (elements.optionBulk) {
-        elements.optionBulk.title = usesTrendSource ? "트렌드 실패 후 preset fallback에서만 적용됩니다." : "";
-    }
-    renderTrendSettingsState();
-}
 
 function renderCounts() {
     document.getElementById("countCollected").textContent = countItems(state.results.collected?.collected_keywords);
@@ -2460,74 +2120,8 @@ function renderCounts() {
     document.getElementById("countTitled").textContent = countItems(state.results.titled?.generated_titles);
 }
 
-function renderProgress() {
-    const completedCount = STAGES.filter((stage) => state.stageStatus[stage.key].state === "success").length;
-    const runningStage = STAGES.find((stage) => state.stageStatus[stage.key].state === "running");
-    const progressUnits = completedCount + (runningStage ? 0.45 : 0);
-    const progressPercent = Math.min(100, Math.round((progressUnits / STAGES.length) * 100));
 
-    elements.progressBar.style.width = `${progressPercent}%`;
-    elements.progressText.textContent = `${completedCount} / ${STAGES.length} 단계 완료`;
-    elements.progressDetail.textContent = runningStage
-        ? `${runningStage.label} 진행 중 · ${formatElapsed(state.stageStatus[runningStage.key])}`
-        : completedCount === 0
-            ? "아직 실행되지 않았습니다."
-            : `${completedCount}개 단계가 완료되었습니다.`;
-}
 
-function renderStageList() {
-    elements.statusList.innerHTML = STAGES.map((stage) => {
-        const status = state.stageStatus[stage.key];
-        const badgeLabel = formatStageBadge(status);
-        const detailLabel = buildStageDetail(status);
-
-        return `
-            <div class="status-item ${status.state}">
-                <div>
-                    <strong>${escapeHtml(stage.label)}</strong>
-                    <span>${escapeHtml(stage.description)}</span>
-                    <small class="status-meta">${escapeHtml(detailLabel)}</small>
-                </div>
-                <div class="stage-chip ${status.state}">${escapeHtml(badgeLabel)}</div>
-            </div>
-        `;
-    }).join("");
-}
-
-function renderResults() {
-    const cards = [];
-
-    if (state.results.collected?.collected_keywords) {
-        cards.push(resultCard("수집 키워드", state.results.collected.collected_keywords, renderCollectedList));
-    }
-    if (state.results.expanded?.expanded_keywords) {
-        cards.push(
-            resultCard("확장 키워드", state.results.expanded.expanded_keywords, renderExpandedList, {
-                limit: "all",
-                subtitle: "기본 12건만 먼저 보여주고, 필요하면 전체를 펼쳐서 볼 수 있습니다.",
-                className: "expanded-result-card",
-            }),
-        );
-    }
-    if (state.results.analyzed?.analyzed_keywords) {
-        cards.push(resultCard("분석 결과", state.results.analyzed.analyzed_keywords, renderAnalyzedList));
-    }
-    if (state.results.selected?.selected_keywords) {
-        cards.push(resultCard("골든 키워드", state.results.selected.selected_keywords, renderSelectedList));
-    }
-    if (state.results.titled?.generated_titles) {
-        cards.push(resultCard("생성된 제목", state.results.titled.generated_titles, renderTitleList));
-    }
-
-    elements.resultsGrid.innerHTML = cards.length > 0
-        ? cards.join("")
-        : `
-            <div class="placeholder">
-                실행 버튼을 누르면 단계별 결과와 디버그 정보가 이 영역에 표시됩니다.<br />
-                수집은 공개 소스 기반으로 동작하므로, collector 진단 로그에서 어떤 쿼리가 성공/실패했는지 같이 확인할 수 있습니다.
-            </div>
-        `;
-}
 
 function renderDiagnostics() {
     renderErrorConsole();
@@ -2577,145 +2171,9 @@ function renderDebugPanels() {
     elements.debugPanels.innerHTML = diagnostics.map((diagnostic) => renderDiagnosticCard(diagnostic)).join("");
 }
 
-function renderDiagnosticCard(diagnostic) {
-    const summary = diagnostic.responseSummary || diagnostic.error || {};
-    const statusLabel = diagnostic.status === "success" ? "정상" : "오류";
-    const requestIdLabel = diagnostic.requestId || "없음";
-    const backendDebugSummary = diagnostic.backendDebug?.summary || null;
-    const openByDefault = diagnostic.status === "error" || diagnostic.stageKey === "collected";
 
-    return `
-        <details class="debug-card" ${openByDefault ? "open" : ""}>
-            <summary>
-                <div>
-                    <strong>${escapeHtml(diagnostic.stageLabel)}</strong>
-                    <span>${escapeHtml(`${statusLabel} · ${formatDuration(diagnostic.durationMs)}`)}</span>
-                </div>
-                <span class="stage-chip ${diagnostic.status}">${escapeHtml(statusLabel)}</span>
-            </summary>
-            <div class="debug-card-body">
-                <div class="debug-meta">
-                    <span class="badge">request_id ${escapeHtml(requestIdLabel)}</span>
-                    <span class="badge">${escapeHtml(diagnostic.endpoint || "-")}</span>
-                    <span class="badge">${escapeHtml(diagnostic.startedAt || "-")}</span>
-                    ${backendDebugSummary ? `<span class="badge">warning ${escapeHtml(String(backendDebugSummary.warning_count || 0))}</span>` : ""}
-                </div>
-                <div class="debug-columns">
-                    <div class="debug-section">
-                        <h4>요청</h4>
-                        <pre>${escapeHtml(formatDebugValue(diagnostic.request))}</pre>
-                    </div>
-                    <div class="debug-section">
-                        <h4>${diagnostic.status === "success" ? "응답 요약" : "오류 상세"}</h4>
-                        <pre>${escapeHtml(formatDebugValue(summary))}</pre>
-                    </div>
-                </div>
-                ${diagnostic.backendDebug ? `
-                    <div class="debug-section debug-section-full">
-                        <h4>Collector Debug</h4>
-                        <pre>${escapeHtml(formatDebugValue(diagnostic.backendDebug))}</pre>
-                    </div>
-                ` : ""}
-            </div>
-        </details>
-    `;
-}
 
-function resultCard(title, items, renderer) {
-    return `
-        <article class="result-card">
-            <div class="result-head">
-                <h3>${escapeHtml(title)}</h3>
-                <span class="result-count">총 ${countItems(items)}건</span>
-            </div>
-            ${renderer(items.slice(0, 8))}
-        </article>
-    `;
-}
 
-function renderCollectedList(items) {
-    return `<div class="keyword-list">${items.map((item) => `
-        <div class="keyword-item">
-            <div class="keyword-main">
-                <strong>${escapeHtml(item.keyword || "-")}</strong>
-                <span class="score-line">${escapeHtml(item.source || "출처 없음")}</span>
-            </div>
-            <div class="keyword-meta">
-                <span class="badge">카테고리 ${escapeHtml(item.category || "미분류")}</span>
-                <span class="badge">원문 ${escapeHtml(item.raw || "-")}</span>
-            </div>
-            <label class="keyword-select">
-                <input
-                    type="checkbox"
-                    data-collected-key="${escapeHtml(createCollectedIdentity(item))}"
-                    ${state.selectedCollectedKeys.includes(createCollectedIdentity(item)) ? "checked" : ""}
-                />
-                <span>확장 입력에 사용</span>
-            </label>
-        </div>
-    `).join("")}</div>`;
-}
-
-function renderExpandedList(items) {
-    const entries = sortExpandedItems(items);
-    const previewItems = entries.slice(0, 12);
-    const typeSummary = summarizeExpandedTypes(entries);
-    const originCount = new Set(entries.map((item) => String(item.origin || "").trim()).filter(Boolean)).size;
-
-    return `
-        <div class="expanded-board">
-            <div class="expanded-stat-strip">
-                <div class="collector-stat-card">
-                    <span>키워드</span>
-                    <strong>${escapeHtml(String(entries.length))}</strong>
-                </div>
-                <div class="collector-stat-card">
-                    <span>원본 수</span>
-                    <strong>${escapeHtml(String(originCount))}</strong>
-                </div>
-                ${typeSummary.map((item) => `
-                    <div class="collector-stat-card">
-                        <span>${escapeHtml(formatExpandedType(item.type))}</span>
-                        <strong>${escapeHtml(String(item.count))}</strong>
-                    </div>
-                `).join("")}
-            </div>
-            <div class="expanded-table-wrap">
-                <table class="expanded-table compact">
-                    <thead>
-                        <tr>
-                            <th>키워드</th>
-                            <th>원본</th>
-                            <th>유형</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${renderExpandedRows(previewItems)}
-                    </tbody>
-                </table>
-            </div>
-            ${entries.length > previewItems.length ? `
-                <details class="expanded-more">
-                    <summary>전체 ${escapeHtml(String(entries.length))}건 펼쳐보기</summary>
-                    <div class="expanded-table-wrap full">
-                        <table class="expanded-table">
-                            <thead>
-                                <tr>
-                                    <th>키워드</th>
-                                    <th>원본</th>
-                                    <th>유형</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${renderExpandedRows(entries)}
-                            </tbody>
-                        </table>
-                    </div>
-                </details>
-            ` : ""}
-        </div>
-    `;
-}
 
 function renderExpandedRows(items) {
     return items.map((item) => `
@@ -2788,87 +2246,9 @@ function formatExpandedType(type) {
     return labelMap[String(type || "unknown")] || String(type || "기타");
 }
 
-function renderAnalyzedList(items) {
-    return `<div class="metric-list">${items.map((item) => `
-        <div class="metric-item">
-            <div class="keyword-main">
-                <strong>${escapeHtml(item.keyword || "-")}</strong>
-                <span class="badge priority-${escapeHtml(item.priority || "low")}">${escapeHtml(formatPriority(item.priority))}</span>
-            </div>
-            <div class="metric-meta">
-                <span class="badge">점수 ${formatNumber(item.score)}</span>
-                <span class="badge">CPC ${formatNumber(item.metrics?.cpc)}</span>
-                <span class="badge">bid ${formatNumber(item.metrics?.bid)}</span>
-                <span class="badge">경쟁 ${formatNumber(item.metrics?.competition)}</span>
-                <span class="badge">기회 ${formatNumber(item.metrics?.opportunity)}</span>
-            </div>
-        </div>
-    `).join("")}</div>`;
-}
 
-function renderSelectedList(items) {
-    return `<div class="keyword-list">${items.map((item) => `
-        <div class="keyword-item">
-            <div class="keyword-main">
-                <strong>${escapeHtml(item.keyword || "-")}</strong>
-                <span class="score-line">수익 점수 ${formatNumber(item.score)}</span>
-            </div>
-            <div class="keyword-meta">
-                <span class="badge">CPC ${formatNumber(item.metrics?.cpc)}</span>
-                <span class="badge">bid ${formatNumber(item.metrics?.bid)}</span>
-                <span class="badge">조회 ${formatNumber(item.metrics?.volume)}</span>
-                <span class="badge">경쟁 ${formatNumber(item.metrics?.competition)}</span>
-            </div>
-        </div>
-    `).join("")}</div>`;
-}
 
-function renderTitleList(items) {
-    return `<div class="title-list">${items.map((item) => `
-        <div class="title-item">
-            <div class="title-keyword">
-                <strong>${escapeHtml(item.keyword || "-")}</strong>
-                <span class="badge">제목 4개 세트</span>
-            </div>
-            <div class="title-columns">
-                <div class="title-column">
-                    <h4>네이버 홈형</h4>
-                    <ul>${(item.titles?.naver_home || []).map((title) => `<li>${escapeHtml(title)}</li>`).join("") || "<li>생성 결과 없음</li>"}</ul>
-                </div>
-                <div class="title-column">
-                    <h4>블로그형</h4>
-                    <ul>${(item.titles?.blog || []).map((title) => `<li>${escapeHtml(title)}</li>`).join("") || "<li>생성 결과 없음</li>"}</ul>
-                </div>
-            </div>
-        </div>
-    `).join("")}</div>`;
-}
 
-function handleResultsGridChange(event) {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement)) {
-        return;
-    }
-
-    if (!target.matches("[data-collected-key]")) {
-        return;
-    }
-
-    const identity = target.dataset.collectedKey || "";
-    if (!identity) {
-        return;
-    }
-
-    if (target.checked) {
-        if (!state.selectedCollectedKeys.includes(identity)) {
-            state.selectedCollectedKeys = [...state.selectedCollectedKeys, identity];
-        }
-    } else {
-        state.selectedCollectedKeys = state.selectedCollectedKeys.filter((item) => item !== identity);
-    }
-
-    renderInputState();
-}
 
 function getSelectedCollectedItems() {
     const collectedKeywords = state.results.collected?.collected_keywords || [];
@@ -2925,16 +2305,6 @@ function countItems(items) {
     return Array.isArray(items) ? items.length : 0;
 }
 
-function setGlobalStatus(message, kind) {
-    elements.pipelineStatus.textContent = message;
-    elements.pipelineStatus.classList.remove("running", "error");
-    if (kind === "running") {
-        elements.pipelineStatus.classList.add("running");
-    }
-    if (kind === "error") {
-        elements.pipelineStatus.classList.add("error");
-    }
-}
 
 function addLog(message, kind = "info") {
     const now = new Date().toLocaleTimeString("ko-KR", {
@@ -2985,26 +2355,6 @@ function logApiUsageSummary(label, debugPayload) {
     addLog(`${label} API 사용: ${parts.join(" · ")}`, "info");
 }
 
-function buildStageDetail(status) {
-    if (status.state === "running") {
-        return `${status.message} · ${formatElapsed(status)}`;
-    }
-    if (status.state === "success") {
-        return `${status.message} · ${formatDuration(status.durationMs)}`;
-    }
-    if (status.state === "error") {
-        return `${status.message} · ${formatDuration(status.durationMs)}`;
-    }
-    return "아직 실행되지 않았습니다.";
-}
-
-function formatStageBadge(status) {
-    if (status.state === "running") return "진행 중";
-    if (status.state === "success") return "완료";
-    if (status.state === "error") return "오류";
-    return "대기";
-}
-
 function formatElapsed(status) {
     if (!status?.startedAt) {
         return "0ms";
@@ -3021,12 +2371,6 @@ function formatDuration(durationMs) {
         return `${Math.round(value)}ms`;
     }
     return `${(value / 1000).toFixed(1)}s`;
-}
-
-function formatPriority(priority) {
-    if (priority === "high") return "높음";
-    if (priority === "medium") return "중간";
-    return "낮음";
 }
 
 function formatNumber(value) {
@@ -3430,11 +2774,6 @@ function promoteKeywordStatus(keyword, nextStatus) {
     setKeywordStatus(normalizedKeyword, targetStatus, { silent: true });
 }
 
-function promoteKeywordStatuses(items, nextStatus) {
-    (items || []).forEach((item) => {
-        promoteKeywordStatus(item?.keyword, nextStatus);
-    });
-}
 
 function renderKeywordWorkflowBadges(keyword, options = {}) {
     const meta = getKeywordWorkflowMeta(keyword);
@@ -3865,11 +3204,110 @@ function escapeHtml(value) {
         .replace(/'/g, "&#39;");
 }
 
-function syncBusyButtons() {
-    elements.actionButtons.forEach((button) => {
-        button.disabled = state.isBusy;
-    });
+if (typeof renderTrendSettingsState === "function") {
+    const originalRenderTrendSettingsState = renderTrendSettingsState;
+    renderTrendSettingsState = function renderTrendSettingsStateWithSessionValidation() {
+        originalRenderTrendSettingsState();
+
+        const categoryMode = getCollectorMode() === "category";
+        const usesTrendSource = categoryMode && elements.categorySourceInput?.value === "naver_trend";
+        const hasInlineCookie = Boolean(elements.trendCookieInput?.value?.trim());
+        const trendSessionCache = state.trendSessionCache?.available ? state.trendSessionCache : null;
+        const hasCachedSession = Boolean(trendSessionCache);
+        const browserLabel = describeTrendBrowserSelection();
+        const cachedBrowserLabel = formatTrendBrowserLabel(trendSessionCache?.browser || "");
+        const fallbackLabel = elements.trendFallbackInput?.checked ? "켜짐" : "꺼짐";
+        const validationPending = Boolean(state.trendSessionValidationPending);
+
+        if (elements.validateTrendSessionButton) {
+            elements.validateTrendSessionButton.disabled = !usesTrendSource || validationPending;
+            elements.validateTrendSessionButton.textContent = validationPending
+                ? "로그인 상태 확인 중..."
+                : "로그인 상태 확인";
+            elements.validateTrendSessionButton.setAttribute("aria-busy", validationPending ? "true" : "false");
+        }
+        if (elements.launchLoginBrowserButton) {
+            elements.launchLoginBrowserButton.disabled = !usesTrendSource || validationPending;
+        }
+        if (elements.loadLocalCookieButton) {
+            elements.loadLocalCookieButton.disabled = !usesTrendSource || validationPending;
+        }
+
+        if (elements.trendSourceHelp) {
+            if (usesTrendSource) {
+                const service = elements.trendServiceInput?.value || "naver_blog";
+                elements.trendSourceHelp.textContent = hasInlineCookie
+                    ? `현재 Creator Advisor ${service} 트렌드를 직접 조회합니다. 입력 세션을 읽을 브라우저는 ${browserLabel}, fallback은 ${fallbackLabel} 상태입니다. 실행 전에는 '로그인 상태 확인'으로 바로 검증할 수 있습니다.`
+                    : hasCachedSession
+                        ? `입력 칸은 비어 있지만 저장된 ${cachedBrowserLabel} 세션을 자동으로 사용합니다. 현재 브라우저 선택은 ${browserLabel}, fallback은 ${fallbackLabel} 상태입니다. 실행 전에는 '로그인 상태 확인'으로 바로 검증할 수 있습니다.`
+                        : `현재 Creator Advisor ${service} 세션이 비어 있습니다. 먼저 네이버에 로그인한 뒤 '현재 브라우저 쿠키 읽기'나 '전용 로그인 브라우저 열기'로 세션을 준비하고, '로그인 상태 확인'으로 바로 검증하세요. fallback이 꺼져 있으면 트렌드 수집이 멈춥니다.`;
+            } else {
+                elements.trendSourceHelp.textContent = "카테고리 수집 소스가 preset fallback이면 기존 공개 검색 경로로 키워드를 수집합니다.";
+            }
+        }
+
+        if (elements.localCookieStatus && !elements.localCookieStatus.dataset.locked) {
+            elements.localCookieStatus.textContent = hasInlineCookie
+                ? "입력된 Creator Advisor 세션이 준비되어 있습니다. 실행 전에 '로그인 상태 확인'으로 바로 검증하세요."
+                : hasCachedSession
+                    ? `저장된 ${cachedBrowserLabel} 전용 세션이 있어 입력 칸이 비어도 수집 시 자동으로 사용합니다. 필요하면 '로그인 상태 확인'으로 바로 검증하세요.`
+                    : "먼저 세션을 준비한 뒤 '로그인 상태 확인'으로 정상 로그인 여부를 확인하세요.";
+        }
+    };
 }
+
+if (typeof renderTrendSettingsState === "function") {
+    const originalRenderTrendSettingsState = renderTrendSettingsState;
+    renderTrendSettingsState = function renderTrendSettingsStateWithSessionValidation() {
+        originalRenderTrendSettingsState();
+
+        const categoryMode = getCollectorMode() === "category";
+        const usesTrendSource = categoryMode && elements.categorySourceInput?.value === "naver_trend";
+        const hasInlineCookie = Boolean(elements.trendCookieInput?.value?.trim());
+        const trendSessionCache = state.trendSessionCache?.available ? state.trendSessionCache : null;
+        const hasCachedSession = Boolean(trendSessionCache);
+        const browserLabel = describeTrendBrowserSelection();
+        const cachedBrowserLabel = formatTrendBrowserLabel(trendSessionCache?.browser || "");
+        const fallbackLabel = elements.trendFallbackInput?.checked ? "켜짐" : "꺼짐";
+        const validationPending = Boolean(state.trendSessionValidationPending);
+
+        if (elements.validateTrendSessionButton) {
+            elements.validateTrendSessionButton.disabled = !usesTrendSource || validationPending;
+            elements.validateTrendSessionButton.textContent = validationPending
+                ? "로그인 상태 확인 중..."
+                : "로그인 상태 확인";
+            elements.validateTrendSessionButton.setAttribute("aria-busy", validationPending ? "true" : "false");
+        }
+        if (elements.launchLoginBrowserButton) {
+            elements.launchLoginBrowserButton.disabled = !usesTrendSource || validationPending;
+        }
+        if (elements.loadLocalCookieButton) {
+            elements.loadLocalCookieButton.disabled = !usesTrendSource || validationPending;
+        }
+
+        if (elements.trendSourceHelp) {
+            if (usesTrendSource) {
+                const service = elements.trendServiceInput?.value || "naver_blog";
+                elements.trendSourceHelp.textContent = hasInlineCookie
+                    ? `현재 Creator Advisor ${service} 트렌드를 직접 조회합니다. 입력 세션을 읽을 브라우저는 ${browserLabel}, fallback은 ${fallbackLabel} 상태입니다. 실행 전에는 '로그인 상태 확인'으로 바로 검증할 수 있습니다.`
+                    : hasCachedSession
+                        ? `입력 칸은 비어 있지만 저장된 ${cachedBrowserLabel} 세션을 자동으로 사용합니다. 현재 브라우저 선택은 ${browserLabel}, fallback은 ${fallbackLabel} 상태입니다. 실행 전에는 '로그인 상태 확인'으로 바로 검증할 수 있습니다.`
+                        : `현재 Creator Advisor ${service} 세션이 비어 있습니다. 먼저 네이버에 로그인한 뒤 '현재 브라우저 쿠키 읽기'나 '전용 로그인 브라우저 열기'로 세션을 준비하고, '로그인 상태 확인'으로 바로 검증하세요. fallback이 꺼져 있으면 트렌드 수집이 멈춥니다.`;
+            } else {
+                elements.trendSourceHelp.textContent = "카테고리 수집 소스가 preset fallback이면 기존 공개 검색 경로로 키워드를 수집합니다.";
+            }
+        }
+
+        if (elements.localCookieStatus && !elements.localCookieStatus.dataset.locked) {
+            elements.localCookieStatus.textContent = hasInlineCookie
+                ? "입력된 Creator Advisor 세션이 준비되어 있습니다. 실행 전에 '로그인 상태 확인'으로 바로 검증하세요."
+                : hasCachedSession
+                    ? `저장된 ${cachedBrowserLabel} 전용 세션이 있어 입력 칸이 비어도 수집 시 자동으로 사용합니다. 필요하면 '로그인 상태 확인'으로 바로 검증하세요.`
+                    : "먼저 세션을 준비한 뒤 '로그인 상태 확인'으로 정상 로그인 여부를 확인하세요.";
+        }
+    };
+}
+
 
 function startTicker() {
     if (state.tickerId) {
@@ -3884,40 +3322,6 @@ function startTicker() {
     }, 250);
 }
 
-function renderResults() {
-    const cards = [];
-
-    if (state.results.collected?.collected_keywords) {
-        cards.push(
-            resultCard("수집 키워드", state.results.collected.collected_keywords, renderCollectedList, {
-                limit: "all",
-                subtitle: "원본 쿼리별로 묶어서 바로 선택할 수 있습니다.",
-                className: "collector-result-card",
-            }),
-        );
-    }
-    if (state.results.expanded?.expanded_keywords) {
-        cards.push(resultCard("확장 키워드", state.results.expanded.expanded_keywords, renderExpandedList));
-    }
-    if (state.results.analyzed?.analyzed_keywords) {
-        cards.push(resultCard("분석 결과", state.results.analyzed.analyzed_keywords, renderAnalyzedList));
-    }
-    if (state.results.selected?.selected_keywords) {
-        cards.push(resultCard("골든 키워드", state.results.selected.selected_keywords, renderSelectedList));
-    }
-    if (state.results.titled?.generated_titles) {
-        cards.push(resultCard("생성된 제목", state.results.titled.generated_titles, renderTitleList));
-    }
-
-    elements.resultsGrid.innerHTML = cards.length > 0
-        ? cards.join("")
-        : `
-            <div class="placeholder">
-                실행 버튼을 누르면 단계별 결과와 진단 정보가 이 영역에 표시됩니다.<br />
-                수집 결과는 쿼리별로 묶어서 보여주고, collector 진단은 코드 대신 읽기 쉬운 표와 요약 카드로 정리합니다.
-            </div>
-        `;
-}
 
 function renderDiagnosticCard(diagnostic) {
     const summary = diagnostic.responseSummary || diagnostic.error || {};
@@ -4126,175 +3530,9 @@ function formatTrendRankChange(value) {
     return normalized > 0 ? `변동 ▲${normalized}` : `변동 ▼${Math.abs(normalized)}`;
 }
 
-function resultCard(title, items, renderer, options = {}) {
-    const entries = Array.isArray(items) ? items : [];
-    const visibleItems = options.limit === "all"
-        ? entries
-        : entries.slice(0, options.limit ?? 8);
 
-    return `
-        <article class="result-card ${escapeHtml(options.className || "")}">
-            <div class="result-head">
-                <div class="result-head-copy">
-                    <h3>${escapeHtml(title)}</h3>
-                    ${options.subtitle ? `<p class="result-subtitle">${escapeHtml(options.subtitle)}</p>` : ""}
-                </div>
-                <span class="result-count">총 ${countItems(entries)}건</span>
-            </div>
-            ${renderer(visibleItems)}
-        </article>
-    `;
-}
 
-function renderCollectedList(items) {
-    const groups = groupCollectedItems(items);
-    const selectedCount = getSelectedCollectedItems().length;
-    const sourceCounts = summarizeCollectedSources(items);
 
-    return `
-        <div class="collector-board">
-            <div class="collector-toolbar">
-                <div class="collector-stat-strip">
-                    <div class="collector-stat-card">
-                        <span>키워드</span>
-                        <strong>${escapeHtml(String(items.length))}</strong>
-                    </div>
-                    <div class="collector-stat-card">
-                        <span>선택됨</span>
-                        <strong>${escapeHtml(String(selectedCount))}</strong>
-                    </div>
-                    <div class="collector-stat-card">
-                        <span>쿼리 묶음</span>
-                        <strong>${escapeHtml(String(groups.length))}</strong>
-                    </div>
-                    <div class="collector-stat-card">
-                        <span>출처 수</span>
-                        <strong>${escapeHtml(String(sourceCounts.length))}</strong>
-                    </div>
-                </div>
-                <div class="collector-toolbar-actions">
-                    <button type="button" class="ghost-btn collector-action-btn" data-collector-action="select_all">전체 선택</button>
-                    <button type="button" class="ghost-btn collector-action-btn" data-collector-action="clear_all">선택 해제</button>
-                </div>
-            </div>
-            ${sourceCounts.length ? `
-                <div class="collector-source-strip">
-                    ${sourceCounts.map((item) => `
-                        <span class="badge">${escapeHtml(formatCollectorSource(item.source))} ${escapeHtml(String(item.count))}건</span>
-                    `).join("")}
-                </div>
-            ` : ""}
-            <div class="collector-groups">
-                ${groups.map((group) => `
-                    <section class="collector-group">
-                        <div class="collector-group-head">
-                            <div>
-                                <div class="collector-group-title">
-                                    <strong>${escapeHtml(group.raw)}</strong>
-                                    <span>${escapeHtml(String(group.items.length))}건</span>
-                                </div>
-                                <div class="collector-group-meta">
-                                    ${group.category ? `<span class="badge">카테고리 ${escapeHtml(group.category)}</span>` : ""}
-                                    ${group.sources.map((source) => `<span class="badge">${escapeHtml(formatCollectorSource(source))}</span>`).join("")}
-                                    ${group.selectedCount ? `<span class="badge">${escapeHtml(String(group.selectedCount))}건 선택</span>` : ""}
-                                </div>
-                            </div>
-                            <div class="collector-group-actions">
-                                <button type="button" class="ghost-btn collector-action-btn" data-collector-action="select_group" data-collector-group="${escapeHtml(group.raw)}">묶음 선택</button>
-                                <button type="button" class="ghost-btn collector-action-btn" data-collector-action="clear_group" data-collector-group="${escapeHtml(group.raw)}">묶음 해제</button>
-                            </div>
-                        </div>
-                        <div class="collector-row-list">
-                            ${group.items.map((item, index) => {
-                                const identity = createCollectedIdentity(item);
-                                const selected = state.selectedCollectedKeys.includes(identity);
-
-                                return `
-                                    <label class="collector-row ${selected ? "selected" : ""}">
-                                        <span class="collector-rank ${item.source === "naver_trend" ? "trend" : ""}">${escapeHtml(String(item.rank ?? index + 1))}</span>
-                                        <input
-                                            type="checkbox"
-                                            data-collected-key="${escapeHtml(identity)}"
-                                            ${selected ? "checked" : ""}
-                                        />
-                                        <span class="collector-keyword">
-                                            <strong>${escapeHtml(item.keyword || "-")}</strong>
-                                            <span>${escapeHtml(formatCollectorSource(item.source))}</span>
-                                        </span>
-                                        <span class="collector-row-tags">
-                                            ${item.rank ? `<span class="badge">순위 ${escapeHtml(String(item.rank))}위</span>` : ""}
-                                            ${item.rank_change !== undefined ? `<span class="badge">${escapeHtml(formatTrendRankChange(item.rank_change))}</span>` : ""}
-                                            <span class="badge">${escapeHtml(item.category || "미분류")}</span>
-                                        </span>
-                                    </label>
-                                `;
-                            }).join("")}
-                        </div>
-                    </section>
-                `).join("")}
-            </div>
-        </div>
-    `;
-}
-
-function handleResultsGridChange(event) {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement)) {
-        return;
-    }
-
-    if (!target.matches("[data-collected-key]")) {
-        return;
-    }
-
-    const identity = target.dataset.collectedKey || "";
-    if (!identity) {
-        return;
-    }
-
-    if (target.checked) {
-        if (!state.selectedCollectedKeys.includes(identity)) {
-            state.selectedCollectedKeys = [...state.selectedCollectedKeys, identity];
-        }
-    } else {
-        state.selectedCollectedKeys = state.selectedCollectedKeys.filter((item) => item !== identity);
-    }
-
-    renderInputState();
-    renderResults();
-}
-
-function handleResultsGridClick(event) {
-    if (!(event.target instanceof Element)) {
-        return;
-    }
-
-    const trigger = event.target.closest("[data-collector-action]");
-    if (!trigger) {
-        return;
-    }
-
-    const action = trigger.getAttribute("data-collector-action") || "";
-    const collectedItems = state.results.collected?.collected_keywords || [];
-
-    if (action === "select_all") {
-        applyCollectedSelection(collectedItems, true);
-        return;
-    }
-
-    if (action === "clear_all") {
-        applyCollectedSelection(collectedItems, false);
-        return;
-    }
-
-    const groupKey = trigger.getAttribute("data-collector-group") || "";
-    if (!groupKey) {
-        return;
-    }
-
-    const groupItems = collectedItems.filter((item) => (item.raw || item.keyword || "") === groupKey);
-    applyCollectedSelection(groupItems, action === "select_group");
-}
 
 function applyCollectedSelection(items, shouldSelect) {
     const nextSelection = new Set(state.selectedCollectedKeys);
@@ -4445,198 +3683,6 @@ STAGES.splice(
     },
 );
 
-function bindElements() {
-    elements.categoryInput = document.getElementById("categoryInput");
-    elements.categorySourceInput = document.getElementById("categorySourceInput");
-    elements.seedInput = document.getElementById("seedInput");
-    elements.trendServiceInput = document.getElementById("trendServiceInput");
-    elements.trendDateInput = document.getElementById("trendDateInput");
-    elements.trendBrowserInput = document.getElementById("trendBrowserInput");
-    elements.trendCookieInput = document.getElementById("trendCookieInput");
-    elements.trendFallbackInput = document.getElementById("trendFallbackInput");
-    elements.trendSourceHelp = document.getElementById("trendSourceHelp");
-    elements.launchLoginBrowserButton = document.getElementById("launchLoginBrowserButton");
-    elements.loadLocalCookieButton = document.getElementById("loadLocalCookieButton");
-    elements.localCookieStatus = document.getElementById("localCookieStatus");
-    elements.expanderAnalysisPath = document.getElementById("expanderAnalysisPath");
-    elements.optionRelated = document.getElementById("optionRelated");
-    elements.optionAutocomplete = document.getElementById("optionAutocomplete");
-    elements.optionBulk = document.getElementById("optionBulk");
-    elements.optionDebug = document.getElementById("optionDebug");
-    elements.expandInputSource = document.getElementById("expandInputSource");
-    elements.expandManualInput = document.getElementById("expandManualInput");
-    elements.expandOptionRelated = document.getElementById("expandOptionRelated");
-    elements.expandOptionAutocomplete = document.getElementById("expandOptionAutocomplete");
-    elements.expandOptionSeedFilter = document.getElementById("expandOptionSeedFilter");
-    elements.expandMaxResultsInput = document.getElementById("expandMaxResultsInput");
-    elements.expandLimitButtons = Array.from(document.querySelectorAll("[data-expand-limit]"));
-    elements.expandSourceVisibilityBlocks = Array.from(document.querySelectorAll("[data-expand-source-visibility]"));
-    elements.analyzeInputSource = document.getElementById("analyzeInputSource");
-    elements.analyzeManualInput = document.getElementById("analyzeManualInput");
-    elements.analyzeKeywordStatsInput = document.getElementById("analyzeKeywordStatsInput");
-    elements.exportCollectedCsvButton = document.getElementById("exportCollectedCsvButton");
-    elements.exportCsvButton = document.getElementById("exportCsvButton");
-    elements.exportSelectedCsvButton = document.getElementById("exportSelectedCsvButton");
-    elements.exportCollectedCsvButtonUtility = document.getElementById("exportCollectedCsvButtonUtility");
-    elements.exportSelectedCsvButtonUtility = document.getElementById("exportSelectedCsvButtonUtility");
-    elements.exportTitleCsvButton = document.getElementById("exportTitleCsvButton");
-    if (elements.exportCollectedCsvButtonUtility && !elements.exportCollectedCsvButtonUtility.closest(".results-panel-tools")) {
-        elements.exportCollectedCsvButtonUtility.hidden = true;
-    }
-    if (elements.exportSelectedCsvButtonUtility && !elements.exportSelectedCsvButtonUtility.closest(".results-panel-tools")) {
-        elements.exportSelectedCsvButtonUtility.hidden = true;
-    }
-    elements.quickStartModeButtons = Array.from(document.querySelectorAll("[data-quickstart-mode]"));
-    elements.quickStartModeBadge = document.getElementById("quickStartModeBadge");
-    elements.quickStartSummaryTitle = document.getElementById("quickStartSummaryTitle");
-    elements.quickStartSummaryText = document.getElementById("quickStartSummaryText");
-    elements.quickStartSummaryMeta = document.getElementById("quickStartSummaryMeta");
-    elements.quickStartPrimaryButton = document.getElementById("quickStartPrimaryButton");
-    elements.quickStartSecondaryButton = document.getElementById("quickStartSecondaryButton");
-    elements.analyzeSourceVisibilityBlocks = Array.from(document.querySelectorAll("[data-analyze-source-visibility]"));
-    elements.selectedCollectedCount = document.getElementById("selectedCollectedCount");
-    elements.manualAnalyzeCount = document.getElementById("manualAnalyzeCount");
-    elements.gradePresetButtons = Array.from(document.querySelectorAll("[data-selection-preset]"));
-    elements.gradeToggleButtons = Array.from(document.querySelectorAll("[data-profitability-toggle]"));
-    elements.attackabilityToggleButtons = Array.from(document.querySelectorAll("[data-attackability-toggle]"));
-    elements.runGradeSelectButton = document.getElementById("runGradeSelectButton");
-    elements.gradeSelectSummary = document.getElementById("gradeSelectSummary");
-    elements.titleMode = document.getElementById("titleMode");
-    elements.titlePreset = document.getElementById("titlePreset");
-    elements.titlePresetDescription = document.getElementById("titlePresetDescription");
-    elements.titleProvider = document.getElementById("titleProvider");
-    elements.titleProviderRegistryHint = document.getElementById("titleProviderRegistryHint");
-    elements.openApiRegistrySettingsButton = document.getElementById("openApiRegistrySettingsButton");
-    elements.titleModel = document.getElementById("titleModel");
-    elements.titleTemperature = document.getElementById("titleTemperature");
-    elements.titleTemperatureDescription = document.getElementById("titleTemperatureDescription");
-    elements.titleFallback = document.getElementById("titleFallback");
-    elements.titleSystemPrompt = document.getElementById("titleSystemPrompt");
-    elements.titlePromptSummary = document.getElementById("titlePromptSummary");
-    elements.openTitlePromptEditorButton = document.getElementById("openTitlePromptEditorButton");
-    elements.clearTitlePromptButton = document.getElementById("clearTitlePromptButton");
-    elements.titleQualitySystemPrompt = document.getElementById("titleQualitySystemPrompt");
-    elements.titleQualityPromptSummary = document.getElementById("titleQualityPromptSummary");
-    elements.openTitleQualityPromptEditorButton = document.getElementById("openTitleQualityPromptEditorButton");
-    elements.clearTitleQualityPromptButton = document.getElementById("clearTitleQualityPromptButton");
-    elements.titleModeBadge = document.getElementById("titleModeBadge");
-    elements.operationMode = document.getElementById("operationMode");
-    elements.operationRequestGap = document.getElementById("operationRequestGap");
-    elements.operationDailyLimit = document.getElementById("operationDailyLimit");
-    elements.operationDailyRequestLimit = document.getElementById("operationDailyRequestLimit");
-    elements.operationMaxContinuousMinutes = document.getElementById("operationMaxContinuousMinutes");
-    elements.operationStopOnAuthError = document.getElementById("operationStopOnAuthError");
-    elements.operationModeDescription = document.getElementById("operationModeDescription");
-    elements.operationCustomModeGuide = document.getElementById("operationCustomModeGuide");
-    elements.operationGuardCard = document.getElementById("operationGuardCard");
-    elements.operationCustomPresetPanel = document.getElementById("operationCustomPresetPanel");
-    elements.operationCustomPresetButtons = Array.from(document.querySelectorAll("[data-operation-custom-preset]"));
-    elements.operationCustomPresetDescription = document.getElementById("operationCustomPresetDescription");
-    elements.operationSettingsHint = document.getElementById("operationSettingsHint");
-    elements.operationSettingsSyncStatus = document.getElementById("operationSettingsSyncStatus");
-    elements.operationModeStatus = document.getElementById("operationModeStatus");
-    elements.operationDailyUsage = document.getElementById("operationDailyUsage");
-    elements.operationRequestUsage = document.getElementById("operationRequestUsage");
-    elements.operationGuardStatus = document.getElementById("operationGuardStatus");
-    elements.refreshOperationSettingsButton = document.getElementById("refreshOperationSettingsButton");
-    elements.resetOperationGuardsButton = document.getElementById("resetOperationGuardsButton");
-    elements.saveOperationSettingsButton = document.getElementById("saveOperationSettingsButton");
-    elements.titleModeRadios = Array.from(document.querySelectorAll("input[name='titleModeOption']"));
-    elements.titleModeVisibilityBlocks = Array.from(document.querySelectorAll("[data-title-mode-visibility]"));
-    elements.statusList = document.getElementById("statusList");
-    elements.resultsGrid = document.getElementById("resultsGrid");
-    elements.activityLog = document.getElementById("activityLog");
-    elements.pipelineStatus = document.getElementById("pipelineStatus");
-    elements.progressBar = document.getElementById("progressBar");
-    elements.progressText = document.getElementById("progressText");
-    elements.progressDetail = document.getElementById("progressDetail");
-    elements.errorConsole = document.getElementById("errorConsole");
-    elements.debugPanels = document.getElementById("debugPanels");
-    elements.actionButtons = Array.from(document.querySelectorAll("button"));
-}
-
-function bindEvents() {
-    document.querySelectorAll("input[name='collectorMode']").forEach((element) => {
-        element.addEventListener("change", renderInputState);
-    });
-    document.getElementById("runCollectButton").addEventListener("click", () => {
-        runWithGuard(runCollectFromScratch, "수집 단계 실행 중");
-    });
-    document.getElementById("runExpandButton").addEventListener("click", () => {
-        runWithGuard(runThroughExpand, "확장 단계 실행 중");
-    });
-    document.getElementById("runAnalyzeButton").addEventListener("click", () => {
-        runWithGuard(runThroughAnalyze, "분석 단계 실행 중");
-    });
-    document.getElementById("runSelectButton").addEventListener("click", () => {
-        runWithGuard(runThroughSelect, "선별 단계 실행 중");
-    });
-    document.getElementById("runTitleButton").addEventListener("click", () => {
-        runWithGuard(runThroughTitle, "제목 생성 단계 실행 중");
-    });
-    document.getElementById("runFullButton").addEventListener("click", () => {
-        runWithGuard(runFullFlow, "전체 파이프라인 실행 중");
-    });
-    document.getElementById("resetButton").addEventListener("click", resetAll);
-    document.getElementById("clearDebugButton").addEventListener("click", clearDiagnostics);
-    elements.resultsGrid.addEventListener("click", handleResultsGridClick);
-    elements.resultsGrid.addEventListener("change", handleResultsGridChange);
-    elements.expandManualInput.addEventListener("input", renderInputState);
-    elements.expandInputSource.addEventListener("change", renderInputState);
-    elements.analyzeManualInput.addEventListener("input", renderInputState);
-    elements.analyzeInputSource.addEventListener("change", renderInputState);
-    elements.analyzeKeywordStatsInput?.addEventListener("input", renderInputState);
-    elements.expandMaxResultsInput?.addEventListener("input", () => {
-        elements.expandLimitButtons.forEach((button) => button.classList.remove("active"));
-    });
-    [
-        elements.categorySourceInput,
-        elements.trendServiceInput,
-        elements.trendDateInput,
-        elements.trendBrowserInput,
-        elements.trendCookieInput,
-        elements.trendFallbackInput,
-    ].forEach((element) => {
-        element.addEventListener("input", handleTrendSettingsChange);
-        element.addEventListener("change", handleTrendSettingsChange);
-    });
-    elements.loadLocalCookieButton.addEventListener("click", () => {
-        runWithGuard(importLocalNaverCookie, "로컬 네이버 세션 불러오는 중");
-    });
-    elements.launchLoginBrowserButton.addEventListener("click", () => {
-        runWithGuard(openDedicatedLoginBrowser, "전용 로그인 브라우저 여는 중");
-    });
-    [
-        elements.titleProvider,
-        elements.titleModel,
-        elements.titleApiKey,
-        elements.titleTemperature,
-        elements.titleFallback,
-    ].forEach((element) => {
-        element.addEventListener("input", handleTitleSettingsChange);
-        element.addEventListener("change", handleTitleSettingsChange);
-    });
-    elements.titleModeRadios.forEach((element) => {
-        element.addEventListener("change", handleTitleSettingsChange);
-    });
-    document.querySelectorAll("[data-preset]").forEach((button) => {
-        button.addEventListener("click", () => applyPreset(button.dataset.preset || "finance"));
-    });
-    elements.guideTabButtons.forEach((button) => {
-        button.addEventListener("click", () => setGuideTab(button.dataset.guideTab || ""));
-    });
-    elements.expandLimitButtons.forEach((button) => {
-        button.addEventListener("click", () => setExpandLimitPreset(button.dataset.expandLimit || "1000"));
-    });
-    elements.exportCollectedCsvButton?.addEventListener("click", downloadCollectedCsv);
-    elements.exportSelectedCsvButton?.addEventListener("click", downloadSelectedCsv);
-    elements.exportCollectedCsvButtonUtility?.addEventListener("click", downloadCollectedCsv);
-    elements.exportSelectedCsvButtonUtility?.addEventListener("click", downloadSelectedCsv);
-    elements.exportCsvButton?.addEventListener("click", downloadAnalyzedCsv);
-    elements.exportTitleCsvButton?.addEventListener("click", downloadTitleCsv);
-    setExpandLimitPreset(elements.expandMaxResultsInput?.value || "1000");
-}
-
 function setExpandLimitPreset(limit) {
     elements.expandLimitButtons.forEach((button) => {
         button.classList.toggle("active", button.dataset.expandLimit === limit);
@@ -4659,11 +3705,14 @@ function setExpandLimitPreset(limit) {
 async function runAnalyzeStage() {
     const source = elements.analyzeInputSource.value;
     const expandSource = elements.expandInputSource?.value || "collector_all";
+    const selectionFilterState = captureSelectionFilterState();
 
     if (source === "manual_text") {
         const inputData = buildAnalyzeInput();
+        const forwardSelectOptions = buildAutoSelectionOptions();
         addLog(`분석 시작: ${describeAnalyzeSource(inputData)}`);
         clearStageAndDownstream("analyzed");
+        restoreSelectionFilterState(selectionFilterState);
         const result = await executeStage({
             stageKey: "analyzed",
             endpoint: "/analyze",
@@ -4672,6 +3721,16 @@ async function runAnalyzeStage() {
         state.results.analyzed = result;
         logApiUsageSummary("분석", result.debug);
         addLog(`분석 완료: ${countItems(result.analyzed_keywords)}건`, "success");
+        try {
+            const runSelect = typeof window.runSelectStage === "function" ? window.runSelectStage : null;
+            if (typeof runSelect === "function") {
+                await runSelect(forwardSelectOptions);
+            }
+        } catch (error) {
+            if (!isUserNoticeError(error)) {
+                throw error;
+            }
+        }
         renderAll();
         return result;
     }
@@ -4686,8 +3745,10 @@ async function runAnalyzeStage() {
 
     if (state.results.expanded?.expanded_keywords?.length) {
         const inputData = buildAnalyzeInput();
+        const forwardSelectOptions = buildAutoSelectionOptions();
         addLog(`분석 시작: ${describeAnalyzeSource(inputData)}`);
         clearStageAndDownstream("analyzed");
+        restoreSelectionFilterState(selectionFilterState);
         const result = await executeStage({
             stageKey: "analyzed",
             endpoint: "/analyze",
@@ -4696,13 +3757,31 @@ async function runAnalyzeStage() {
         state.results.analyzed = result;
         logApiUsageSummary("분석", result.debug);
         addLog(`분석 완료: ${countItems(result.analyzed_keywords)}건`, "success");
+        try {
+            const runSelect = typeof window.runSelectStage === "function" ? window.runSelectStage : null;
+            if (typeof runSelect === "function") {
+                await runSelect(forwardSelectOptions);
+            }
+        } catch (error) {
+            if (!isUserNoticeError(error)) {
+                throw error;
+            }
+        }
         renderAll();
         return result;
     }
 
-    const inputData = buildExpandInput();
+    const inputData = {
+        ...buildExpandInput(),
+        ...buildTitleExportRequestContext(),
+    };
+    const selectOptions = buildAutoSelectionOptions();
+    if (Object.keys(selectOptions).length) {
+        inputData.select_options = selectOptions;
+    }
     addLog(`확장 및 분석 시작: ${describeExpandSource(inputData)}`);
     clearStageAndDownstream("expanded");
+    restoreSelectionFilterState(selectionFilterState);
     const result = await executeExpandAnalyzeStageStream(inputData);
     state.results.expanded = {
         ...(state.results.expanded || {}),
@@ -4711,205 +3790,21 @@ async function runAnalyzeStage() {
     state.results.analyzed = {
         analyzed_keywords: result.analyzed_keywords || [],
     };
+    if (result.selected_keywords || result.longtail_suggestions) {
+        state.results.selected = decorateSelectedResult(
+            result,
+            countItems(result.analyzed_keywords || []),
+        );
+    }
     logApiUsageSummary("확장/분석", result.debug);
     addLog(
-        `확장 ${countItems(result.expanded_keywords)}건 · 분석 ${countItems(result.analyzed_keywords)}건 완료`,
+        `확장 ${countItems(result.expanded_keywords)}건 · 분석 ${countItems(result.analyzed_keywords)}건 · 선별 ${countItems(result.selected_keywords || [])}건 완료`,
         "success",
     );
     renderAll();
     return result;
 }
 
-function buildExpandInput() {
-    const source = elements.expandInputSource.value;
-    const analysisPath = elements.expanderAnalysisPath.value.trim();
-    const category = elements.categoryInput.value.trim();
-    const expandOptions = {
-        enable_related: elements.expandOptionRelated?.checked ?? true,
-        enable_autocomplete: elements.expandOptionAutocomplete?.checked ?? true,
-        enable_seed_filter: elements.expandOptionSeedFilter?.checked ?? true,
-        max_results: coerceExpandLimitValue(elements.expandMaxResultsInput?.value),
-    };
-
-    if (source === "manual_text") {
-        const keywordsText = elements.expandManualInput.value.trim();
-        const keywords = parseKeywordText(keywordsText);
-        if (keywords.length === 0) {
-            throw new Error("확장할 키워드를 직접 입력해 주세요.");
-        }
-
-        return {
-            keywords_text: keywordsText,
-            category,
-            source: "manual_input",
-            analysis_json_path: analysisPath,
-            expand_options: expandOptions,
-        };
-    }
-
-    const collectedKeywords = source === "collector_selected"
-        ? getSelectedCollectedItems()
-        : state.results.collected?.collected_keywords || [];
-
-    if (collectedKeywords.length === 0) {
-        throw new Error(
-            source === "collector_selected"
-                ? "확장에 사용할 수집 키워드를 최소 1개 선택해 주세요."
-                : "수집 결과가 없습니다. 먼저 수집을 실행해 주세요.",
-        );
-    }
-
-    return {
-        collected_keywords: collectedKeywords,
-        analysis_json_path: analysisPath,
-        expand_options: expandOptions,
-    };
-}
-
-async function executeExpandAnalyzeStageStream(inputData) {
-    const expandedStartedAt = Date.now();
-    const startedAtLabel = new Date(expandedStartedAt).toISOString();
-
-    state.stageStatus.expanded = {
-        state: "running",
-        message: "실시간 확장 중",
-        startedAt: expandedStartedAt,
-        finishedAt: null,
-        durationMs: null,
-    };
-    state.stageStatus.analyzed = {
-        state: "running",
-        message: "실시간 분석 중",
-        startedAt: analyzedStartedAt,
-        finishedAt: null,
-        durationMs: null,
-    };
-    state.results.expanded = {
-        expanded_keywords: [],
-        stream_meta: {
-            phase: "starting",
-            currentKeyword: "",
-            depth: 0,
-            totalResults: 0,
-            queueSize: 0,
-            totalOrigins: 0,
-            maxDepth: 0,
-        },
-    };
-    state.results.analyzed = {
-        analyzed_keywords: [],
-    };
-    renderAll();
-
-    try {
-        const response = await postModuleStream("/expand/analyze/stream", inputData, (eventPayload) => {
-            if (eventPayload?.event === "progress") {
-                applyExpandStreamEvent(eventPayload, expandedStartedAt);
-            }
-            if (eventPayload?.event === "analysis") {
-                applyAnalyzeStreamEvent(eventPayload, analyzedStartedAt);
-            }
-        });
-
-        const result = response.result || {};
-        result.expanded_keywords = mergeExpandedKeywords(
-            state.results.expanded?.expanded_keywords || [],
-            result.expanded_keywords || [],
-        );
-        result.analyzed_keywords = mergeAnalyzedKeywords(
-            state.results.analyzed?.analyzed_keywords || [],
-            result.analyzed_keywords || [],
-        );
-
-        const expandedDurationMs = Date.now() - expandedStartedAt;
-        const analyzedDurationMs = Date.now() - analyzedStartedAt;
-        state.stageStatus.expanded = {
-            state: "success",
-            message: `${result.expanded_keywords.length}건 완료`,
-            startedAt: expandedStartedAt,
-            finishedAt: Date.now(),
-            durationMs: expandedDurationMs,
-        };
-        state.stageStatus.analyzed = {
-            state: "success",
-            message: `${result.analyzed_keywords.length}건 완료`,
-            startedAt: analyzedStartedAt,
-            finishedAt: Date.now(),
-            durationMs: analyzedDurationMs,
-        };
-        state.diagnostics.expanded = {
-            stageKey: "expanded",
-            stageLabel: getStage("expanded").label,
-            status: "success",
-            endpoint: "/expand/analyze/stream",
-            requestId: response.requestId,
-            startedAt: startedAtLabel,
-            durationMs: expandedDurationMs,
-            request: sanitizeSensitiveData(inputData),
-            responseSummary: buildResponseSummary("expanded", result),
-            backendDebug: result.debug || null,
-        };
-        state.diagnostics.analyzed = {
-            stageKey: "analyzed",
-            stageLabel: getStage("analyzed").label,
-            status: "success",
-            endpoint: "/expand/analyze/stream",
-            requestId: response.requestId,
-            startedAt: startedAtLabel,
-            durationMs: analyzedDurationMs,
-            request: sanitizeSensitiveData(inputData),
-            responseSummary: buildResponseSummary("analyzed", result),
-            backendDebug: result.debug || null,
-        };
-        return result;
-    } catch (error) {
-        const normalizedError = normalizeError(error, {
-            stageKey: "analyzed",
-            endpoint: "/expand/analyze/stream",
-            request: inputData,
-            startedAt: startedAtLabel,
-            durationMs: Date.now() - analyzedStartedAt,
-        });
-        state.stageStatus.expanded = {
-            state: "error",
-            message: normalizedError.message,
-            startedAt: expandedStartedAt,
-            finishedAt: Date.now(),
-            durationMs: normalizedError.durationMs,
-        };
-        state.stageStatus.analyzed = {
-            state: "error",
-            message: normalizedError.message,
-            startedAt: analyzedStartedAt,
-            finishedAt: Date.now(),
-            durationMs: normalizedError.durationMs,
-        };
-        state.diagnostics.expanded = {
-            stageKey: "expanded",
-            stageLabel: getStage("expanded").label,
-            status: "error",
-            endpoint: "/expand/analyze/stream",
-            requestId: normalizedError.requestId,
-            startedAt: startedAtLabel,
-            durationMs: normalizedError.durationMs,
-            request: sanitizeSensitiveData(inputData),
-            error: normalizedError,
-        };
-        state.diagnostics.analyzed = {
-            stageKey: "analyzed",
-            stageLabel: getStage("analyzed").label,
-            status: "error",
-            endpoint: "/expand/analyze/stream",
-            requestId: normalizedError.requestId,
-            startedAt: startedAtLabel,
-            durationMs: normalizedError.durationMs,
-            request: sanitizeSensitiveData(inputData),
-            error: normalizedError,
-        };
-        renderAll();
-        throw normalizedError;
-    }
-}
 
 function applyAnalyzeStreamEvent(eventPayload, startedAt) {
     if (!eventPayload || eventPayload.event !== "analysis") {
@@ -4940,7 +3835,7 @@ function applyAnalyzeStreamEvent(eventPayload, startedAt) {
         state.results.analyzed = currentResult;
         state.stageStatus.analyzed = {
             state: "running",
-            message: `${Number(data.total_candidates || 0)}건 일괄 분석 중`,
+            message: `${Number(data.total_candidates || 0)}건부터 누적 분석 시작`,
             startedAt,
             finishedAt: null,
             durationMs: 0,
@@ -4974,18 +3869,63 @@ function applyAnalyzeStreamEvent(eventPayload, startedAt) {
     currentResult.stream_meta = {
         ...currentMeta,
         phase: "running",
+        totalCandidates: Number(data.total_candidates || currentMeta.totalCandidates || 0),
         totalAnalyzed: Number(data.total_analyzed || currentResult.analyzed_keywords.length || 0),
     };
     state.results.analyzed = currentResult;
 
     state.stageStatus.analyzed = {
         state: "running",
-        message: `${currentResult.analyzed_keywords.length}건 평가 완료`,
+        message: `${currentResult.analyzed_keywords.length}건 누적 분석 완료`,
         startedAt,
         finishedAt: null,
         durationMs: Date.now() - startedAt,
     };
     requestStreamRender();
+}
+
+function applySelectionStreamEvent(eventPayload, startedAt) {
+    if (!eventPayload || eventPayload.event !== "selection") {
+        return;
+    }
+
+    const data = eventPayload.data || {};
+    const totalAnalyzed = Number(
+        data.total_analyzed
+        || state.results.analyzed?.stream_meta?.totalAnalyzed
+        || state.results.analyzed?.analyzed_keywords?.length
+        || 0,
+    );
+    const previousSelectedCount = countItems(state.results.selected?.selected_keywords || []);
+    const nextSelectedResult = decorateSelectedResult(data, totalAnalyzed);
+    state.results.selected = nextSelectedResult;
+
+    const nextOptionalSuffixKeys = Array.isArray(nextSelectedResult.longtail_options?.optional_suffix_keys)
+        ? nextSelectedResult.longtail_options.optional_suffix_keys
+        : [];
+    if (nextOptionalSuffixKeys.length) {
+        state.longtailOptionalSuffixKeys = [...nextOptionalSuffixKeys];
+    }
+
+    const selectionStartedAt = state.stageStatus.selected?.startedAt || startedAt || Date.now();
+    const selectedCount = countItems(nextSelectedResult.selected_keywords || []);
+    state.stageStatus.selected = {
+        state: "running",
+        message: `${selectedCount}건 선별 · ${totalAnalyzed}건 분석 반영`,
+        startedAt: selectionStartedAt,
+        finishedAt: null,
+        durationMs: Date.now() - selectionStartedAt,
+    };
+
+    if (
+        previousSelectedCount === 0
+        && selectedCount > 0
+        && normalizeResultViewKey(state.activeResultView) === "analyzed"
+    ) {
+        setActiveResultView("selected");
+    }
+
+    requestStreamRender({ force: previousSelectedCount === 0 && selectedCount > 0 });
 }
 
 function mergeAnalyzedKeywords(existingItems, incomingItems) {
@@ -5038,179 +3978,11 @@ function renderStageList() {
     }).join("");
 }
 
-function renderResults() {
-    const cards = [];
 
-    if (state.results.collected?.collected_keywords) {
-        cards.push(resultCard("수집 키워드", state.results.collected.collected_keywords, renderCollectedList));
-    }
-    if (state.results.expanded?.expanded_keywords) {
-        cards.push(
-            resultCard("확장 키워드", state.results.expanded.expanded_keywords, renderExpandedList, {
-                className: "expanded-result-card",
-            }),
-        );
-    }
-    if (state.results.analyzed?.analyzed_keywords) {
-        cards.push(resultCard("분석 결과", state.results.analyzed.analyzed_keywords, renderAnalyzedList));
-    }
-    if (state.results.selected?.selected_keywords) {
-        cards.push(resultCard("골든 키워드", state.results.selected.selected_keywords, renderSelectedList));
-    }
-    if (state.results.titled?.generated_titles) {
-        cards.push(resultCard("생성된 제목", state.results.titled.generated_titles, renderTitleList));
-    }
 
-    elements.resultsGrid.innerHTML = cards.length > 0
-        ? cards.join("")
-        : `
-            <div class="placeholder">
-                상단 설정을 고른 뒤 실행 버튼을 누르면 결과가 이 영역에 표시됩니다.<br />
-                키워드 발굴과 분석을 먼저 확인한 뒤, 마지막에 제목 생성으로 넘어가면 됩니다.
-            </div>
-        `;
-}
 
-function resultCard(title, items, renderer, options = {}) {
-    return `
-        <article class="result-card ${escapeHtml(options.className || "")}">
-            <div class="result-head">
-                <h3>${escapeHtml(title)}</h3>
-                <span class="result-count">총 ${countItems(items)}건</span>
-            </div>
-            ${options.subtitle ? `<p class="result-subtitle">${escapeHtml(options.subtitle)}</p>` : ""}
-            ${renderer(items)}
-        </article>
-    `;
-}
 
-function renderCollectedList(items) {
-    return `<div class="keyword-list">${items.slice(0, 20).map((item) => `
-        <div class="keyword-item">
-            <div class="keyword-main">
-                <strong>${escapeHtml(item.keyword || "-")}</strong>
-                <span class="score-line">${escapeHtml(item.source || "source 없음")}</span>
-            </div>
-            <div class="keyword-meta">
-                <span class="badge">카테고리 ${escapeHtml(item.category || "미분류")}</span>
-                <span class="badge">원문 ${escapeHtml(item.raw || "-")}</span>
-            </div>
-            <label class="keyword-select">
-                <input
-                    type="checkbox"
-                    data-collected-key="${escapeHtml(createCollectedIdentity(item))}"
-                    ${state.selectedCollectedKeys.includes(createCollectedIdentity(item)) ? "checked" : ""}
-                />
-                <span>확장 입력에 사용</span>
-            </label>
-        </div>
-    `).join("")}</div>`;
-}
 
-function renderAnalyzedList(items) {
-    const rows = (items || []).slice(0, 50).map((item) => `
-        <tr>
-            <td><strong>${escapeHtml(item.keyword || "-")}</strong></td>
-            <td>${escapeHtml(formatPriority(item.priority))}</td>
-            <td>${escapeHtml(formatNumber(item.score))}</td>
-            <td>${escapeHtml(formatNumber(item.metrics?.volume))}</td>
-            <td>${escapeHtml(formatNumber(item.metrics?.competition))}</td>
-            <td>${escapeHtml(formatNumber(item.metrics?.cpc))}</td>
-            <td>${escapeHtml(formatNumber(item.metrics?.bid))}</td>
-            <td>${escapeHtml(formatNumber(item.metrics?.profit))}</td>
-        </tr>
-    `).join("");
-
-    return `
-        <div class="expanded-table-wrap full">
-            <table class="expanded-table analyzed-table">
-                <thead>
-                    <tr>
-                        <th>키워드</th>
-                        <th>등급</th>
-                        <th>점수</th>
-                        <th>조회량</th>
-                        <th>경쟁도</th>
-                        <th>CPC</th>
-                        <th>입찰가</th>
-                        <th>수익성</th>
-                    </tr>
-                </thead>
-                <tbody>${rows || `<tr><td colspan="8">분석 결과가 없습니다.</td></tr>`}</tbody>
-            </table>
-        </div>
-    `;
-}
-
-function renderSelectedList(items) {
-    return `<div class="keyword-list">${items.map((item) => `
-        <div class="keyword-item">
-            <div class="keyword-main">
-                <strong>${escapeHtml(item.keyword || "-")}</strong>
-                <span class="score-line">수익 점수 ${escapeHtml(formatNumber(item.score))}</span>
-            </div>
-            <div class="keyword-meta">
-                <span class="badge">CPC ${escapeHtml(formatNumber(item.metrics?.cpc))}</span>
-                <span class="badge">입찰 ${escapeHtml(formatNumber(item.metrics?.bid))}</span>
-                <span class="badge">경쟁 ${escapeHtml(formatNumber(item.metrics?.competition))}</span>
-            </div>
-        </div>
-    `).join("")}</div>`;
-}
-
-function renderTitleList(items) {
-    return `<div class="title-list">${items.map((item) => `
-        <div class="title-item">
-            <div class="title-keyword">
-                <strong>${escapeHtml(item.keyword || "-")}</strong>
-                <span class="badge">제목 ${escapeHtml(String((item.titles?.naver_home || []).length + (item.titles?.blog || []).length))}개</span>
-            </div>
-            <div class="title-columns">
-                <div class="title-column">
-                    <h4>네이버 홈형</h4>
-                    <ul>${(item.titles?.naver_home || []).map((title) => `<li>${escapeHtml(title)}</li>`).join("") || "<li>결과 없음</li>"}</ul>
-                </div>
-                <div class="title-column">
-                    <h4>블로그형</h4>
-                    <ul>${(item.titles?.blog || []).map((title) => `<li>${escapeHtml(title)}</li>`).join("") || "<li>결과 없음</li>"}</ul>
-                </div>
-            </div>
-        </div>
-    `).join("")}</div>`;
-}
-
-function buildStageDetail(status) {
-    if (status.state === "running") {
-        return `${status.message} · ${formatElapsed(status)}`;
-    }
-    if (status.state === "success") {
-        return `${status.message} · ${formatDuration(status.durationMs)}`;
-    }
-    if (status.state === "error") {
-        return `${status.message} · ${formatDuration(status.durationMs)}`;
-    }
-    return "아직 실행하지 않았습니다.";
-}
-
-function formatStageBadge(status) {
-    if (status.state === "running") return "실행중";
-    if (status.state === "success") return "완료";
-    if (status.state === "error") return "오류";
-    return "대기";
-}
-
-function formatPriority(priority) {
-    if (priority === "high") return "상";
-    if (priority === "medium") return "중";
-    return "하";
-}
-
-function getStageStatusIcon(stateValue) {
-    if (stateValue === "running") return "◔";
-    if (stateValue === "success") return "●";
-    if (stateValue === "error") return "▲";
-    return "○";
-}
 
 function getStageTooltipText(stage, status) {
     return `${stage.description} ${buildStageDetail(status)}`;
@@ -5231,7 +4003,7 @@ function coerceExpandLimitValue(rawValue) {
 function downloadCollectedCsv() {
     const items = state.results.collected?.collected_keywords || [];
     if (!items.length) {
-        addLog("?대낫???섏쭛 寃곌낵媛 ?놁뒿?덈떎.", "error");
+        addLog("내보낼 수집 결과가 없습니다.", "error");
         return;
     }
 
@@ -5243,13 +4015,48 @@ function downloadCollectedCsv() {
         item.raw || "",
     ]);
     downloadCsvFile(header, rows, `keyword-collected-${new Date().toISOString().slice(0, 10)}.csv`);
-    addLog(`?섏쭛 寃곌낵 ${items.length}嫄댁쓣 CSV濡??대낫?덉뒿?덈떎.`, "success");
+    addLog(`수집 결과 ${items.length}건을 CSV로 내보냈습니다.`, "success");
+}
+
+function downloadCollectedTxt() {
+    const items = state.results.collected?.collected_keywords || [];
+    downloadKeywordTxtFile(items, {
+        filenamePrefix: "keyword-collected",
+        emptyMessage: "내보낼 수집 결과가 없습니다.",
+        successMessage: (count) => `수집 결과 ${count}건을 TXT로 내보냈습니다.`,
+    });
+}
+
+function downloadExpandedCsv() {
+    const items = state.results.expanded?.expanded_keywords || [];
+    if (!items.length) {
+        addLog("내보낼 확장 결과가 없습니다.", "error");
+        return;
+    }
+
+    const header = ["keyword", "origin", "type"];
+    const rows = items.map((item) => [
+        item.keyword || "",
+        item.origin || "",
+        item.type || "",
+    ]);
+    downloadCsvFile(header, rows, `keyword-expanded-${new Date().toISOString().slice(0, 10)}.csv`);
+    addLog(`확장 결과 ${items.length}건을 CSV로 내보냈습니다.`, "success");
+}
+
+function downloadExpandedTxt() {
+    const items = state.results.expanded?.expanded_keywords || [];
+    downloadKeywordTxtFile(items, {
+        filenamePrefix: "keyword-expanded",
+        emptyMessage: "내보낼 확장 결과가 없습니다.",
+        successMessage: (count) => `확장 결과 ${count}건을 TXT로 내보냈습니다.`,
+    });
 }
 
 function downloadSelectedCsv() {
     const items = state.results.selected?.selected_keywords || [];
     if (!items.length) {
-        addLog("?대낫???좊퀎 寃곌낵媛 ?놁뒿?덈떎.", "error");
+        addLog("내보낼 선별 결과가 없습니다.", "error");
         return;
     }
 
@@ -5295,114 +4102,25 @@ function downloadSelectedCsv() {
         ];
     });
     downloadCsvFile(header, rows, `keyword-selected-${new Date().toISOString().slice(0, 10)}.csv`);
-    addLog(`?좊퀎 寃곌낵 ${items.length}嫄댁쓣 CSV濡??대낫?덉뒿?덈떎.`, "success");
+    addLog(`선별 결과 ${items.length}건을 CSV로 내보냈습니다.`, "success");
 }
 
-function downloadAnalyzedCsv() {
-    const items = state.results.analyzed?.analyzed_keywords || [];
-    if (!items.length) {
-        addLog("내보낼 분석 결과가 없습니다.", "error");
-        return;
-    }
-
-    const header = [
-        "keyword",
-        "grade",
-        "priority",
-        "analysis_mode",
-        "confidence",
-        "score",
-        "cpc_score",
-        "search_volume_score",
-        "rarity_score",
-        "pc_searches",
-        "mobile_searches",
-        "volume",
-        "blog_results",
-        "pc_clicks",
-        "mobile_clicks",
-        "cpc",
-        "bid",
-        "bid_1",
-        "bid_2",
-        "bid_3",
-        "mobile_bid_1",
-        "mobile_bid_2",
-        "mobile_bid_3",
-        "profit",
-        "competition",
-        "opportunity",
-    ];
-    const rows = items.map((item) => [
-        item.keyword || "",
-        item.grade || "",
-        item.priority || "",
-        item.analysis_mode || "",
-        item.confidence ?? item.metrics?.confidence ?? "",
-        item.score ?? "",
-        item.metrics?.cpc_score ?? item.metrics?.monetization_score ?? "",
-        item.metrics?.search_volume_score ?? item.metrics?.volume_score ?? "",
-        item.metrics?.rarity_score ?? "",
-        item.metrics?.pc_searches ?? "",
-        item.metrics?.mobile_searches ?? "",
-        item.metrics?.volume ?? "",
-        item.metrics?.blog_results ?? "",
-        item.metrics?.pc_clicks ?? "",
-        item.metrics?.mobile_clicks ?? "",
-        item.metrics?.cpc ?? "",
-        item.metrics?.bid ?? "",
-        item.metrics?.bid_1 ?? "",
-        item.metrics?.bid_2 ?? "",
-        item.metrics?.bid_3 ?? "",
-        item.metrics?.mobile_bid_1 ?? "",
-        item.metrics?.mobile_bid_2 ?? "",
-        item.metrics?.mobile_bid_3 ?? "",
-        item.metrics?.profit ?? "",
-        item.metrics?.competition ?? "",
-        item.metrics?.opportunity ?? "",
-    ]);
-    downloadCsvFile(header, rows, `keyword-analysis-${new Date().toISOString().slice(0, 10)}.csv`);
-    addLog(`분석 결과 ${items.length}건을 CSV로 내보냈습니다.`, "success");
-}
-
-function downloadTitleCsv() {
-    const items = state.results.titled?.generated_titles || [];
-    if (!items.length) {
-        addLog("내보낼 제목 결과가 없습니다.", "error");
-        return;
-    }
-
-    const header = [
-        "target_mode",
-        "base_keyword",
-        "support_keywords",
-        "source_kind",
-        "source_note",
-        "keyword",
-        "naver_home_1",
-        "naver_home_2",
-        "blog_1",
-        "blog_2",
-    ];
-    const rows = items.map((item) => {
-        const naverHomeTitles = Array.isArray(item.titles?.naver_home) ? item.titles.naver_home : [];
-        const blogTitles = Array.isArray(item.titles?.blog) ? item.titles.blog : [];
-        return [
-            item.target_mode_label || item.target_mode || "",
-            item.base_keyword || "",
-            Array.isArray(item.support_keywords) ? item.support_keywords.join(" | ") : "",
-            item.source_kind || "",
-            item.source_note || "",
-            item.keyword || "",
-            naverHomeTitles[0] || "",
-            naverHomeTitles[1] || "",
-            blogTitles[0] || "",
-            blogTitles[1] || "",
-        ];
+function downloadSelectedTxt() {
+    const items = state.results.selected?.selected_keywords || [];
+    downloadKeywordTxtFile(items, {
+        filenamePrefix: "keyword-selected",
+        emptyMessage: "내보낼 선별 결과가 없습니다.",
+        successMessage: (count) => `선별 결과 ${count}건을 TXT로 내보냈습니다.`,
     });
+}
 
-    downloadCsvFile(header, rows, `keyword-titles-${new Date().toISOString().slice(0, 10)}.csv`);
-    addLog(`제목 결과 ${items.length}건을 CSV로 내보냈습니다.`, "success");
+function downloadAnalyzedTxt() {
+    const items = state.results.analyzed?.analyzed_keywords || [];
+    downloadKeywordTxtFile(items, {
+        filenamePrefix: "keyword-analysis",
+        emptyMessage: "내보낼 분석 결과가 없습니다.",
+        successMessage: (count) => `분석 결과 ${count}건을 TXT로 내보냈습니다.`,
+    });
 }
 
 function downloadCsvFile(header, rows, filename) {
@@ -5419,6 +4137,34 @@ function downloadCsvFile(header, rows, filename) {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+}
+
+function downloadTextFile(text, filename) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+function downloadKeywordTxtFile(items, { filenamePrefix, emptyMessage, successMessage }) {
+    const lines = (items || [])
+        .map((item) => String(item?.keyword || "").trim())
+        .filter(Boolean);
+    if (!lines.length) {
+        addLog(emptyMessage, "error");
+        return;
+    }
+
+    downloadTextFile(
+        lines.join("\n"),
+        `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.txt`,
+    );
+    addLog(successMessage(lines.length), "success");
 }
 
 function getCollectorSourcePriority(source) {
@@ -5539,361 +4285,9 @@ function formatCollectorWarningDetail(detail) {
         .join(" / ");
 }
 
-function buildExpandedLiveSubtitle() {
-    const streamMeta = state.results.expanded?.stream_meta;
-    if (!streamMeta) {
-        return "\uc2e4\uc2dc\uac04\uc73c\ub85c \ud655\uc7a5 \ud0a4\uc6cc\ub4dc\ub97c \ubcf4\uc5ec\uc8fc\uace0 \uc788\uc2b5\ub2c8\ub2e4.";
-    }
 
-    const parts = [];
-    if (streamMeta.depth) {
-        parts.push(`${streamMeta.depth}\ub2e8\uacc4`);
-    }
-    if (streamMeta.currentKeyword) {
-        parts.push(streamMeta.currentKeyword);
-    }
-    if (streamMeta.queueSize) {
-        parts.push(`\ub300\uae30 ${streamMeta.queueSize}\uac1c`);
-    }
 
-    return parts.length > 0
-        ? `${parts.join(" \u00b7 ")} \ud655\uc7a5 \uc911\uc785\ub2c8\ub2e4.`
-        : "\uc2e4\uc2dc\uac04\uc73c\ub85c \ud655\uc7a5 \ud0a4\uc6cc\ub4dc\ub97c \ubcf4\uc5ec\uc8fc\uace0 \uc788\uc2b5\ub2c8\ub2e4.";
-}
 
-function renderExpandedList(items) {
-    const entries = sortExpandedItems(items);
-    const previewItems = entries.slice(0, 12);
-    const typeSummary = summarizeExpandedTypes(entries);
-    const originCount = new Set(entries.map((item) => String(item.origin || "").trim()).filter(Boolean)).size;
-    const isStreaming = state.stageStatus.expanded.state === "running";
-    const streamMeta = state.results.expanded?.stream_meta || null;
-    const stopLabel = state.streamAbortRequested ? "중지 요청됨..." : "중지";
-
-    return `
-        <div class="expanded-board">
-            ${isStreaming ? `
-                <div class="expanded-live-note">
-                    <div class="expanded-live-copy">
-                        <strong>\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911</strong>
-                        <span>${escapeHtml(buildExpandedLiveSubtitle())}</span>
-                    </div>
-                    <button
-                        type="button"
-                        class="inline-action-btn ${state.streamAbortRequested ? "requested" : ""}"
-                        data-inline-action="stop_expand_stream"
-                        ${state.streamAbortRequested ? "disabled" : ""}
-                    >${stopLabel}</button>
-                </div>
-            ` : ""}
-            <div class="expanded-stat-strip">
-                <div class="collector-stat-card">
-                    <span>\ud0a4\uc6cc\ub4dc</span>
-                    <strong>${escapeHtml(String(entries.length))}</strong>
-                </div>
-                <div class="collector-stat-card">
-                    <span>\uc6d0\ubcf8 \uc218</span>
-                    <strong>${escapeHtml(String(originCount))}</strong>
-                </div>
-                ${typeSummary.map((item) => `
-                    <div class="collector-stat-card">
-                        <span>${escapeHtml(formatExpandedType(item.type))}</span>
-                        <strong>${escapeHtml(String(item.count))}</strong>
-                    </div>
-                `).join("")}
-                ${isStreaming && streamMeta ? `
-                    <div class="collector-stat-card">
-                        <span>\ud604\uc7ac \ub2e8\uacc4</span>
-                        <strong>${escapeHtml(String(streamMeta.depth || 0))}</strong>
-                    </div>
-                ` : ""}
-            </div>
-            ${entries.length ? `
-                <div class="expanded-table-wrap" data-preserve-scroll-key="expanded-preview-table">
-                    <table class="expanded-table compact">
-                        <thead>
-                            <tr>
-                                <th>\ud0a4\uc6cc\ub4dc</th>
-                                <th>\uc6d0\ubcf8</th>
-                                <th>\uc720\ud615</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${renderExpandedRows(previewItems)}
-                        </tbody>
-                    </table>
-                </div>
-            ` : `
-                <div class="collector-empty">\ud655\uc7a5 \uc911\uc778 \ud0a4\uc6cc\ub4dc\uac00 \uc544\uc9c1 \uc5c6\uc2b5\ub2c8\ub2e4.</div>
-            `}
-            ${entries.length > previewItems.length ? `
-                <details class="expanded-more" data-preserve-open-key="expanded-more-details">
-                    <summary>\uc804\uccb4 ${escapeHtml(String(entries.length))}\uac74 \ud3bc\uccd0\ubcf4\uae30</summary>
-                    <div class="expanded-table-wrap full" data-preserve-scroll-key="expanded-full-table">
-                        <table class="expanded-table">
-                            <thead>
-                                <tr>
-                                    <th>\ud0a4\uc6cc\ub4dc</th>
-                                    <th>\uc6d0\ubcf8</th>
-                                    <th>\uc720\ud615</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${renderExpandedRows(entries)}
-                            </tbody>
-                        </table>
-                    </div>
-                </details>
-            ` : ""}
-        </div>
-    `;
-}
-
-function renderResults() {
-    const cards = [];
-
-    if (state.results.collected?.collected_keywords) {
-        cards.push(
-            resultCard("\uc218\uc9d1 \ud0a4\uc6cc\ub4dc", state.results.collected.collected_keywords, renderCollectedList, {
-                limit: "all",
-                subtitle: "\uc6d0\ubcf8 \ucffc\ub9ac\ubcc4\ub85c \ubb36\uc5b4\uc11c \ubc14\ub85c \uc120\ud0dd\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.",
-                className: "collector-result-card",
-            }),
-        );
-    }
-    if (state.results.expanded?.expanded_keywords) {
-        cards.push(
-            resultCard("\ud655\uc7a5 \ud0a4\uc6cc\ub4dc", state.results.expanded.expanded_keywords, renderExpandedList, {
-                subtitle: state.stageStatus.expanded.state === "running"
-                    ? buildExpandedLiveSubtitle()
-                    : "\uae30\ubcf8 12\uac74\ub9cc \uba3c\uc800 \ubcf4\uc5ec\uc8fc\uace0, \ud544\uc694\ud558\uba74 \uc804\uccb4\ub97c \ud3bc\uccd0 \ubcfc \uc218 \uc788\uc2b5\ub2c8\ub2e4.",
-                className: "expanded-result-card",
-            }),
-        );
-    }
-    if (state.results.analyzed?.analyzed_keywords) {
-        cards.push(resultCard("\ubd84\uc11d \uacb0\uacfc", state.results.analyzed.analyzed_keywords, renderAnalyzedList));
-    }
-    if (state.results.selected?.selected_keywords) {
-        cards.push(resultCard("\uace8\ub4e0 \ud0a4\uc6cc\ub4dc", state.results.selected.selected_keywords, renderSelectedList));
-    }
-    if (state.results.titled?.generated_titles) {
-        cards.push(resultCard("\uc0dd\uc131\ub41c \uc81c\ubaa9", state.results.titled.generated_titles, renderTitleList));
-    }
-
-    elements.resultsGrid.innerHTML = cards.length > 0
-        ? cards.join("")
-        : `
-            <div class="placeholder">
-                \uc2e4\ud589 \ubc84\ud2bc\uc744 \ub204\ub974\uba74 \ub2e8\uacc4\ubcc4 \uacb0\uacfc\uc640 \uc9c4\ub2e8 \uc815\ubcf4\uac00 \uc774 \uc601\uc5ed\uc5d0 \ud45c\uc2dc\ub429\ub2c8\ub2e4.<br />
-                \uc218\uc9d1 \uacb0\uacfc\ub294 \ucffc\ub9ac\ubcc4\ub85c \ubb36\uc5b4 \ubcf4\uc5ec\uc8fc\uace0, collector \uc9c4\ub2e8\uc740 \ucf54\ub4dc \ub300\uc2e0 \uc77d\uae30 \uc26c\uc6b4 \uc694\uc57d \uce74\ub4dc\ub85c \uc815\ub9ac\ub429\ub2c8\ub2e4.
-            </div>
-        `;
-}
-
-async function executeExpandStageStream(inputData) {
-    const stageKey = "expanded";
-    const stage = getStage(stageKey);
-    const startedAt = Date.now();
-    const startedAtLabel = new Date(startedAt).toISOString();
-
-    cancelScheduledStreamRender();
-    state.stageStatus[stageKey] = {
-        state: "running",
-        message: `${stage.label} \uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911`,
-        startedAt,
-        finishedAt: null,
-        durationMs: null,
-    };
-    state.results.expanded = {
-        expanded_keywords: [],
-        stream_meta: {
-            phase: "starting",
-            currentKeyword: "",
-            depth: 0,
-            totalResults: 0,
-            queueSize: 0,
-            totalOrigins: 0,
-            maxDepth: 0,
-        },
-    };
-    renderAll();
-
-    try {
-        const response = await postModuleStream("/expand/stream", inputData, (eventPayload) => {
-            applyExpandStreamEvent(eventPayload, startedAt);
-        });
-        const result = response.result || {};
-        result.expanded_keywords = mergeExpandedKeywords(
-            state.results.expanded?.expanded_keywords || [],
-            result.expanded_keywords || [],
-        );
-
-        const durationMs = Date.now() - startedAt;
-        state.stageStatus[stageKey] = {
-            state: "success",
-            message: `${result.expanded_keywords.length}\uac74 \uc644\ub8cc`,
-            startedAt,
-            finishedAt: Date.now(),
-            durationMs,
-        };
-        state.diagnostics[stageKey] = {
-            stageKey,
-            stageLabel: stage.label,
-            status: "success",
-            endpoint: "/expand/stream",
-            requestId: response.requestId,
-            startedAt: startedAtLabel,
-            durationMs,
-            request: sanitizeSensitiveData(inputData),
-            responseSummary: buildResponseSummary(stageKey, result),
-            backendDebug: result.debug || null,
-        };
-
-        cancelScheduledStreamRender();
-        return result;
-    } catch (error) {
-        const normalizedError = normalizeError(error, {
-            stageKey,
-            endpoint: "/expand/stream",
-            request: inputData,
-            startedAt: startedAtLabel,
-            durationMs: Date.now() - startedAt,
-        });
-
-        state.stageStatus[stageKey] = {
-            state: "error",
-            message: normalizedError.message,
-            startedAt,
-            finishedAt: Date.now(),
-            durationMs: normalizedError.durationMs,
-        };
-        state.diagnostics[stageKey] = {
-            stageKey,
-            stageLabel: stage.label,
-            status: "error",
-            endpoint: "/expand/stream",
-            requestId: normalizedError.requestId,
-            startedAt: startedAtLabel,
-            durationMs: normalizedError.durationMs,
-            request: sanitizeSensitiveData(inputData),
-            error: normalizedError,
-        };
-        renderAll();
-        throw normalizedError;
-    }
-}
-
-async function postModuleStream(endpoint, inputData, onEvent) {
-    const startedAt = Date.now();
-    let response;
-
-    try {
-        response = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ input_data: inputData }),
-        });
-    } catch (error) {
-        const networkError = new Error("\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc694\uccad\uc5d0 \uc2e4\ud328\ud588\uc2b5\ub2c8\ub2e4. \ub124\ud2b8\uc6cc\ud06c\uc640 \uc11c\ubc84 \uc0c1\ud0dc\ub97c \ud655\uc778\ud574 \uc8fc\uc138\uc694.");
-        networkError.code = "network_error";
-        networkError.endpoint = endpoint;
-        networkError.detail = error instanceof Error ? error.message : String(error);
-        networkError.durationMs = Date.now() - startedAt;
-        throw networkError;
-    }
-
-    const requestId = response.headers.get("X-Request-ID") || "";
-    if (!response.ok) {
-        const rawText = await response.text();
-        const payload = tryParseJson(rawText);
-        throw createApiError({
-            endpoint,
-            requestId,
-            statusCode: response.status,
-            payload,
-            rawText,
-            durationMs: Date.now() - startedAt,
-        });
-    }
-
-    if (!response.body) {
-        return {
-            requestId,
-            result: {},
-            durationMs: Date.now() - startedAt,
-        };
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let finalResult = {};
-
-    while (true) {
-        const { value, done } = await reader.read();
-        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-
-        let newlineIndex = buffer.indexOf("\n");
-        while (newlineIndex !== -1) {
-            const line = buffer.slice(0, newlineIndex).trim();
-            buffer = buffer.slice(newlineIndex + 1);
-
-            if (line) {
-                const payload = tryParseJson(line);
-                if (payload?.event === "error") {
-                    throw createApiError({
-                        endpoint,
-                        requestId,
-                        statusCode: 500,
-                        payload: { error: payload.error || {} },
-                        rawText: line,
-                        durationMs: Date.now() - startedAt,
-                    });
-                }
-                if (payload?.event === "completed") {
-                    finalResult = payload.result || {};
-                }
-                if (payload && typeof onEvent === "function") {
-                    onEvent(payload);
-                }
-            }
-
-            newlineIndex = buffer.indexOf("\n");
-        }
-
-        if (done) {
-            break;
-        }
-    }
-
-    const trailingLine = buffer.trim();
-    if (trailingLine) {
-        const payload = tryParseJson(trailingLine);
-        if (payload?.event === "error") {
-            throw createApiError({
-                endpoint,
-                requestId,
-                statusCode: 500,
-                payload: { error: payload.error || {} },
-                rawText: trailingLine,
-                durationMs: Date.now() - startedAt,
-            });
-        }
-        if (payload?.event === "completed") {
-            finalResult = payload.result || {};
-        }
-        if (payload && typeof onEvent === "function") {
-            onEvent(payload);
-        }
-    }
-
-    return {
-        requestId,
-        result: finalResult,
-        durationMs: Date.now() - startedAt,
-    };
-}
 
 function applyExpandStreamEvent(eventPayload, startedAt) {
     if (!eventPayload || eventPayload.event !== "progress") {
@@ -5905,7 +4299,12 @@ function applyExpandStreamEvent(eventPayload, startedAt) {
     const currentItems = Array.isArray(currentResult.expanded_keywords) ? currentResult.expanded_keywords : [];
     const currentMeta = currentResult.stream_meta || {};
 
-    if (progress.type === "keyword_results" || progress.type === "depth_completed") {
+    if (progress.type === "keyword_results") {
+        currentResult.expanded_keywords = mergeExpandedKeywords(
+            currentItems,
+            progress.accepted_items || progress.items || [],
+        );
+    } else if (progress.type === "depth_completed") {
         currentResult.expanded_keywords = mergeExpandedKeywords(currentItems, progress.items || []);
     }
 
@@ -5942,10 +4341,16 @@ function buildExpandStreamStatusMessage(streamMeta) {
         return "\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911\uc785\ub2c8\ub2e4.";
     }
     if (streamMeta.currentKeyword) {
-        return `${streamMeta.depth || "?"}\ub2e8\uacc4 \u00b7 ${streamMeta.currentKeyword} \ud655\uc7a5 \uc911`;
+        const totalResults = Number(streamMeta.totalResults || 0);
+        return totalResults > 0
+            ? `${streamMeta.depth || "?"}\ub2e8\uacc4 \u00b7 ${streamMeta.currentKeyword} \ud655\uc7a5 \uc911 \u00b7 \ub204\uc801 ${totalResults}\uac74`
+            : `${streamMeta.depth || "?"}\ub2e8\uacc4 \u00b7 ${streamMeta.currentKeyword} \ud655\uc7a5 \uc911`;
     }
     if (streamMeta.depth) {
-        return `${streamMeta.depth}\ub2e8\uacc4 \ud655\uc7a5 \uc911`;
+        const totalResults = Number(streamMeta.totalResults || 0);
+        return totalResults > 0
+            ? `${streamMeta.depth}\ub2e8\uacc4 \ud655\uc7a5 \uc911 \u00b7 \ub204\uc801 ${totalResults}\uac74`
+            : `${streamMeta.depth}\ub2e8\uacc4 \ud655\uc7a5 \uc911`;
     }
     return "\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911\uc785\ub2c8\ub2e4.";
 }
@@ -5969,6 +4374,7 @@ function bindElements() {
     elements.trendSourceHelp = document.getElementById("trendSourceHelp");
     elements.launchLoginBrowserButton = document.getElementById("launchLoginBrowserButton");
     elements.loadLocalCookieButton = document.getElementById("loadLocalCookieButton");
+    elements.validateTrendSessionButton = document.getElementById("validateTrendSessionButton");
     elements.localCookieStatus = document.getElementById("localCookieStatus");
     elements.expanderAnalysisPath = document.getElementById("expanderAnalysisPath");
     elements.optionRelated = document.getElementById("optionRelated");
@@ -5986,8 +4392,31 @@ function bindElements() {
     elements.analyzeInputSource = document.getElementById("analyzeInputSource");
     elements.analyzeManualInput = document.getElementById("analyzeManualInput");
     elements.analyzeKeywordStatsInput = document.getElementById("analyzeKeywordStatsInput");
+    elements.exportCollectedCsvButton = document.getElementById("exportCollectedCsvButton");
+    elements.exportCollectedTxtButton = document.getElementById("exportCollectedTxtButton");
+    elements.exportExpandedCsvButton = document.getElementById("exportExpandedCsvButton");
+    elements.exportExpandedTxtButton = document.getElementById("exportExpandedTxtButton");
     elements.exportCsvButton = document.getElementById("exportCsvButton");
+    elements.exportAnalyzedTxtButton = document.getElementById("exportAnalyzedTxtButton");
+    elements.exportSelectedCsvButton = document.getElementById("exportSelectedCsvButton");
+    elements.exportSelectedTxtButton = document.getElementById("exportSelectedTxtButton");
+    elements.exportCollectedCsvButtonUtility = document.getElementById("exportCollectedCsvButtonUtility");
+    elements.exportSelectedCsvButtonUtility = document.getElementById("exportSelectedCsvButtonUtility");
+    elements.resultsExportCollectedCsvButton = document.getElementById("resultsExportCollectedCsvButton");
+    elements.resultsExportCollectedTxtButton = document.getElementById("resultsExportCollectedTxtButton");
+    elements.resultsExportExpandedCsvButton = document.getElementById("resultsExportExpandedCsvButton");
+    elements.resultsExportExpandedTxtButton = document.getElementById("resultsExportExpandedTxtButton");
+    elements.resultsExportAnalyzedCsvButton = document.getElementById("resultsExportAnalyzedCsvButton");
+    elements.resultsExportAnalyzedTxtButton = document.getElementById("resultsExportAnalyzedTxtButton");
+    elements.resultsExportSelectedCsvButton = document.getElementById("resultsExportSelectedCsvButton");
+    elements.resultsExportSelectedTxtButton = document.getElementById("resultsExportSelectedTxtButton");
     elements.exportTitleCsvButton = document.getElementById("exportTitleCsvButton");
+    if (elements.exportCollectedCsvButtonUtility && !elements.exportCollectedCsvButtonUtility.closest(".results-panel-tools")) {
+        elements.exportCollectedCsvButtonUtility.hidden = true;
+    }
+    if (elements.exportSelectedCsvButtonUtility && !elements.exportSelectedCsvButtonUtility.closest(".results-panel-tools")) {
+        elements.exportSelectedCsvButtonUtility.hidden = true;
+    }
     elements.quickStartModeButtons = Array.from(document.querySelectorAll("[data-quickstart-mode]"));
     elements.quickStartModeBadge = document.getElementById("quickStartModeBadge");
     elements.quickStartSummaryTitle = document.getElementById("quickStartSummaryTitle");
@@ -5998,8 +4427,9 @@ function bindElements() {
     elements.analyzeSourceVisibilityBlocks = Array.from(document.querySelectorAll("[data-analyze-source-visibility]"));
     elements.selectedCollectedCount = document.getElementById("selectedCollectedCount");
     elements.manualAnalyzeCount = document.getElementById("manualAnalyzeCount");
-    elements.gradePresetButtons = Array.from(document.querySelectorAll("[data-grade-preset]"));
-    elements.gradeToggleButtons = Array.from(document.querySelectorAll("[data-grade-toggle]"));
+    elements.gradePresetButtons = Array.from(document.querySelectorAll("[data-selection-preset]"));
+    elements.gradeToggleButtons = Array.from(document.querySelectorAll("[data-profitability-toggle]"));
+    elements.attackabilityToggleButtons = Array.from(document.querySelectorAll("[data-attackability-toggle]"));
     elements.runGradeSelectButton = document.getElementById("runGradeSelectButton");
     elements.gradeSelectSummary = document.getElementById("gradeSelectSummary");
     elements.titleMode = document.getElementById("titleMode");
@@ -6050,6 +4480,27 @@ function bindElements() {
     elements.openTitleQualityPromptEditorButton = document.getElementById("openTitleQualityPromptEditorButton");
     elements.clearTitleQualityPromptButton = document.getElementById("clearTitleQualityPromptButton");
     elements.titleModeBadge = document.getElementById("titleModeBadge");
+    elements.operationMode = document.getElementById("operationMode");
+    elements.operationRequestGap = document.getElementById("operationRequestGap");
+    elements.operationDailyLimit = document.getElementById("operationDailyLimit");
+    elements.operationDailyRequestLimit = document.getElementById("operationDailyRequestLimit");
+    elements.operationMaxContinuousMinutes = document.getElementById("operationMaxContinuousMinutes");
+    elements.operationStopOnAuthError = document.getElementById("operationStopOnAuthError");
+    elements.operationModeDescription = document.getElementById("operationModeDescription");
+    elements.operationCustomModeGuide = document.getElementById("operationCustomModeGuide");
+    elements.operationGuardCard = document.getElementById("operationGuardCard");
+    elements.operationCustomPresetPanel = document.getElementById("operationCustomPresetPanel");
+    elements.operationCustomPresetButtons = Array.from(document.querySelectorAll("[data-operation-custom-preset]"));
+    elements.operationCustomPresetDescription = document.getElementById("operationCustomPresetDescription");
+    elements.operationSettingsHint = document.getElementById("operationSettingsHint");
+    elements.operationSettingsSyncStatus = document.getElementById("operationSettingsSyncStatus");
+    elements.operationModeStatus = document.getElementById("operationModeStatus");
+    elements.operationDailyUsage = document.getElementById("operationDailyUsage");
+    elements.operationRequestUsage = document.getElementById("operationRequestUsage");
+    elements.operationGuardStatus = document.getElementById("operationGuardStatus");
+    elements.refreshOperationSettingsButton = document.getElementById("refreshOperationSettingsButton");
+    elements.resetOperationGuardsButton = document.getElementById("resetOperationGuardsButton");
+    elements.saveOperationSettingsButton = document.getElementById("saveOperationSettingsButton");
     elements.titleModeRadios = Array.from(document.querySelectorAll("input[name='titleModeOption']"));
     elements.titleModeVisibilityBlocks = Array.from(document.querySelectorAll("[data-title-mode-visibility]"));
     elements.statusList = document.getElementById("statusList");
@@ -6175,6 +4626,9 @@ function bindEvents() {
     elements.loadLocalCookieButton?.addEventListener("click", () => {
         runWithGuard(importLocalNaverCookie, "\ub85c\uceec \ub124\uc774\ubc84 \uc138\uc158 \ubd88\ub7ec\uc624\ub294 \uc911");
     });
+    elements.validateTrendSessionButton?.addEventListener("click", () => {
+        runWithGuard(validateTrendSession, "Creator Advisor \ub85c\uadf8\uc778 \uc0c1\ud0dc\ub97c \ud655\uc778\ud558\ub294 \uc911");
+    });
     elements.launchLoginBrowserButton?.addEventListener("click", () => {
         runWithGuard(openDedicatedLoginBrowser, "\uc804\uc6a9 \ub85c\uadf8\uc778 \ube0c\ub77c\uc6b0\uc800 \uc5ec\ub294 \uc911");
     });
@@ -6242,7 +4696,7 @@ function bindEvents() {
         });
     });
     elements.refreshOperationSettingsButton?.addEventListener("click", () => {
-        void loadOperationSettings({ forceServer: true });
+        void loadOperationSettings({ forceServer: true, announce: true });
     });
     elements.saveOperationSettingsButton?.addEventListener("click", () => {
         void saveOperationSettings();
@@ -6256,7 +4710,24 @@ function bindEvents() {
     elements.expandLimitButtons.forEach((button) => {
         button.addEventListener("click", () => setExpandLimitPreset(button.dataset.expandLimit || "1000"));
     });
+    elements.exportCollectedCsvButton?.addEventListener("click", downloadCollectedCsv);
+    elements.exportCollectedTxtButton?.addEventListener("click", downloadCollectedTxt);
+    elements.exportExpandedCsvButton?.addEventListener("click", downloadExpandedCsv);
+    elements.exportExpandedTxtButton?.addEventListener("click", downloadExpandedTxt);
     elements.exportCsvButton?.addEventListener("click", downloadAnalyzedCsv);
+    elements.exportAnalyzedTxtButton?.addEventListener("click", downloadAnalyzedTxt);
+    elements.exportSelectedCsvButton?.addEventListener("click", downloadSelectedCsv);
+    elements.exportSelectedTxtButton?.addEventListener("click", downloadSelectedTxt);
+    elements.exportCollectedCsvButtonUtility?.addEventListener("click", downloadCollectedCsv);
+    elements.exportSelectedCsvButtonUtility?.addEventListener("click", downloadSelectedCsv);
+    elements.resultsExportCollectedCsvButton?.addEventListener("click", downloadCollectedCsv);
+    elements.resultsExportCollectedTxtButton?.addEventListener("click", downloadCollectedTxt);
+    elements.resultsExportExpandedCsvButton?.addEventListener("click", downloadExpandedCsv);
+    elements.resultsExportExpandedTxtButton?.addEventListener("click", downloadExpandedTxt);
+    elements.resultsExportAnalyzedCsvButton?.addEventListener("click", downloadAnalyzedCsv);
+    elements.resultsExportAnalyzedTxtButton?.addEventListener("click", downloadAnalyzedTxt);
+    elements.resultsExportSelectedCsvButton?.addEventListener("click", downloadSelectedCsv);
+    elements.resultsExportSelectedTxtButton?.addEventListener("click", downloadSelectedTxt);
     elements.exportTitleCsvButton?.addEventListener("click", downloadTitleCsv);
     setExpandLimitPreset(elements.expandMaxResultsInput?.value || "1000");
 }
@@ -6331,62 +4802,6 @@ function buildExpandInput() {
     });
 }
 
-function renderInputState() {
-    const mode = getCollectorMode();
-    const categoryMode = mode === "category";
-    const selectedCount = getSelectedCollectedItems().length;
-    const expandCount = parseKeywordText(elements.expandManualInput?.value || "").length;
-    const analyzeCount = parseKeywordText(elements.analyzeManualInput?.value || "").length;
-    const expandUsesManual = elements.expandInputSource?.value === "manual_text";
-    const analyzeUsesManual = elements.analyzeInputSource?.value === "manual_text";
-    const usesTrendSource = categoryMode && elements.categorySourceInput?.value === "naver_trend";
-
-    elements.modeVisibilityBlocks.forEach((element) => {
-        element.hidden = element.dataset.modeVisibility !== mode;
-    });
-
-    if (elements.selectedCollectedCount) {
-        elements.selectedCollectedCount.textContent = expandUsesManual
-            ? `\uc9c1\uc811 \uc785\ub825 ${expandCount}\uac74`
-            : `\uc120\ud0dd ${selectedCount}\uac74`;
-    }
-    if (elements.manualAnalyzeCount) {
-        elements.manualAnalyzeCount.textContent = `\uc9c1\uc811 \uc785\ub825 ${analyzeCount}\uac74`;
-    }
-    if (elements.expandManualInput) {
-        elements.expandManualInput.disabled = !expandUsesManual;
-    }
-    if (elements.analyzeManualInput) {
-        elements.analyzeManualInput.disabled = !analyzeUsesManual;
-    }
-    if (elements.seedInput) {
-        elements.seedInput.disabled = categoryMode;
-        elements.seedInput.title = categoryMode ? "\uce74\ud14c\uace0\ub9ac \ubaa8\ub4dc\uc5d0\uc11c\ub294 \uc2dc\ub4dc \ud0a4\uc6cc\ub4dc\ub97c \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4." : "";
-    }
-    if (elements.categoryInput) {
-        elements.categoryInput.disabled = !categoryMode;
-        elements.categoryInput.title = categoryMode ? "" : "\uc2dc\ub4dc \ubaa8\ub4dc\uc5d0\uc11c\ub294 \uce74\ud14c\uace0\ub9ac\ub97c \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.";
-    }
-    if (elements.categorySourceInput) {
-        elements.categorySourceInput.disabled = !categoryMode;
-    }
-    if (elements.optionRelated) {
-        elements.optionRelated.title = usesTrendSource ? "\ud2b8\ub80c\ub4dc \uc2e4\ud328 \ud6c4 preset fallback\uc5d0\uc11c\ub9cc \uc801\uc6a9\ub429\ub2c8\ub2e4." : "";
-    }
-    if (elements.optionAutocomplete) {
-        elements.optionAutocomplete.title = usesTrendSource ? "\ud2b8\ub80c\ub4dc \uc2e4\ud328 \ud6c4 preset fallback\uc5d0\uc11c\ub9cc \uc801\uc6a9\ub429\ub2c8\ub2e4." : "";
-    }
-    if (elements.optionBulk) {
-        elements.optionBulk.title = usesTrendSource ? "\ud2b8\ub80c\ub4dc \uc2e4\ud328 \ud6c4 preset fallback\uc5d0\uc11c\ub9cc \uc801\uc6a9\ub429\ub2c8\ub2e4." : "";
-    }
-    if (elements.stopStreamButton) {
-        elements.stopStreamButton.title = state.streamAbortController
-            ? "\uc2e4\uc2dc\uac04 \ud655\uc7a5/\ubd84\uc11d \uc2a4\ud2b8\ub9bc\uc744 \uc911\uc9c0\ud569\ub2c8\ub2e4."
-            : "";
-    }
-
-    renderTrendSettingsState();
-}
 
 function renderTrendSettingsState() {
     const categoryMode = getCollectorMode() === "category";
@@ -6394,6 +4809,7 @@ function renderTrendSettingsState() {
     const hasInlineCookie = Boolean(elements.trendCookieInput.value.trim());
     const trendSessionCache = state.trendSessionCache?.available ? state.trendSessionCache : null;
     const hasCachedSession = Boolean(trendSessionCache);
+    const validationPending = Boolean(state.trendSessionValidationPending);
     const browserLabel = describeTrendBrowserSelection();
     const cachedBrowserLabel = formatTrendBrowserLabel(trendSessionCache?.browser || "");
     const fallbackLabel = elements.trendFallbackInput.checked ? "켜짐" : "꺼짐";
@@ -6405,9 +4821,16 @@ function renderTrendSettingsState() {
     elements.trendBrowserInput.disabled = !usesTrendSource;
     elements.trendCookieInput.disabled = !usesTrendSource;
     elements.trendFallbackInput.disabled = !categoryMode;
-    elements.launchLoginBrowserButton.disabled = !usesTrendSource;
+    elements.launchLoginBrowserButton.disabled = !usesTrendSource || validationPending;
     if (elements.loadLocalCookieButton) {
-        elements.loadLocalCookieButton.disabled = !usesTrendSource;
+        elements.loadLocalCookieButton.disabled = !usesTrendSource || validationPending;
+    }
+    if (elements.validateTrendSessionButton) {
+        elements.validateTrendSessionButton.disabled = !usesTrendSource || validationPending;
+        elements.validateTrendSessionButton.textContent = validationPending
+            ? "로그인 상태 확인 중..."
+            : "로그인 상태 확인";
+        elements.validateTrendSessionButton.setAttribute("aria-busy", validationPending ? "true" : "false");
     }
 
     if (elements.trendSourceHelp) {
@@ -6432,48 +4855,7 @@ function renderTrendSettingsState() {
     }
 }
 
-function syncBusyButtons() {
-    elements.actionButtons.forEach((button) => {
-        if (button === elements.stopStreamButton) {
-            button.disabled = !(state.isBusy && state.streamAbortController && !state.streamAbortRequested);
-            return;
-        }
-        button.disabled = state.isBusy;
-    });
-}
 
-async function runWithGuard(task, runningMessage) {
-    if (state.isBusy) {
-        addLog("\uc774\ubbf8 \ub2e4\ub978 \uc791\uc5c5\uc744 \uc2e4\ud589 \uc911\uc785\ub2c8\ub2e4. \ud604\uc7ac \ub2e8\uacc4\uac00 \ub05d\ub09c \ub4a4 \ub2e4\uc2dc \uc2dc\ub3c4\ud574 \uc8fc\uc138\uc694.", "error");
-        return;
-    }
-
-    state.isBusy = true;
-    state.lastError = null;
-    setGlobalStatus(runningMessage, "running");
-    syncBusyButtons();
-    renderAll();
-
-    try {
-        await task();
-        setGlobalStatus("\uc2e4\ud589 \uc644\ub8cc", "success");
-    } catch (error) {
-        if (isAbortLikeError(error)) {
-            state.lastError = null;
-            setGlobalStatus("\uc911\uc9c0\ub428", "idle");
-            addLog(error.message || "\uc2e4\uc2dc\uac04 \uc791\uc5c5\uc744 \uc911\uc9c0\ud588\uc2b5\ub2c8\ub2e4.", "info");
-        } else {
-            const normalizedError = normalizeError(error);
-            state.lastError = normalizedError;
-            setGlobalStatus("\uc624\ub958 \ubc1c\uc0dd", "error");
-            addLog(buildErrorHeadline(normalizedError), "error");
-        }
-    } finally {
-        state.isBusy = false;
-        syncBusyButtons();
-        renderAll();
-    }
-}
 
 function beginStreamRequest(endpoint) {
     const controller = new AbortController();
@@ -6644,6 +5026,7 @@ async function executeExpandStageStream(inputData) {
 async function executeExpandAnalyzeStageStream(inputData) {
     const expandedStartedAt = Date.now();
     const analyzedStartedAt = expandedStartedAt;
+    const selectedStartedAt = expandedStartedAt;
     const startedAtLabel = new Date(expandedStartedAt).toISOString();
     const streamController = beginStreamRequest("/expand/analyze/stream");
 
@@ -6658,7 +5041,14 @@ async function executeExpandAnalyzeStageStream(inputData) {
     };
     state.stageStatus.analyzed = {
         state: "running",
-        message: "\ud655\uc7a5 \uc644\ub8cc \ud6c4 \uc77c\uad04 \ubd84\uc11d \ub300\uae30",
+        message: "\ud655\uc7a5 \uacb0\uacfc \ub300\uae30 \uc911",
+        startedAt: null,
+        finishedAt: null,
+        durationMs: null,
+    };
+    state.stageStatus.selected = {
+        state: "running",
+        message: "\ubd84\uc11d \uacb0\uacfc \ub300\uae30 \uc911",
         startedAt: null,
         finishedAt: null,
         durationMs: null,
@@ -6683,6 +5073,7 @@ async function executeExpandAnalyzeStageStream(inputData) {
             totalAnalyzed: 0,
         },
     };
+    state.results.selected = decorateSelectedResult(createEmptySelectedResult(), 0);
     renderAll();
 
     try {
@@ -6695,6 +5086,9 @@ async function executeExpandAnalyzeStageStream(inputData) {
                 }
                 if (eventPayload?.event === "analysis") {
                     applyAnalyzeStreamEvent(eventPayload, state.stageStatus.analyzed?.startedAt || Date.now());
+                }
+                if (eventPayload?.event === "selection") {
+                    applySelectionStreamEvent(eventPayload, state.stageStatus.selected?.startedAt || Date.now());
                 }
             },
             { signal: streamController.signal },
@@ -6709,11 +5103,26 @@ async function executeExpandAnalyzeStageStream(inputData) {
             state.results.analyzed?.analyzed_keywords || [],
             result.analyzed_keywords || [],
         );
+        const selectedResult = decorateSelectedResult(
+            result.selected_keywords || result.longtail_suggestions
+                ? result
+                : (state.results.selected || createEmptySelectedResult()),
+            countItems(result.analyzed_keywords || []),
+        );
+        state.results.selected = selectedResult;
+        const nextOptionalSuffixKeys = Array.isArray(selectedResult.longtail_options?.optional_suffix_keys)
+            ? selectedResult.longtail_options.optional_suffix_keys
+            : [];
+        if (nextOptionalSuffixKeys.length) {
+            state.longtailOptionalSuffixKeys = [...nextOptionalSuffixKeys];
+        }
 
         const finishedAt = Date.now();
         const expandedDurationMs = finishedAt - expandedStartedAt;
         const analyzedStartedAt = state.stageStatus.analyzed?.startedAt || finishedAt;
         const analyzedDurationMs = finishedAt - analyzedStartedAt;
+        const selectedStartedAt = state.stageStatus.selected?.startedAt || finishedAt;
+        const selectedDurationMs = finishedAt - selectedStartedAt;
         state.stageStatus.expanded = {
             state: "success",
             message: `${result.expanded_keywords.length}\uac74 \uc644\ub8cc`,
@@ -6727,6 +5136,13 @@ async function executeExpandAnalyzeStageStream(inputData) {
             startedAt: analyzedStartedAt,
             finishedAt,
             durationMs: analyzedDurationMs,
+        };
+        state.stageStatus.selected = {
+            state: "success",
+            message: `${countItems(selectedResult.selected_keywords || [])}\uac74 \uc644\ub8cc`,
+            startedAt: selectedStartedAt,
+            finishedAt,
+            durationMs: selectedDurationMs,
         };
         state.diagnostics.expanded = {
             stageKey: "expanded",
@@ -6752,13 +5168,27 @@ async function executeExpandAnalyzeStageStream(inputData) {
             responseSummary: buildResponseSummary("analyzed", result),
             backendDebug: result.debug || null,
         };
+        state.diagnostics.selected = {
+            stageKey: "selected",
+            stageLabel: getStage("selected").label,
+            status: "success",
+            endpoint: "/expand/analyze/stream",
+            requestId: response.requestId,
+            startedAt: new Date(selectedStartedAt).toISOString(),
+            durationMs: selectedDurationMs,
+            request: sanitizeSensitiveData(inputData),
+            responseSummary: buildResponseSummary("selected", selectedResult),
+            backendDebug: result.debug || null,
+        };
         cancelScheduledStreamRender();
         return result;
     } catch (error) {
         const finishedAt = Date.now();
         const analyzedStartedAt = state.stageStatus.analyzed?.startedAt || finishedAt;
+        const selectedStartedAt = state.stageStatus.selected?.startedAt || finishedAt;
         const expandedDurationMs = finishedAt - expandedStartedAt;
         const analyzedDurationMs = finishedAt - analyzedStartedAt;
+        const selectedDurationMs = finishedAt - selectedStartedAt;
         if (isAbortLikeError(error)) {
             state.stageStatus.expanded = {
                 state: "cancelled",
@@ -6773,6 +5203,13 @@ async function executeExpandAnalyzeStageStream(inputData) {
                 startedAt: analyzedStartedAt,
                 finishedAt,
                 durationMs: analyzedDurationMs,
+            };
+            state.stageStatus.selected = {
+                state: "cancelled",
+                message: "\uc0ac\uc6a9\uc790 \uc911\uc9c0",
+                startedAt: selectedStartedAt,
+                finishedAt,
+                durationMs: selectedDurationMs,
             };
             state.diagnostics.expanded = {
                 stageKey: "expanded",
@@ -6792,6 +5229,16 @@ async function executeExpandAnalyzeStageStream(inputData) {
                 requestId: "",
                 startedAt: new Date(analyzedStartedAt).toISOString(),
                 durationMs: analyzedDurationMs,
+                request: sanitizeSensitiveData(inputData),
+            };
+            state.diagnostics.selected = {
+                stageKey: "selected",
+                stageLabel: getStage("selected").label,
+                status: "cancelled",
+                endpoint: "/expand/analyze/stream",
+                requestId: "",
+                startedAt: new Date(selectedStartedAt).toISOString(),
+                durationMs: selectedDurationMs,
                 request: sanitizeSensitiveData(inputData),
             };
             cancelScheduledStreamRender();
@@ -6820,6 +5267,13 @@ async function executeExpandAnalyzeStageStream(inputData) {
             finishedAt,
             durationMs: analyzedDurationMs,
         };
+        state.stageStatus.selected = {
+            state: "error",
+            message: normalizedError.message,
+            startedAt: selectedStartedAt,
+            finishedAt,
+            durationMs: selectedDurationMs,
+        };
         state.diagnostics.expanded = {
             stageKey: "expanded",
             stageLabel: getStage("expanded").label,
@@ -6839,6 +5293,17 @@ async function executeExpandAnalyzeStageStream(inputData) {
             requestId: normalizedError.requestId,
             startedAt: new Date(analyzedStartedAt).toISOString(),
             durationMs: analyzedDurationMs,
+            request: sanitizeSensitiveData(inputData),
+            error: normalizedError,
+        };
+        state.diagnostics.selected = {
+            stageKey: "selected",
+            stageLabel: getStage("selected").label,
+            status: "error",
+            endpoint: "/expand/analyze/stream",
+            requestId: normalizedError.requestId,
+            startedAt: new Date(selectedStartedAt).toISOString(),
+            durationMs: selectedDurationMs,
             request: sanitizeSensitiveData(inputData),
             error: normalizedError,
         };
@@ -7006,6 +5471,12 @@ function formatStageBadge(status) {
     return "\ub300\uae30";
 }
 
+function formatPriority(priority) {
+    if (priority === "high") return "\uc0c1";
+    if (priority === "medium") return "\uc911";
+    return "\ud558";
+}
+
 function getStageStatusIcon(stateValue) {
     if (stateValue === "running") return "\u25d4";
     if (stateValue === "success") return "\u25cf";
@@ -7068,66 +5539,8 @@ function applyTitleModeSelection(mode) {
     return normalized;
 }
 
-function loadTitleSettings() {
-    const defaults = {
-        mode: "template",
-        provider: "openai",
-        model: TITLE_PROVIDER_DEFAULT_MODELS.openai,
-        api_key: "",
-        temperature: "0.7",
-        fallback_to_template: true,
-    };
 
-    const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY);
-    const settings = { ...defaults, ...(storedSettings || {}) };
 
-    applyTitleModeSelection(settings.mode);
-    elements.titleProvider.value = settings.provider;
-    elements.titleModel.value = settings.model;
-    elements.titleApiKey.value = settings.api_key;
-    elements.titleTemperature.value = String(settings.temperature || "0.7");
-    elements.titleFallback.checked = Boolean(settings.fallback_to_template);
-
-    renderTitleSettingsState();
-}
-
-function handleTitleSettingsChange(event) {
-    if (event?.target?.matches?.("input[name='titleModeOption']")) {
-        syncTitleModeInputFromRadios();
-    }
-
-    if (event?.target === elements.titleProvider && !elements.titleModel.value.trim()) {
-        elements.titleModel.value = TITLE_PROVIDER_DEFAULT_MODELS[elements.titleProvider.value] || "gpt-4o-mini";
-    }
-
-    if (event?.target === elements.titleProvider) {
-        const providerModel = TITLE_PROVIDER_DEFAULT_MODELS[elements.titleProvider.value] || "gpt-4o-mini";
-        const currentModel = elements.titleModel.value.trim();
-        const knownModels = Object.values(TITLE_PROVIDER_DEFAULT_MODELS);
-        if (!currentModel || knownModels.includes(currentModel)) {
-            elements.titleModel.value = providerModel;
-        }
-    }
-
-    persistTitleSettings();
-    renderTitleSettingsState();
-}
-
-function renderTitleSettingsState() {
-    const mode = syncTitleModeInputFromRadios();
-    const isAiMode = mode === "ai";
-
-    elements.titleModeVisibilityBlocks.forEach((block) => {
-        block.hidden = block.dataset.titleModeVisibility !== mode;
-    });
-
-    elements.titleProvider.disabled = !isAiMode;
-    elements.titleModel.disabled = !isAiMode;
-    elements.titleApiKey.disabled = !isAiMode;
-    elements.titleTemperature.disabled = !isAiMode;
-    elements.titleFallback.disabled = !isAiMode;
-    elements.titleModeBadge.textContent = isAiMode ? `AI:${elements.titleProvider.value}` : "템플릿";
-}
 
 function resetAll() {
     clearPipelineResults({
@@ -7136,27 +5549,6 @@ function resetAll() {
         announce: true,
         message: "결과와 디버그 정보를 초기화했습니다.",
     });
-    return;
-    state.results = createEmptyResults();
-    state.stageStatus = createInitialStageStatus();
-    state.diagnostics = createEmptyDiagnostics();
-    state.selectedCollectedKeys = [];
-    state.selectGradeFilters = [...PROFITABILITY_ORDER];
-    state.selectAttackabilityFilters = [...ATTACKABILITY_ORDER];
-    state.gradeSelectionTouched = false;
-    state.activeResultView = "";
-    state.lastError = null;
-    state.analyzedFilters = createDefaultAnalyzedFilters();
-    state.streamAbortController = null;
-    state.streamAbortEndpoint = "";
-    state.streamAbortRequested = false;
-    state.requestAbortController = null;
-    state.requestAbortStageKey = "";
-    state.requestAbortEndpoint = "";
-    state.requestAbortRequested = false;
-    setGlobalStatus("대기 중", "idle");
-    renderAll();
-    addLog("결과와 디버그 정보를 초기화했습니다.");
 }
 
 function renderInputState() {
@@ -7314,18 +5706,6 @@ function renderGuideTabs() {
     });
 }
 
-function getTitleSettingsFormState() {
-    const mode = syncTitleModeInputFromRadios();
-    const provider = elements.titleProvider.value;
-    return {
-        mode,
-        provider,
-        model: elements.titleModel.value.trim() || TITLE_PROVIDER_DEFAULT_MODELS[provider] || "gpt-4o-mini",
-        api_key: elements.titleApiKey.value.trim(),
-        temperature: elements.titleTemperature.value.trim() || "0.7",
-        fallback_to_template: elements.titleFallback.checked,
-    };
-}
 
 function setGlobalStatus(message, kind) {
     elements.pipelineStatus.textContent = message;
@@ -7572,17 +5952,6 @@ async function runWithGuard(task, runningMessage) {
     }
 }
 
-function cancelActiveStream() {
-    if (!state.streamAbortController || state.streamAbortRequested) {
-        return;
-    }
-    state.streamAbortRequested = true;
-    addLog("\uc2e4\uc2dc\uac04 \ud655\uc7a5 \uc911\uc9c0\ub97c \uc694\uccad\ud588\uc2b5\ub2c8\ub2e4. \ub9c8\uc9c0\ub9c9 \uc218\uc2e0 \ub370\uc774\ud130\uae4c\uc9c0 \ubcf4\uc874\ud569\ub2c8\ub2e4.", "info");
-    updateStopButtonState();
-    state.streamAbortController.abort("user_cancelled");
-    renderAll();
-}
-
 function buildExpandedLiveSubtitle() {
     const streamMeta = state.results.expanded?.stream_meta;
     if (!streamMeta) {
@@ -7722,163 +6091,8 @@ function hasMatchingSelectionProfile(allowedGrades) {
         && normalizedGrades.every((grade) => profileGrades.includes(grade));
 }
 
-async function runSelectStage(options = {}) {
-    if (!state.results.analyzed?.analyzed_keywords?.length) {
-        await runAnalyzeStage();
-    } else if (state.stageStatus.analyzed.state === "cancelled") {
-        addLog(`중지 전까지 분석된 ${countItems(state.results.analyzed.analyzed_keywords)}건으로 선별을 이어갑니다.`);
-    }
 
-    const allowedGrades = normalizeGradeList(options.allowedGrades || []);
-    const analyzedKeywords = state.results.analyzed?.analyzed_keywords || [];
-    const selectionCandidates = allowedGrades.length
-        ? analyzedKeywords.filter((item) => allowedGrades.includes(resolveAnalysisGrade(item)))
-        : analyzedKeywords;
 
-    if (!selectionCandidates.length) {
-        const noticeMessage = allowedGrades.length
-            ? `선택한 조건에 맞는 검색 결과가 없습니다.\n등급 조건(${allowedGrades.join(", ")})을 넓혀서 다시 시도해 주세요.`
-            : "선별할 검색 결과가 없습니다.\n먼저 수집/확장/분석 결과를 확인해 주세요.";
-        applyEmptySelectedResult(noticeMessage);
-        throw createUserNoticeError(noticeMessage, {
-            code: "empty_selection_notice",
-            stageKey: "selected",
-        });
-    }
-
-    addLog(
-        allowedGrades.length
-            ? `선별 시작: ${allowedGrades.join(", ")} 등급 ${countItems(selectionCandidates)}건에 골든 기준을 적용합니다.`
-            : "선별 시작: 골든 키워드 기준을 적용합니다.",
-    );
-    clearStageAndDownstream("selected");
-    const result = await executeStage({
-        stageKey: "selected",
-        endpoint: "/select",
-        inputData: {
-            analyzed_keywords: selectionCandidates,
-            select_options: allowedGrades.length
-                ? { allowed_grades: allowedGrades, mode: "grade_filter" }
-                : {},
-        },
-    });
-
-    state.results.selected = {
-        ...result,
-        selection_profile: {
-            mode: allowedGrades.length ? "grade_filter" : "default",
-            allowed_grades: allowedGrades,
-            candidate_count: selectionCandidates.length,
-        },
-    };
-    addLog(
-        allowedGrades.length
-            ? `선별 완료 (${allowedGrades.join(", ")}): ${countItems(result.selected_keywords)}건`
-            : `선별 완료: ${countItems(result.selected_keywords)}건`,
-        "success",
-    );
-    renderAll();
-    return state.results.selected;
-}
-
-async function runTitleStage() {
-    const forwardSelectOptions = getForwardSelectOptions();
-    if (
-        !state.results.selected?.selected_keywords?.length
-        || !hasMatchingSelectionProfile(forwardSelectOptions.allowedGrades || [])
-    ) {
-        await runSelectStage(forwardSelectOptions);
-    }
-
-    const titleOptions = buildTitleOptions();
-    if (state.stageStatus.selected.state === "cancelled") {
-        addLog(`중지 전까지 선별된 ${countItems(state.results.selected?.selected_keywords)}건으로 제목 생성을 이어갑니다.`);
-    }
-    addLog(
-        titleOptions.mode === "ai"
-            ? `제목 생성 시작: ${titleOptions.provider} / ${titleOptions.model} 모델을 사용합니다.`
-            : "제목 생성 시작: 템플릿 규칙 기반 제목을 생성합니다.",
-    );
-    clearStageAndDownstream("titled");
-    const result = await executeStage({
-        stageKey: "titled",
-        endpoint: "/generate-title",
-        inputData: {
-            selected_keywords: state.results.selected?.selected_keywords || [],
-            title_options: titleOptions,
-        },
-    });
-
-    state.results.titled = result;
-    addLog(`제목 생성 완료: ${countItems(result.generated_titles)}세트`, "success");
-    renderAll();
-    return result;
-}
-
-function handleResultsGridClick(event) {
-    if (!(event.target instanceof Element)) {
-        return;
-    }
-
-    const resultTabTrigger = event.target.closest("[data-result-tab]");
-    if (resultTabTrigger) {
-        setActiveResultView(resultTabTrigger.getAttribute("data-result-tab") || "");
-        renderResults();
-        if (resultTabTrigger.closest("#resultStageDock, .workspace-nav-stage-dock")) {
-            window.requestAnimationFrame(() => {
-                focusResultsWorkbench();
-            });
-        }
-        return;
-    }
-
-    const inlineTrigger = event.target.closest("[data-inline-action]");
-    if (inlineTrigger) {
-        const action = inlineTrigger.getAttribute("data-inline-action") || "";
-        if (action === "stop_expand_stream") {
-            cancelActiveStream();
-            return;
-        }
-        if (action === "continue_analyze") {
-            runWithGuard(runThroughAnalyze, "부분 확장 결과로 분석 이어가는 중");
-            return;
-        }
-        if (action === "continue_select") {
-            runWithGuard(runThroughSelect, "부분 분석 결과로 선별 이어가는 중");
-            return;
-        }
-        if (action === "continue_title") {
-            runWithGuard(runThroughTitle, "선별 결과로 제목 생성 이어가는 중");
-            return;
-        }
-    }
-
-    const trigger = event.target.closest("[data-collector-action]");
-    if (!trigger) {
-        return;
-    }
-
-    const action = trigger.getAttribute("data-collector-action") || "";
-    const collectedItems = state.results.collected?.collected_keywords || [];
-
-    if (action === "select_all") {
-        applyCollectedSelection(collectedItems, true);
-        return;
-    }
-
-    if (action === "clear_all") {
-        applyCollectedSelection(collectedItems, false);
-        return;
-    }
-
-    const groupKey = trigger.getAttribute("data-collector-group") || "";
-    if (!groupKey) {
-        return;
-    }
-
-    const groupItems = collectedItems.filter((item) => (item.raw || item.keyword || "") === groupKey);
-    applyCollectedSelection(groupItems, action === "select_group");
-}
 
 function renderResultStageTabs(resultViews, activeViewKey, options = {}) {
     const dockMode = Boolean(options.dockMode);
@@ -8414,29 +6628,6 @@ function resultCard(title, items, renderer, options = {}) {
 
 state.analyzedFilters = state.analyzedFilters || createDefaultAnalyzedFilters();
 
-function createDefaultAnalyzedFilters() {
-    return {
-        query: "",
-        minScore: "",
-        minPcSearch: "",
-        minMoSearch: "",
-        minTotalSearch: "1",
-        maxTotalSearch: "",
-        minBlog: "",
-        minPcClicks: "",
-        minMoClicks: "",
-        minTotalClicks: "",
-        minCpc: "",
-        minBid1: "",
-        minBid2: "",
-        minBid3: "",
-        maxCompetition: "",
-        priority: "all",
-        measured: "all",
-        hideRecentDuplicates: false,
-        hidePublished: false,
-    };
-}
 
 function getAnalyzedFilters() {
     return {
@@ -8445,17 +6636,6 @@ function getAnalyzedFilters() {
     };
 }
 
-function hasActiveAnalyzedFilters(filters = getAnalyzedFilters()) {
-    return Object.entries(filters).some(([key, value]) => {
-        if (typeof value === "boolean") {
-            return value;
-        }
-        if (key === "priority" || key === "measured") {
-            return value && value !== "all";
-        }
-        return String(value || "").trim() !== "";
-    });
-}
 
 function coerceFilterNumber(value) {
     if (value === null || value === undefined) {
@@ -8468,99 +6648,6 @@ function coerceFilterNumber(value) {
     return Number.isFinite(number) ? number : null;
 }
 
-function applyAnalyzedFilters(items) {
-    const filters = getAnalyzedFilters();
-    const selectedGrades = new Set(getSelectedGradeFilters());
-    const query = String(filters.query || "").trim().toLowerCase();
-    const minScore = coerceFilterNumber(filters.minScore);
-    const minPcSearch = coerceFilterNumber(filters.minPcSearch);
-    const minMoSearch = coerceFilterNumber(filters.minMoSearch);
-    const minTotalSearch = coerceFilterNumber(filters.minTotalSearch ?? filters.minVolume);
-    const maxTotalSearch = coerceFilterNumber(filters.maxTotalSearch);
-    const minBlog = coerceFilterNumber(filters.minBlog);
-    const minPcClicks = coerceFilterNumber(filters.minPcClicks);
-    const minMoClicks = coerceFilterNumber(filters.minMoClicks);
-    const minTotalClicks = coerceFilterNumber(filters.minTotalClicks);
-    const minCpc = coerceFilterNumber(filters.minCpc);
-    const minBid1 = coerceFilterNumber(filters.minBid1 ?? filters.minBid);
-    const minBid2 = coerceFilterNumber(filters.minBid2);
-    const minBid3 = coerceFilterNumber(filters.minBid3);
-    const maxCompetition = coerceFilterNumber(filters.maxCompetition);
-    const priority = String(filters.priority || "all");
-    const measured = String(filters.measured || "all");
-    const hideRecentDuplicates = Boolean(filters.hideRecentDuplicates);
-    const hidePublished = Boolean(filters.hidePublished);
-
-    return (items || []).filter((item) => {
-        const itemGrade = resolveAnalysisGrade(item);
-        if (selectedGrades.size && !selectedGrades.has(itemGrade)) {
-            return false;
-        }
-        const keyword = String(item.keyword || "");
-        if (query && !keyword.toLowerCase().includes(query)) {
-            return false;
-        }
-        if (priority !== "all" && String(item.priority || "") !== priority) {
-            return false;
-        }
-        if (measured === "measured" && !isMeasuredItem(item)) {
-            return false;
-        }
-        if (measured === "estimated" && isMeasuredItem(item)) {
-            return false;
-        }
-        const workflowMeta = getKeywordWorkflowMeta(item.keyword);
-        if (hideRecentDuplicates && workflowMeta.isRecentDuplicate) {
-            return false;
-        }
-        if (hidePublished && workflowMeta.isPublished) {
-            return false;
-        }
-        if (minScore !== null && Number(item.score || 0) < minScore) {
-            return false;
-        }
-        if (minPcSearch !== null && Number(item.metrics?.pc_searches || 0) < minPcSearch) {
-            return false;
-        }
-        if (minMoSearch !== null && Number(item.metrics?.mobile_searches || 0) < minMoSearch) {
-            return false;
-        }
-        if (minTotalSearch !== null && Number(item.metrics?.volume || 0) < minTotalSearch) {
-            return false;
-        }
-        if (maxTotalSearch !== null && Number(item.metrics?.volume || 0) > maxTotalSearch) {
-            return false;
-        }
-        if (minBlog !== null && Number(item.metrics?.blog_results || 0) < minBlog) {
-            return false;
-        }
-        if (minPcClicks !== null && Number(item.metrics?.pc_clicks || 0) < minPcClicks) {
-            return false;
-        }
-        if (minMoClicks !== null && Number(item.metrics?.mobile_clicks || 0) < minMoClicks) {
-            return false;
-        }
-        if (minTotalClicks !== null && Number(item.metrics?.total_clicks || 0) < minTotalClicks) {
-            return false;
-        }
-        if (minCpc !== null && Number(item.metrics?.cpc || 0) < minCpc) {
-            return false;
-        }
-        if (minBid1 !== null && Number(item.metrics?.bid || 0) < minBid1) {
-            return false;
-        }
-        if (minBid2 !== null && Number(item.metrics?.bid_2 || 0) < minBid2) {
-            return false;
-        }
-        if (minBid3 !== null && Number(item.metrics?.bid_3 || 0) < minBid3) {
-            return false;
-        }
-        if (maxCompetition !== null && Number(item.metrics?.competition || 0) > maxCompetition) {
-            return false;
-        }
-        return true;
-    });
-}
 
 function isMeasuredItem(item) {
     return String(item?.analysis_mode || "") === "search_metrics";
@@ -8666,21 +6753,6 @@ function renderGradeBadge(grade) {
     return `<span class="table-grade-badge grade-${escapeHtml(tone)}">${escapeHtml(safeGrade)}</span>`;
 }
 
-function renderAnalysisKeywordCell(item) {
-    const meta = [];
-    if (item.origin && item.origin !== item.keyword) {
-        meta.push(`원본 ${item.origin}`);
-    }
-    if (item.type) {
-        meta.push(formatExpandedType(item.type));
-    }
-    return `
-        <div class="analysis-keyword-cell">
-            <strong>${escapeHtml(item.keyword || "-")}</strong>
-            ${meta.length ? `<span>${escapeHtml(meta.join(" · "))}</span>` : ""}
-        </div>
-    `;
-}
 
 function renderAnalysisSourceCell(item) {
     const badges = [
@@ -8695,172 +6767,7 @@ function renderAnalysisSourceCell(item) {
     return `<div class="analysis-source-cell">${badges.join("")}</div>`;
 }
 
-function renderAnalyzedList(items) {
-    const filters = getAnalyzedFilters();
-    const filteredItems = applyAnalyzedFilters(items);
-    const measuredCount = filteredItems.filter(isMeasuredItem).length;
-    const goldenCount = filteredItems.filter(isGoldenCandidate).length;
-    const highBidCount = filteredItems.filter((item) => Number(item.metrics?.bid || 0) >= 500).length;
-    const typeCount = new Set(filteredItems.map((item) => String(item.type || "").trim()).filter(Boolean)).size;
-    const rows = filteredItems.map((item) => `
-        <tr class="${isMeasuredItem(item) ? "measured-row" : "estimated-row"}">
-            <td>${renderAnalysisKeywordCell(item)}</td>
-            <td>${renderGradeBadge(resolveAnalysisGrade(item))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.score))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_searches))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_searches))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.volume))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.blog_results))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_clicks))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_clicks))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.total_clicks))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.cpc))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid_2))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid_3))}</td>
-            <td>${renderAnalysisSourceCell(item)}</td>
-        </tr>
-    `).join("");
 
-    return `
-        <div class="analysis-console">
-            <div class="analysis-summary-strip">
-                <div class="collector-stat-card">
-                    <span>표시 키워드</span>
-                    <strong>${escapeHtml(String(filteredItems.length))}</strong>
-                </div>
-                <div class="collector-stat-card">
-                    <span>실측</span>
-                    <strong>${escapeHtml(String(measuredCount))}</strong>
-                </div>
-                <div class="collector-stat-card">
-                    <span>${escapeHtml(getQuickCandidateLabel())}</span>
-                    <strong>${escapeHtml(String(goldenCount))}</strong>
-                </div>
-                <div class="collector-stat-card">
-                    <span>입찰1 500+</span>
-                    <strong>${escapeHtml(String(highBidCount))}</strong>
-                </div>
-                <div class="collector-stat-card">
-                    <span>출처 유형</span>
-                    <strong>${escapeHtml(String(typeCount))}</strong>
-                </div>
-            </div>
-            <div class="analysis-filter-tip">
-                <strong>필터 팁</strong>
-                <span>합계↑에 1을 넣으면 검색량 0 키워드를 먼저 걸러낼 수 있고, 입찰1↑ 500은 광고 단가가 붙는 키워드만 빠르게 남깁니다.</span>
-            </div>
-            <div class="analysis-filter-tip">
-                <strong>참고</strong>
-                <span>\`${escapeHtml(getQuickCandidateLabel())}\`는 S등급이 아니라 샘플식 빠른 체크입니다. 기준은 총조회 1,000 이상 + 블로그 10,000 이하이고, 실제 다음 단계 전송은 아래 등급 선택을 기준으로 동작합니다.</span>
-            </div>
-            ${renderAnalyzedGradeBoard(items, filteredItems)}
-            <div class="analysis-filter-stack">
-                <div class="analysis-filter-row primary">
-                    <input class="analysis-filter-input" type="search" data-analyzed-filter="query" value="${escapeHtml(filters.query)}" placeholder="키워드 검색..." />
-                    <select class="analysis-filter-select" data-analyzed-filter="priority">
-                        <option value="all"${filters.priority === "all" ? " selected" : ""}>우선순위 전체</option>
-                        <option value="high"${filters.priority === "high" ? " selected" : ""}>상</option>
-                        <option value="medium"${filters.priority === "medium" ? " selected" : ""}>중</option>
-                        <option value="low"${filters.priority === "low" ? " selected" : ""}>하</option>
-                    </select>
-                    <select class="analysis-filter-select" data-analyzed-filter="measured">
-                        <option value="all"${filters.measured === "all" ? " selected" : ""}>측정 전체</option>
-                        <option value="measured"${filters.measured === "measured" ? " selected" : ""}>실측만</option>
-                        <option value="estimated"${filters.measured === "estimated" ? " selected" : ""}>추정만</option>
-                    </select>
-                    <button type="button" class="ghost-chip" data-inline-action="reset_analyzed_filters">필터 초기화</button>
-                    <span class="analysis-filter-summary">표시 ${filteredItems.length} / 전체 ${countItems(items)}건</span>
-                </div>
-                <div class="analysis-filter-row metrics">
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minPcSearch" value="${escapeHtml(filters.minPcSearch)}" placeholder="PC조회↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minMoSearch" value="${escapeHtml(filters.minMoSearch)}" placeholder="MO조회↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minTotalSearch" value="${escapeHtml(filters.minTotalSearch)}" placeholder="합계↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="maxTotalSearch" value="${escapeHtml(filters.maxTotalSearch)}" placeholder="합계↓" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBlog" value="${escapeHtml(filters.minBlog)}" placeholder="블로그↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minScore" value="${escapeHtml(filters.minScore)}" placeholder="점수↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minCpc" value="${escapeHtml(filters.minCpc)}" placeholder="CPC↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="maxCompetition" value="${escapeHtml(filters.maxCompetition)}" placeholder="경쟁↓" />
-                </div>
-                <div class="analysis-filter-row metrics">
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minPcClicks" value="${escapeHtml(filters.minPcClicks)}" placeholder="PC클릭↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minMoClicks" value="${escapeHtml(filters.minMoClicks)}" placeholder="MO클릭↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minTotalClicks" value="${escapeHtml(filters.minTotalClicks)}" placeholder="클릭합↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid1" value="${escapeHtml(filters.minBid1)}" placeholder="입찰1↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid2" value="${escapeHtml(filters.minBid2)}" placeholder="입찰2↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid3" value="${escapeHtml(filters.minBid3)}" placeholder="입찰3↑" />
-                </div>
-            </div>
-            <div class="expanded-table-wrap full">
-                <table class="expanded-table analyzed-table compact">
-                    <thead>
-                        <tr>
-                            <th>키워드</th>
-                            <th>등급</th>
-                            <th>점수</th>
-                            <th>PC조회</th>
-                            <th>MO조회</th>
-                            <th>총조회</th>
-                            <th>블로그</th>
-                            <th>PC클릭</th>
-                            <th>MO클릭</th>
-                            <th>클릭합</th>
-                            <th>CPC</th>
-                            <th>1위입찰</th>
-                            <th>2위입찰</th>
-                            <th>3위입찰</th>
-                            <th>출처</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows || `<tr><td colspan="15">조건에 맞는 키워드가 없습니다.</td></tr>`}</tbody>
-                </table>
-            </div>
-        </div>
-    `;
-}
-
-function renderSelectedList(items) {
-    const rows = (items || []).map((item, index) => `
-        <tr>
-            <td class="num-cell">${escapeHtml(String(index + 1))}</td>
-            <td>${renderAnalysisKeywordCell(item)}</td>
-            <td>${renderGradeBadge(resolveAnalysisGrade(item))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.score))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_searches))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_searches))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.volume))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.blog_results))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.cpc))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid))}</td>
-            <td>${renderAnalysisSourceCell(item)}</td>
-        </tr>
-    `).join("");
-
-    return `
-        <div class="analysis-console">
-            <div class="expanded-table-wrap">
-                <table class="expanded-table selected-table compact">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>키워드</th>
-                            <th>등급</th>
-                            <th>점수</th>
-                            <th>PC조회</th>
-                            <th>MO조회</th>
-                            <th>총조회</th>
-                            <th>블로그</th>
-                            <th>CPC</th>
-                            <th>1위입찰</th>
-                            <th>출처</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows || `<tr><td colspan="11">선별 결과가 없습니다.</td></tr>`}</tbody>
-                </table>
-            </div>
-        </div>
-    `;
-}
 
 function formatMeasuredState(item) {
     const mode = String(item.analysis_mode || "");
@@ -8896,58 +6803,7 @@ function updateTitleResultControl(name, value) {
     scheduleDashboardSessionSave();
 }
 
-function handleResultsGridInput(event) {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
-        return;
-    }
 
-    const filterName = target.dataset.analyzedFilter || "";
-    if (!filterName) {
-        return;
-    }
-
-    updateAnalyzedFilter(filterName, target.value);
-}
-
-function handleResultsGridChange(event) {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
-        return;
-    }
-
-    const filterName = target.dataset.analyzedFilter || "";
-    if (filterName) {
-        updateAnalyzedFilter(filterName, target.value);
-        return;
-    }
-
-    const titleResultControl = target.dataset.titleResultControl || "";
-    if (titleResultControl) {
-        updateTitleResultControl(titleResultControl, target.value);
-        return;
-    }
-
-    if (!(target instanceof HTMLInputElement) || !target.matches("[data-collected-key]")) {
-        return;
-    }
-
-    const identity = target.dataset.collectedKey || "";
-    if (!identity) {
-        return;
-    }
-
-    if (target.checked) {
-        if (!state.selectedCollectedKeys.includes(identity)) {
-            state.selectedCollectedKeys = [...state.selectedCollectedKeys, identity];
-        }
-    } else {
-        state.selectedCollectedKeys = state.selectedCollectedKeys.filter((item) => item !== identity);
-    }
-
-    renderInputState();
-    renderResults();
-}
 
 function handleResultsGridClick(event) {
     if (!(event.target instanceof Element)) {
@@ -9253,37 +7109,6 @@ function isTitlePresetAvailable(presetKey, registry = readTitleApiRegistry()) {
     return getVisibleTitlePresets(registry).some((preset) => preset?.key === normalizedPresetKey);
 }
 
-function setTitleProviderOptions(preferredProvider = "", registry = readTitleApiRegistry()) {
-    if (!elements.titleProvider) {
-        return "";
-    }
-
-    const registeredProviders = getRegisteredTitleProviders(registry);
-    elements.titleProvider.innerHTML = "";
-
-    if (!registeredProviders.length) {
-        const emptyOption = document.createElement("option");
-        emptyOption.value = "";
-        emptyOption.textContent = "등록된 API 없음";
-        elements.titleProvider.appendChild(emptyOption);
-        elements.titleProvider.value = "";
-        return "";
-    }
-
-    registeredProviders.forEach((provider) => {
-        const option = document.createElement("option");
-        option.value = provider;
-        option.textContent = formatTitleProviderLabel(provider);
-        elements.titleProvider.appendChild(option);
-    });
-
-    const selectedProvider = ensureRegisteredTitleProvider(preferredProvider, registry);
-    elements.titleProvider.value = selectedProvider;
-    if (elements.titleProvider.value !== selectedProvider) {
-        elements.titleProvider.value = registeredProviders[0] || "";
-    }
-    return String(elements.titleProvider.value || "").trim();
-}
 
 function setTitleProviderOptionsForElement(
     selectElement,
@@ -9587,70 +7412,11 @@ function applyTitleKeywordModes(rawModes) {
     }
 }
 
-function buildTitleKeywordModeSummary() {
-    const modeState = getTitleKeywordModeState();
-    const enabledLabels = [];
-    if (modeState.single) enabledLabels.push("단일");
-    if (modeState.longtail_selected) enabledLabels.push("V1");
-    if (modeState.longtail_exploratory) enabledLabels.push("V2");
-    if (modeState.longtail_experimental) enabledLabels.push("V3");
-    if (!enabledLabels.length) {
-        return "최소 1개는 선택해야 합니다. 현재는 자동으로 단일 키워드를 유지합니다.";
-    }
-    return `현재 생성 대상: ${enabledLabels.join(" + ")} / 단일은 안전형, V1은 선별 기반, V2는 탈락 연계 확장, V3는 저검색량 실험형입니다.`;
-}
 
-function updateTitleKeywordModeSummary() {
-    if (!elements.titleKeywordModeSummary) {
-        return;
-    }
-    elements.titleKeywordModeSummary.textContent = buildTitleKeywordModeSummary();
-}
 
-function buildTitleKeywordModeSummary() {
-    const modeState = getTitleKeywordModeState();
-    const enabledLabels = [];
-    if (modeState.single) enabledLabels.push("?⑥씪");
-    if (modeState.longtail_selected) enabledLabels.push("V1");
-    if (modeState.longtail_exploratory) enabledLabels.push("V2");
-    if (modeState.longtail_experimental) enabledLabels.push("V3");
-    if (!enabledLabels.length) {
-        return "理쒖냼 1媛쒕뒗 ?좏깮?댁빞 ?⑸땲?? ?꾩옱???먮룞?쇰줈 ?⑥씪 ?ㅼ썙?쒕? ?좎??⑸땲??";
-    }
-    return `?꾩옱 ?앹꽦 ??? ${enabledLabels.join(" + ")}`;
-}
 
-function updateTitleKeywordModeSummary() {
-    if (!elements.titleKeywordModeSummary) {
-        return;
-    }
-    elements.titleKeywordModeSummary.textContent = buildTitleKeywordModeSummary();
-}
 
-function buildTitleAutoRetrySummary() {
-    const isAiMode = String(elements.titleMode?.value || "template").trim() === "ai";
-    const isEnabled = Boolean(elements.titleAutoRetryEnabled?.checked);
-    const retryThreshold = normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold?.value);
-    if (!isAiMode) {
-        return "AI 紐⑤뱶?먯꽌留??ъ슜?⑸땲??";
-    }
-    if (!isEnabled) {
-        return "??먯닔 誘몃떖 ?쒕ぉ???먮룞 ?ъ옉?섏? ?딆뒿?덈떎.";
-    }
-    return `${retryThreshold}??誘몃쭔 ?쒕ぉ???먮룞?쇰줈 ??踰????앹꽦?⑸땲??`;
-}
 
-function updateTitleAutoRetrySummary() {
-    if (elements.titleAutoRetryThreshold) {
-        elements.titleAutoRetryThreshold.value = String(
-            normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold.value),
-        );
-    }
-    if (!elements.titleAutoRetrySummary) {
-        return;
-    }
-    elements.titleAutoRetrySummary.textContent = buildTitleAutoRetrySummary();
-}
 
 function buildTitleKeywordModeSummary() {
     const modeState = getTitleKeywordModeState();
@@ -9832,48 +7598,6 @@ function updateTitleIssueContextSummary() {
     }
 }
 
-function setTitleModelOptions(provider, preferredValue = "") {
-    if (!elements.titleModel) {
-        return;
-    }
-
-    const rawProvider = String(provider || "").trim().toLowerCase();
-    if (!rawProvider) {
-        elements.titleModel.innerHTML = "";
-        const emptyOption = document.createElement("option");
-        emptyOption.value = "";
-        emptyOption.textContent = "등록된 API 없음";
-        elements.titleModel.appendChild(emptyOption);
-        elements.titleModel.value = "";
-        return;
-    }
-
-    const normalizedProvider = normalizeTitleProvider(provider);
-    const normalizedPreferredValue = String(preferredValue || "").trim();
-    const baseOptions = getTitleModelOptionsForProvider(normalizedProvider).map((option) => ({ ...option }));
-
-    if (normalizedPreferredValue && !baseOptions.some((option) => option.value === normalizedPreferredValue)) {
-        baseOptions.unshift({
-            value: normalizedPreferredValue,
-            label: `[기존 저장 모델] ${normalizedPreferredValue}`,
-        });
-    }
-
-    elements.titleModel.innerHTML = "";
-    baseOptions.forEach((option) => {
-        const optionElement = document.createElement("option");
-        optionElement.value = option.value;
-        optionElement.textContent = option.label;
-        elements.titleModel.appendChild(optionElement);
-    });
-
-    const fallbackValue = TITLE_PROVIDER_DEFAULT_MODELS[normalizedProvider] || baseOptions[0]?.value || "";
-    const targetValue = normalizedPreferredValue || fallbackValue;
-    elements.titleModel.value = targetValue;
-    if (elements.titleModel.value !== targetValue) {
-        elements.titleModel.value = fallbackValue;
-    }
-}
 
 function setTitleModelOptionsForElement(modelElement, provider, preferredValue = "", emptyLabel = "등록된 API 없음") {
     if (!modelElement) {
@@ -10525,12 +8249,6 @@ function handleTitleSettingsVisibilitySync() {
     }
 }
 
-function openTitlePromptEditor() {
-    const openedWindow = window.open("/title-prompt-editor", "keywordForgeTitlePromptEditor");
-    if (!openedWindow) {
-        addLog("프롬프트 편집 탭을 열지 못했습니다. 팝업 차단 여부를 확인해 주세요.", "error");
-    }
-}
 
 function openTitleQualityPromptEditor() {
     const openedWindow = window.open("/title-quality-prompt-editor", "keywordForgeTitleQualityPromptEditor");
@@ -11532,6 +9250,14 @@ function buildOperationGuardLabel(runtimeState) {
     return "정상";
 }
 
+function hasPendingOperationSettingsAction() {
+    return Boolean(
+        state.operationSettingsRefreshPending
+        || state.operationSettingsSavePending
+        || state.operationGuardResetPending,
+    );
+}
+
 function renderOperationSettingsState() {
     if (!elements.operationMode) {
         return;
@@ -11633,19 +9359,44 @@ function renderOperationSettingsState() {
     if (elements.operationGuardStatus) {
         elements.operationGuardStatus.textContent = buildOperationGuardLabel(runtimeState);
     }
+    const actionPending = hasPendingOperationSettingsAction();
+    if (elements.refreshOperationSettingsButton) {
+        elements.refreshOperationSettingsButton.disabled = actionPending;
+        elements.refreshOperationSettingsButton.textContent = state.operationSettingsRefreshPending
+            ? "불러오는 중..."
+            : "서버 상태 새로고침";
+        elements.refreshOperationSettingsButton.setAttribute(
+            "aria-busy",
+            state.operationSettingsRefreshPending ? "true" : "false",
+        );
+    }
+    if (elements.saveOperationSettingsButton) {
+        elements.saveOperationSettingsButton.disabled = actionPending;
+        elements.saveOperationSettingsButton.textContent = state.operationSettingsSavePending
+            ? "저장 중..."
+            : "설정 저장 후 적용";
+        elements.saveOperationSettingsButton.setAttribute(
+            "aria-busy",
+            state.operationSettingsSavePending ? "true" : "false",
+        );
+    }
     if (elements.resetOperationGuardsButton) {
-        elements.resetOperationGuardsButton.disabled = Boolean(state.operationGuardResetPending);
+        elements.resetOperationGuardsButton.disabled = actionPending;
         elements.resetOperationGuardsButton.textContent = state.operationGuardResetPending
-            ? "해제 중..."
-            : "보호 잠금 해제";
+            ? "초기화 중..."
+            : "인증 잠금 초기화";
         elements.resetOperationGuardsButton.setAttribute(
             "aria-busy",
             state.operationGuardResetPending ? "true" : "false",
         );
     }
     if (elements.operationSettingsSyncStatus) {
-        if (state.operationGuardResetPending) {
-            elements.operationSettingsSyncStatus.textContent = "보호 잠금 해제를 요청하는 중입니다...";
+        if (state.operationSettingsRefreshPending) {
+            elements.operationSettingsSyncStatus.textContent = "서버 런타임 상태를 다시 불러오는 중입니다...";
+        } else if (state.operationSettingsSavePending) {
+            elements.operationSettingsSyncStatus.textContent = "운영 설정을 저장하고 서버에 적용하는 중입니다...";
+        } else if (state.operationGuardResetPending) {
+            elements.operationSettingsSyncStatus.textContent = "인증 잠금 초기화를 요청하는 중입니다...";
         } else if (state.operationGuardStatusMessage) {
             elements.operationSettingsSyncStatus.textContent = state.operationGuardStatusMessage;
         } else {
@@ -11695,6 +9446,9 @@ async function loadOperationSettings(options = {}) {
     if (!elements.operationMode) {
         return null;
     }
+    if (options.announce && hasPendingOperationSettingsAction()) {
+        return state.operationSettingsSnapshot;
+    }
 
     const draft = readOperationSettingsDraft();
     if (!options.forceServer) {
@@ -11702,20 +9456,49 @@ async function loadOperationSettings(options = {}) {
         renderOperationSettingsState();
     }
 
+    if (options.announce) {
+        state.operationSettingsRefreshPending = true;
+        state.operationGuardStatusMessage = "서버 런타임 상태를 다시 불러오는 중입니다...";
+        renderOperationSettingsState();
+        showUserNotice({
+            message: "운영 설정의 서버 상태를 다시 불러오는 중입니다.",
+            type: "info",
+            noticeDurationMs: 1800,
+        });
+    }
+
     try {
         const snapshot = await requestOperationSettings("/settings/runtime");
         state.operationModePresets = normalizeOperationPresetList(snapshot.presets);
         state.operationSettingsSnapshot = snapshot;
-        state.operationGuardStatusMessage = "";
+        state.operationSettingsRefreshPending = false;
+        state.operationGuardStatusMessage = options.announce
+            ? "운영 설정의 서버 상태를 다시 불러왔습니다."
+            : "";
         applyOperationSettingsToForm(snapshot.settings || {});
         persistOperationSettingsDraft(snapshot.settings || {});
         renderOperationSettingsState();
+        if (options.announce) {
+            showUserNotice({
+                message: "운영 설정의 서버 상태를 다시 불러왔습니다.",
+                type: "success",
+            });
+            showBlockingResultPopup("?댁쁺 ?ㅼ젙???쒕쾭 ?곹깭瑜??ㅼ떆 遺덈윭?붿뒿?덈떎.");
+        }
         return snapshot;
     } catch (error) {
+        const normalizedError = normalizeError(error, { endpoint: "/settings/runtime" });
+        state.operationSettingsRefreshPending = false;
         state.operationSettingsSnapshot = null;
+        state.operationGuardStatusMessage = normalizedError.message;
         renderOperationSettingsState();
         if (elements.operationSettingsSyncStatus) {
             elements.operationSettingsSyncStatus.textContent = "서버 상태를 불러오지 못해 로컬 저장본을 표시 중입니다.";
+        }
+        if (options.announce) {
+            addLog(normalizedError.message, "error");
+            showUserNotice(normalizedError);
+            showBlockingResultPopup(normalizedError.message);
         }
         return null;
     }
@@ -11725,9 +9508,21 @@ async function saveOperationSettings() {
     if (!elements.operationMode) {
         return;
     }
+    if (hasPendingOperationSettingsAction()) {
+        return;
+    }
 
     const settings = getOperationSettingsFormState();
+    const wasLocked = Boolean(state.operationSettingsSnapshot?.state?.auth_lock_active);
     persistOperationSettingsDraft(settings);
+    state.operationSettingsSavePending = true;
+    state.operationGuardStatusMessage = "운영 설정을 저장하고 서버에 적용하는 중입니다...";
+    renderOperationSettingsState();
+    showUserNotice({
+        message: "운영 설정을 저장하고 서버에 적용하는 중입니다.",
+        type: "info",
+        noticeDurationMs: 1800,
+    });
 
     try {
         const snapshot = await requestOperationSettings("/settings/runtime", {
@@ -11736,17 +9531,30 @@ async function saveOperationSettings() {
         });
         state.operationModePresets = normalizeOperationPresetList(snapshot.presets);
         state.operationSettingsSnapshot = snapshot;
-        state.operationGuardStatusMessage = "운영 설정을 저장하고 서버 런타임에 적용했습니다.";
+        state.operationSettingsSavePending = false;
+        state.operationGuardStatusMessage = wasLocked
+            ? "운영 설정을 저장하고 서버에 적용했습니다. 인증 잠금도 함께 정리했습니다."
+            : "운영 설정을 저장하고 서버에 적용했습니다.";
         applyOperationSettingsToForm(snapshot.settings || settings);
         persistOperationSettingsDraft(snapshot.settings || settings);
         renderOperationSettingsState();
-        addLog("운영 설정을 저장하고 서버 런타임에 적용했습니다.", "success");
+        addLog(state.operationGuardStatusMessage, "success");
+        showUserNotice({
+            message: state.operationGuardStatusMessage,
+            type: "success",
+        });
+        showBlockingResultPopup(state.operationGuardStatusMessage);
     } catch (error) {
         const normalizedError = normalizeError(error, { endpoint: "/settings/runtime" });
+        state.operationSettingsSavePending = false;
+        state.operationGuardStatusMessage = normalizedError.message;
+        renderOperationSettingsState();
         if (elements.operationSettingsSyncStatus) {
             elements.operationSettingsSyncStatus.textContent = normalizedError.message;
         }
         addLog(normalizedError.message, "error");
+        showUserNotice(normalizedError);
+        showBlockingResultPopup(normalizedError.message);
     }
 }
 
@@ -11754,13 +9562,21 @@ async function resetOperationGuards(options = {}) {
     if (!elements.operationMode) {
         return;
     }
+    if (hasPendingOperationSettingsAction()) {
+        return;
+    }
 
     const wasLocked = Boolean(state.operationSettingsSnapshot?.state?.auth_lock_active);
     state.operationGuardResetPending = true;
-    state.operationGuardStatusMessage = "보호 잠금 해제를 요청하는 중입니다...";
+    state.operationGuardStatusMessage = "인증 잠금 초기화를 요청하는 중입니다...";
     renderOperationSettingsState();
     if (!options.silent) {
-        addLog("보호 잠금 해제를 요청했습니다.", "info");
+        addLog("인증 잠금 초기화를 요청했습니다.", "info");
+        showUserNotice({
+            message: "인증 잠금 상태를 초기화하는 중입니다.",
+            type: "info",
+            noticeDurationMs: 1800,
+        });
     }
 
     try {
@@ -11773,15 +9589,19 @@ async function resetOperationGuards(options = {}) {
         applyOperationSettingsToForm(snapshot.settings || getOperationSettingsFormState());
         const isLocked = Boolean(snapshot?.state?.auth_lock_active);
         const feedbackMessage = isLocked
-            ? "보호 잠금이 아직 유지되고 있습니다. 잠시 후 다시 시도해 주세요."
+            ? "인증 잠금이 아직 유지되고 있습니다. 로그인 세션을 확인한 뒤 다시 시도해 주세요."
             : wasLocked
-                ? "보호 잠금을 해제했습니다. 다시 수집을 실행해 보세요."
-                : "이미 보호 잠금이 해제된 상태입니다.";
+                ? "인증 잠금을 초기화했습니다. 세션이 정상이면 다시 요청할 수 있습니다."
+                : "현재 초기화할 인증 잠금이 없습니다.";
         state.operationGuardStatusMessage = feedbackMessage;
         renderOperationSettingsState();
         if (!options.silent) {
-            addLog(options.successMessage || feedbackMessage, isLocked ? "error" : "info");
-            showUserNotice({ message: options.successMessage || feedbackMessage });
+            addLog(options.successMessage || feedbackMessage, isLocked ? "error" : "success");
+            showUserNotice({
+                message: options.successMessage || feedbackMessage,
+                type: isLocked ? "error" : "success",
+            });
+            showBlockingResultPopup(options.successMessage || feedbackMessage);
         }
     } catch (error) {
         const normalizedError = normalizeError(error, { endpoint: "/settings/runtime/reset-guards" });
@@ -11791,6 +9611,7 @@ async function resetOperationGuards(options = {}) {
         if (!options.silent) {
             addLog(normalizedError.message, "error");
             showUserNotice(normalizedError);
+            showBlockingResultPopup(normalizedError.message);
         }
     }
 }
@@ -12292,55 +10113,6 @@ function renderRecommendedTitleBlock(titles, checks) {
     `;
 }
 
-function renderTitleList(items) {
-    return `<div class="title-list">${(items || []).map((item) => {
-        const naverHomeCount = Array.isArray(item.titles?.naver_home) ? item.titles.naver_home.length : 0;
-        const blogCount = Array.isArray(item.titles?.blog) ? item.titles.blog.length : 0;
-        const qualityReport = getTitleQualityReport(item);
-        const qualityStatus = qualityReport.status || "review";
-        const qualityLabel = qualityReport.label || "검수 대기";
-        const summary = qualityReport.summary || "제목 품질을 확인하는 중입니다.";
-        const channelScores = qualityReport.channel_scores || {};
-        const titleChecks = qualityReport.title_checks || {};
-        const targetIdentity = getTitleTargetIdentity(item);
-        return `
-            <div class="title-item">
-                <div class="title-item-head">
-                    <div class="title-keyword">
-                        <strong>${escapeHtml(item.keyword || "-")}</strong>
-                        <span class="badge">제목 ${escapeHtml(String(naverHomeCount + blogCount))}개</span>
-                    </div>
-                    <div class="title-item-actions">
-                        <span class="title-quality-chip ${escapeHtml(qualityStatus)}">품질 ${escapeHtml(String(qualityReport.bundle_score || 0))}점</span>
-                        <span class="title-quality-chip ${escapeHtml(qualityStatus)}">${escapeHtml(qualityLabel)}</span>
-                        <button
-                            type="button"
-                            class="inline-action-btn"
-                            data-inline-action="rerun_title_single"
-                            data-title-target-id="${escapeHtml(targetIdentity)}"
-                        >이 키워드만 다시 생성</button>
-                    </div>
-                </div>
-                ${renderTitleTargetMeta(item)}
-                <div class="title-quality-summary ${escapeHtml(qualityStatus)}">
-                    <strong>${escapeHtml(summary)}</strong>
-                    <span>네이버 홈형 ${escapeHtml(String(channelScores.naver_home || 0))}점 · 블로그형 ${escapeHtml(String(channelScores.blog || 0))}점</span>
-                </div>
-                ${renderTitleQualityIssues(qualityReport)}
-                <div class="title-columns">
-                    <div class="title-column">
-                        <h4>네이버 홈형</h4>
-                        <ul>${renderTitleBulletList(item.titles?.naver_home || [], titleChecks.naver_home || [])}</ul>
-                    </div>
-                    <div class="title-column">
-                        <h4>블로그형</h4>
-                        <ul>${renderTitleBulletList(item.titles?.blog || [], titleChecks.blog || [])}</ul>
-                    </div>
-                </div>
-            </div>
-        `;
-    }).join("")}</div>`;
-}
 
 function normalizeTitleResultModeFilter(value) {
     const safeValue = String(value || "all").trim();
@@ -12448,58 +10220,6 @@ function renderTitleResultControls(items) {
     `;
 }
 
-function renderTitleList(items) {
-    const entries = buildTitleListEntries(items);
-    if (!entries.length) {
-        return '<div class="collector-empty">선택한 조건에 맞는 제목 결과가 없습니다.</div>';
-    }
-    return `<div class="title-list">${entries.map(({ item, qualityReport }) => {
-        const naverHomeCount = Array.isArray(item.titles?.naver_home) ? item.titles.naver_home.length : 0;
-        const blogCount = Array.isArray(item.titles?.blog) ? item.titles.blog.length : 0;
-        const qualityStatus = qualityReport.status || "review";
-        const qualityLabel = qualityReport.label || "검수 대기";
-        const summary = qualityReport.summary || "제목 문장을 확인하는 중입니다.";
-        const channelScores = qualityReport.channel_scores || {};
-        const titleChecks = qualityReport.title_checks || {};
-        const targetIdentity = getTitleTargetIdentity(item);
-        return `
-            <div class="title-item">
-                <div class="title-item-head">
-                    <div class="title-keyword">
-                        <strong>${escapeHtml(item.keyword || "-")}</strong>
-                        <span class="badge">제목 ${escapeHtml(String(naverHomeCount + blogCount))}개</span>
-                    </div>
-                    <div class="title-item-actions">
-                        <span class="title-quality-chip ${escapeHtml(qualityStatus)}">품질 ${escapeHtml(String(qualityReport.bundle_score || 0))}점</span>
-                        <span class="title-quality-chip ${escapeHtml(qualityStatus)}">${escapeHtml(qualityLabel)}</span>
-                        <button
-                            type="button"
-                            class="inline-action-btn"
-                            data-inline-action="rerun_title_single"
-                            data-title-target-id="${escapeHtml(targetIdentity)}"
-                        >이 키워드만 다시 생성</button>
-                    </div>
-                </div>
-                ${renderTitleTargetMeta(item)}
-                <div class="title-quality-summary ${escapeHtml(qualityStatus)}">
-                    <strong>${escapeHtml(summary)}</strong>
-                    <span>네이버 홈형 ${escapeHtml(String(channelScores.naver_home || 0))}점 · 블로그형 ${escapeHtml(String(channelScores.blog || 0))}점</span>
-                </div>
-                ${renderTitleQualityIssues(qualityReport)}
-                <div class="title-columns">
-                    <div class="title-column">
-                        <h4>네이버 홈형</h4>
-                        <ul>${renderTitleBulletList(item.titles?.naver_home || [], titleChecks.naver_home || [])}</ul>
-                    </div>
-                    <div class="title-column">
-                        <h4>블로그형</h4>
-                        <ul>${renderTitleBulletList(item.titles?.blog || [], titleChecks.blog || [])}</ul>
-                    </div>
-                </div>
-            </div>
-        `;
-    }).join("")}</div>`;
-}
 
 function getTitleTargetIdentity(item) {
     return String(item?.target_id || item?.keyword || "").trim();
@@ -13040,139 +10760,6 @@ function renderAnalysisKeywordCell(item) {
     `;
 }
 
-function renderAnalyzedList(items) {
-    const filters = getAnalyzedFilters();
-    const filteredItems = applyAnalyzedFilters(items);
-    const measuredCount = filteredItems.filter(isMeasuredItem).length;
-    const goldenCount = filteredItems.filter(isGoldenCandidate).length;
-    const highBidCount = filteredItems.filter((item) => Number(item.metrics?.bid || 0) >= 500).length;
-    const typeCount = new Set(filteredItems.map((item) => String(item.type || "").trim()).filter(Boolean)).size;
-    const recentDuplicateCount = (items || []).filter((item) => getKeywordWorkflowMeta(item?.keyword).isRecentDuplicate).length;
-    const publishedCount = (items || []).filter((item) => getKeywordWorkflowMeta(item?.keyword).isPublished).length;
-    const rows = filteredItems.map((item) => `
-        <tr class="${isMeasuredItem(item) ? "measured-row" : "estimated-row"}">
-            <td>${renderAnalysisKeywordCell(item)}</td>
-            <td>${renderGradeBadge(resolveAnalysisGrade(item))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.score))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_searches))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_searches))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.volume))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.blog_results))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.pc_clicks))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.mobile_clicks))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.total_clicks))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.cpc))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid_2))}</td>
-            <td class="num-cell">${escapeHtml(formatNumber(item.metrics?.bid_3))}</td>
-            <td>${renderAnalysisSourceCell(item)}</td>
-        </tr>
-    `).join("");
-
-    return `
-        <div class="analysis-console">
-            <div class="analysis-summary-strip">
-                <div class="collector-stat-card">
-                    <span>표시 키워드</span>
-                    <strong>${escapeHtml(String(filteredItems.length))}</strong>
-                </div>
-                <div class="collector-stat-card">
-                    <span>실측</span>
-                    <strong>${escapeHtml(String(measuredCount))}</strong>
-                </div>
-                <div class="collector-stat-card">
-                    <span>${escapeHtml(getQuickCandidateLabel())}</span>
-                    <strong>${escapeHtml(String(goldenCount))}</strong>
-                </div>
-                <div class="collector-stat-card">
-                    <span>입찰1 500+</span>
-                    <strong>${escapeHtml(String(highBidCount))}</strong>
-                </div>
-                <div class="collector-stat-card">
-                    <span>출처 유형</span>
-                    <strong>${escapeHtml(String(typeCount))}</strong>
-                </div>
-            </div>
-            <div class="analysis-filter-tip">
-                <strong>필터 팁</strong>
-                <span>기본 필터는 검색량 1 이상 키워드를 먼저 보도록 잡혀 있습니다. 필요하면 조회수, 클릭수, CPC, 경쟁 강도로 더 좁힐 수 있습니다.</span>
-            </div>
-            <div class="analysis-filter-tip">
-                <strong>중복 방지</strong>
-                <span>최근 14일 이력 ${escapeHtml(String(recentDuplicateCount))}건 / 발행완료 ${escapeHtml(String(publishedCount))}건을 태그로 표시하고, 숨기기 토글과 자동 제외에 함께 사용합니다.</span>
-            </div>
-            ${renderAnalyzedGradeBoard(items, filteredItems)}
-            <div class="analysis-filter-stack">
-                <div class="analysis-filter-row primary">
-                    <input class="analysis-filter-input" type="search" data-analyzed-filter="query" value="${escapeHtml(filters.query)}" placeholder="키워드 검색..." />
-                    <select class="analysis-filter-select" data-analyzed-filter="priority">
-                        <option value="all"${filters.priority === "all" ? " selected" : ""}>우선순위 전체</option>
-                        <option value="high"${filters.priority === "high" ? " selected" : ""}>상</option>
-                        <option value="medium"${filters.priority === "medium" ? " selected" : ""}>중</option>
-                        <option value="low"${filters.priority === "low" ? " selected" : ""}>하</option>
-                    </select>
-                    <select class="analysis-filter-select" data-analyzed-filter="measured">
-                        <option value="all"${filters.measured === "all" ? " selected" : ""}>측정 전체</option>
-                        <option value="measured"${filters.measured === "measured" ? " selected" : ""}>실측만</option>
-                        <option value="estimated"${filters.measured === "estimated" ? " selected" : ""}>추정만</option>
-                    </select>
-                    <label class="analysis-filter-check">
-                        <input type="checkbox" data-analyzed-filter="hideRecentDuplicates" ${filters.hideRecentDuplicates ? "checked" : ""} />
-                        <span>2주 중복 숨기기</span>
-                    </label>
-                    <label class="analysis-filter-check">
-                        <input type="checkbox" data-analyzed-filter="hidePublished" ${filters.hidePublished ? "checked" : ""} />
-                        <span>발행완료 숨기기</span>
-                    </label>
-                    <button type="button" class="ghost-chip" data-inline-action="reset_analyzed_filters">필터 초기화</button>
-                    <span class="analysis-filter-summary">표시 ${filteredItems.length} / 전체 ${countItems(items)}건</span>
-                </div>
-                <div class="analysis-filter-row metrics">
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minPcSearch" value="${escapeHtml(filters.minPcSearch)}" placeholder="PC조회↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minMoSearch" value="${escapeHtml(filters.minMoSearch)}" placeholder="MO조회↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minTotalSearch" value="${escapeHtml(filters.minTotalSearch)}" placeholder="합계↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="maxTotalSearch" value="${escapeHtml(filters.maxTotalSearch)}" placeholder="합계↓" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBlog" value="${escapeHtml(filters.minBlog)}" placeholder="블로그↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minScore" value="${escapeHtml(filters.minScore)}" placeholder="점수↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minCpc" value="${escapeHtml(filters.minCpc)}" placeholder="CPC↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="maxCompetition" value="${escapeHtml(filters.maxCompetition)}" placeholder="경쟁↓" />
-                </div>
-                <div class="analysis-filter-row metrics">
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minPcClicks" value="${escapeHtml(filters.minPcClicks)}" placeholder="PC클릭↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minMoClicks" value="${escapeHtml(filters.minMoClicks)}" placeholder="MO클릭↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minTotalClicks" value="${escapeHtml(filters.minTotalClicks)}" placeholder="클릭합↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid1" value="${escapeHtml(filters.minBid1)}" placeholder="입찰1↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid2" value="${escapeHtml(filters.minBid2)}" placeholder="입찰2↑" />
-                    <input class="analysis-filter-input" type="number" min="0" step="0.1" data-analyzed-filter="minBid3" value="${escapeHtml(filters.minBid3)}" placeholder="입찰3↑" />
-                </div>
-            </div>
-            <div class="expanded-table-wrap full">
-                <table class="expanded-table analyzed-table compact">
-                    <thead>
-                        <tr>
-                            <th>키워드</th>
-                            <th>등급</th>
-                            <th>점수</th>
-                            <th>PC조회</th>
-                            <th>MO조회</th>
-                            <th>총조회</th>
-                            <th>블로그</th>
-                            <th>PC클릭</th>
-                            <th>MO클릭</th>
-                            <th>클릭합</th>
-                            <th>CPC</th>
-                            <th>입찰1</th>
-                            <th>입찰2</th>
-                            <th>입찰3</th>
-                            <th>출처</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows || '<tr><td colspan="15">조건에 맞는 키워드가 없습니다.</td></tr>'}</tbody>
-                </table>
-            </div>
-        </div>
-    `;
-}
 
 function handleResultsGridInput(event) {
     const target = event.target;
@@ -13350,6 +10937,7 @@ async function runSelectStage(options = {}) {
             blocked_summary: buildKeywordBlockedSummary(blockedItems),
         },
     };
+    logApiUsageSummary("선별", result.debug);
     promoteKeywordStatuses(result.selected_keywords || [], "selected");
     addLog(
         allowedGrades.length

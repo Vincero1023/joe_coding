@@ -97,6 +97,41 @@ def test_local_naver_session_endpoint_returns_attempts_on_failure() -> None:
     assert payload["detail"]["hint"] == "브라우저를 모두 종료한 뒤 다시 시도해 보세요."
 
 
+def test_local_naver_session_validate_endpoint_returns_login_status() -> None:
+    with patch(
+        "app.api.routes.local_naver.session_validator.validate_session",
+        return_value={
+            "valid": True,
+            "status": "authenticated",
+            "message": "입력된 Creator Advisor 세션이 유효합니다.",
+            "service": "naver_blog",
+            "content_type": "text",
+            "auth_source": "inline",
+            "checked_sources": ["inline"],
+            "topic_group_count": 12,
+            "topic_count": 64,
+        },
+    ):
+        response = client.post(
+            "/local/naver-session/validate",
+            json={
+                "input_data": {
+                    "service": "naver_blog",
+                    "content_type": "text",
+                    "auth_cookie": "NID_AUT=test; NID_SES=session",
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["valid"] is True
+    assert result["status"] == "authenticated"
+    assert result["auth_source"] == "inline"
+    assert result["topic_group_count"] == 12
+    assert result["topic_count"] == 64
+
+
 def test_local_naver_login_browser_endpoint_returns_cookie_header() -> None:
     with patch(
         "app.api.routes.local_naver.login_browser_service.open_and_capture_session",

@@ -2028,11 +2028,12 @@ def _render_home() -> str:
                                 value=""
                             />
                             <div class="session-helper-actions">
-                                <button type="button" class="primary-btn session-helper-btn" id="loadLocalCookieButton">현재 브라우저에서 가져오기</button>
+                                <button type="button" class="primary-btn session-helper-btn" id="loadLocalCookieButton">현재 브라우저 쿠키 읽기</button>
+                                <button type="button" class="ghost-chip session-helper-btn" id="validateTrendSessionButton">로그인 상태 확인</button>
                                 <button type="button" class="ghost-chip session-helper-btn" id="launchLoginBrowserButton">전용 로그인 브라우저 열기</button>
                             </div>
                             <p class="input-help session-helper-status" id="localCookieStatus">
-                                현재 브라우저 로그인 세션과 저장된 전용 세션을 확인하는 중입니다.
+                                현재 브라우저 세션이나 저장된 전용 세션으로 로그인 상태를 확인할 수 있습니다.
                             </p>
                         </div>
                     </div>
@@ -2093,7 +2094,8 @@ def _render_home() -> str:
 
                 <p class="input-help" id="trendSourceHelp" data-mode-visibility="category">
                     카테고리 모드에서 네이버 트렌드를 고르면 Creator Advisor 주제 기반 인기 키워드를 먼저 조회합니다.
-                    먼저 현재 브라우저에서 로그인한 세션을 불러와 쓰고, 저장된 세션이 있으면 자동으로 이어서 사용합니다.
+                    먼저 현재 브라우저의 로컬 쿠키를 읽어 보지만, 브라우저 권한이나 쿠키 DB 잠금 때문에 실패할 수 있습니다.
+                    그럴 때는 `전용 로그인 브라우저 열기`가 더 안정적이며, 저장된 전용 세션이 있으면 자동으로 이어서 사용합니다.
                     세션이 없거나 실패하면 아래 fallback 설정에 따라 검색 preset으로 전환합니다.
                 </p>
 
@@ -2294,9 +2296,14 @@ def _render_home() -> str:
                                 <div class="field-block field-block-wide">
                                     <span class="field-label">분석/출력</span>
                                     <div class="option-row">
-                                        <button type="button" class="ghost-chip" id="exportCollectedCsvButton">?섏쭛 寃곌낵 CSV</button>
+                                        <button type="button" class="ghost-chip" id="exportCollectedCsvButton">수집 결과 CSV</button>
+                                        <button type="button" class="ghost-chip" id="exportCollectedTxtButton">수집 결과 TXT</button>
+                                        <button type="button" class="ghost-chip" id="exportExpandedCsvButton">확장 결과 CSV</button>
+                                        <button type="button" class="ghost-chip" id="exportExpandedTxtButton">확장 결과 TXT</button>
                                         <button type="button" class="ghost-chip" id="exportCsvButton">분석 결과 CSV</button>
-                                        <button type="button" class="ghost-chip" id="exportSelectedCsvButton">?좊퀎 寃곌낵 CSV</button>
+                                        <button type="button" class="ghost-chip" id="exportAnalyzedTxtButton">분석 결과 TXT</button>
+                                        <button type="button" class="ghost-chip" id="exportSelectedCsvButton">선별 결과 CSV</button>
+                                        <button type="button" class="ghost-chip" id="exportSelectedTxtButton">선별 결과 TXT</button>
                                     </div>
                                 </div>
                                 <p class="input-help compact-help">확장 없이 분석만 실행하거나, 분석 결과를 내려받는 용도로 씁니다.</p>
@@ -2590,6 +2597,14 @@ def _render_home() -> str:
                     </div>
                 </div>
                 <div class="results-panel-tools">
+                    <button type="button" class="ghost-chip" id="resultsExportCollectedCsvButton">수집 CSV</button>
+                    <button type="button" class="ghost-chip" id="resultsExportCollectedTxtButton">수집 TXT</button>
+                    <button type="button" class="ghost-chip" id="resultsExportExpandedCsvButton">확장 CSV</button>
+                    <button type="button" class="ghost-chip" id="resultsExportExpandedTxtButton">확장 TXT</button>
+                    <button type="button" class="ghost-chip" id="resultsExportAnalyzedCsvButton">분석 CSV</button>
+                    <button type="button" class="ghost-chip" id="resultsExportAnalyzedTxtButton">분석 TXT</button>
+                    <button type="button" class="ghost-chip" id="resultsExportSelectedCsvButton">선별 CSV</button>
+                    <button type="button" class="ghost-chip" id="resultsExportSelectedTxtButton">선별 TXT</button>
                     <button type="button" class="ghost-chip" data-utility-open="history" aria-pressed="false">실행 기록</button>
                     <button type="button" class="ghost-chip" data-utility-open="vault" aria-pressed="false">키워드 보관함</button>
                     <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">오류 / 진단</button>
@@ -2625,9 +2640,9 @@ def _render_home() -> str:
                                     </p>
                                 </div>
                                 <div class="settings-hero-actions">
-                                    <button type="button" class="ghost-chip" id="refreshOperationSettingsButton">새로고침</button>
-                                    <button type="button" class="ghost-chip" id="resetOperationGuardsButton">보호 잠금 해제</button>
-                                    <button type="button" class="ghost-btn" id="saveOperationSettingsButton">저장 후 적용</button>
+                                    <button type="button" class="ghost-chip" id="refreshOperationSettingsButton">서버 상태 새로고침</button>
+                                    <button type="button" class="ghost-chip" id="resetOperationGuardsButton">인증 잠금 초기화</button>
+                                    <button type="button" class="ghost-btn" id="saveOperationSettingsButton">설정 저장 후 적용</button>
                                 </div>
                             </div>
                             <div class="settings-status-grid">
@@ -2647,6 +2662,11 @@ def _render_home() -> str:
                                     <span>보호 상태</span>
                                     <strong id="operationGuardStatus">정상</strong>
                                 </article>
+                            </div>
+                            <div class="settings-hint settings-action-guide">
+                                `서버 상태 새로고침`은 서버 런타임 값을 다시 읽습니다.
+                                `인증 잠금 초기화`는 인증 오류로 걸린 잠금 상태만 해제하며, 로그인 세션 자체를 복구하지는 않습니다.
+                                `설정 저장 후 적용`은 현재 입력값을 서버에 반영하고 잠금 상태도 함께 정리합니다.
                             </div>
                             <div class="settings-panel-grid">
                                 <section class="settings-card api-registry-card">

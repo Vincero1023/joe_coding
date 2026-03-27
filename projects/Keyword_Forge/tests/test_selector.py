@@ -173,6 +173,41 @@ def test_selector_grade_filter_returns_allowed_grades_without_golden_filtering()
     assert result["selected_keywords"][0]["selection_mode"] == "grade_filter"
 
 
+def test_selector_response_includes_debug_payload() -> None:
+    result = run(
+        {
+            "analyzed_keywords": [
+                {
+                    "keyword": "insurance compare",
+                    "score": 74.0,
+                    "analysis_mode": "search_metrics",
+                    "confidence": 0.92,
+                    "metrics": {
+                        "volume": 12500.0,
+                        "cpc": 420.0,
+                        "competition": 0.42,
+                        "bid": 310.0,
+                        "profit": 26.0,
+                        "opportunity": 2.4,
+                        "monetization_score": 60.0,
+                        "rarity_score": 38.0,
+                        "search_volume_score": 90.0,
+                        "total_clicks": 84.0,
+                    },
+                },
+            ],
+            "selection_export": {
+                "enabled": False,
+            },
+        }
+    )
+
+    assert result["debug"]["stage"] == "selector"
+    assert result["debug"]["summary"]["total_calls"] == 0
+    assert result["debug"]["selection_summary"]["input_keyword_count"] == 1
+    assert result["debug"]["selection_summary"]["selected_keyword_count"] == 1
+
+
 def test_selector_combo_filter_returns_matching_two_axis_keywords() -> None:
     result = run(
         {

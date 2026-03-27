@@ -92,12 +92,20 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "data-queue-category" in response.text
     assert "localCookieStatus" in response.text
     assert "loadLocalCookieButton" in response.text
-    assert "현재 브라우저에서 가져오기" in response.text
+    assert "현재 브라우저 쿠키 읽기" in response.text
     assert "전용 로그인 브라우저 열기" in response.text
     assert "executionHistoryList" in response.text
     assert "keywordVaultList" in response.text
     assert "topicSeedInput" in response.text
     assert "generateTopicSeedsButton" in response.text
+    assert "validateTrendSessionButton" in response.text
+    assert "로그인 상태 확인" in response.text
+    assert "exportExpandedCsvButton" in response.text
+    assert "exportExpandedTxtButton" in response.text
+    assert "exportSelectedTxtButton" in response.text
+    assert "resultsExportExpandedCsvButton" in response.text
+    assert "resultsExportExpandedTxtButton" in response.text
+    assert "resultsExportSelectedTxtButton" in response.text
 
 
 def test_home_page_injects_repo_backed_title_prompt_settings() -> None:
