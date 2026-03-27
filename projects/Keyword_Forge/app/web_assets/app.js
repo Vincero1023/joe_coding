@@ -26,7 +26,7 @@ const STAGES = [
     {
         key: "titled",
         label: "5단계 제목 생성",
-        description: "네이버 홈형과 블로그형 제목을 각각 생성합니다.",
+        description: "선택한 제목 영역과 개수 설정에 맞춰 결과를 생성합니다.",
         resultKey: "generated_titles",
     },
 ];
@@ -7627,10 +7627,10 @@ function getTitleSurfaceSettingsState() {
 
 function formatTitleSurfaceSummary(rawModes, rawCounts) {
     const modes = normalizeTitleSurfaceModes(rawModes);
-    const nextModes = modes.length ? modes : ["naver_home"];
+    const nextModes = modes.length ? modes : ["naver_home", "blog"];
     const counts = buildNormalizedTitleSurfaceCounts(rawCounts, nextModes);
     const labels = nextModes.map((channel) => `${TITLE_SURFACE_SHORT_LABELS[channel] || channel} ${counts[channel]}개`);
-    return labels.length ? `영역 ${labels.join(" + ")}` : "영역 홈판 2개";
+    return labels.length ? `영역 ${labels.join(" + ")}` : "영역 홈판 2개 + 블로그형 2개";
 }
 
 function buildTitleSurfaceSummary() {

@@ -2448,7 +2448,7 @@ def _render_home() -> str:
                                 </label>
                             </div>
                             <p id="titleSurfaceSummary" class="input-help compact-help">
-                                선택: 홈판 2개 + 블로그형 2개
+                                선택: 홈판 2개 + 블로그형 2개, 필요하면 둘다 포함 각 1-4개
                             </p>
                         </div>
 
