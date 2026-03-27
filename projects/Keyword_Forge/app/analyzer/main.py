@@ -14,6 +14,7 @@ from app.analyzer.keywordmaster_benchmark import build_keywordmaster_benchmark_i
 from app.analyzer.naver_open_search import build_blog_search_index
 from app.analyzer.naver_searchad import build_searchad_bid_index, build_searchad_keyword_tool_index
 from app.analyzer.scorer import analyze_items
+from app.core.api_usage import bind_current_api_usage_context, capture_api_usage
 from app.core.keyword_inputs import coerce_expanded_keyword_items
 from app.core.interfaces import ModuleRunner
 from app.expander.utils.tokenizer import normalize_key
@@ -21,10 +22,13 @@ from app.expander.utils.tokenizer import normalize_key
 
 class AnalyzerService:
     def run(self, input_data: Any) -> Any:
-        analyzed = analyze_keywords(input_data)
+        analyzed, debug = analyze_keywords_with_debug(input_data)
         if isinstance(input_data, list):
             return analyzed
-        return {"analyzed_keywords": analyzed}
+        return {
+            "analyzed_keywords": analyzed,
+            "debug": debug,
+        }
 
 
 service = AnalyzerService()
@@ -42,14 +46,30 @@ def run(input_data: Any) -> Any:
 
 
 def analyze_keywords(input_data: Any) -> list[dict[str, Any]]:
-    keywords = _coerce_input_items(input_data)
-    stats_index = build_stats_index(input_data)
-    _merge_measured_stats_index(input_data, keywords, stats_index)
-    return analyze_items(
-        keywords,
-        stats_index=stats_index,
-        config=DEFAULT_CONFIG,
-    )
+    analyzed, _ = analyze_keywords_with_debug(input_data)
+    return analyzed
+
+
+def analyze_keywords_with_debug(input_data: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    with capture_api_usage() as api_usage:
+        keywords = _coerce_input_items(input_data)
+        stats_index = build_stats_index(input_data)
+        _merge_measured_stats_index(input_data, keywords, stats_index)
+        analyzed = analyze_items(
+            keywords,
+            stats_index=stats_index,
+            config=DEFAULT_CONFIG,
+        )
+    return analyzed, {
+        "stage": "analyzer",
+        "summary": api_usage.snapshot().get("summary", {}),
+        "api_usage": api_usage.snapshot(),
+        "analysis_summary": {
+            "input_keyword_count": len(keywords),
+            "analyzed_keyword_count": len(analyzed),
+            "stats_index_count": len(stats_index),
+        },
+    }
 
 
 class AnalyzerModule(ModuleRunner):
@@ -107,7 +127,7 @@ def _merge_measured_stats_index(
 
     measured_indexes: list[dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=len(builders)) as executor:
-        futures = [executor.submit(builder) for builder in builders]
+        futures = [executor.submit(bind_current_api_usage_context(builder)) for builder in builders]
         for future in as_completed(futures):
             measured_indexes.append(future.result())
 

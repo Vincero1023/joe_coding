@@ -5,6 +5,7 @@ from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from app.core.api_usage import record_api_usage
 from app.expander.utils.throttle import wait_for_naver_keyword_request
 from app.expander.utils.tokenizer import normalize_text
 
@@ -46,7 +47,23 @@ def get_naver_autocomplete(keyword: str) -> list[str]:
             body = response.read().decode("utf-8", errors="ignore")
         data = _parse_response_body(body)
         suggestions = _extract_suggestions(data.get("items"))
+        record_api_usage(
+            stage="expander",
+            service="naver_autocomplete",
+            provider="naver",
+            endpoint="/nx/ac",
+            requested_units=1,
+            success=True,
+        )
     except Exception:
+        record_api_usage(
+            stage="expander",
+            service="naver_autocomplete",
+            provider="naver",
+            endpoint="/nx/ac",
+            requested_units=1,
+            success=False,
+        )
         suggestions = []
 
     _CACHE[cache_key] = suggestions

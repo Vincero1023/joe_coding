@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app.analyzer.keyword_stats import KeywordStats
+from app.core.api_usage import bind_current_api_usage_context, record_api_usage
 from app.core.config import get_settings
 from app.expander.utils.tokenizer import normalize_key, normalize_text
 from app.analyzer.naver_searchad import _normalize_keyword_tool_hint
@@ -151,7 +152,7 @@ class NaverOpenSearchClient:
 
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             future_map = {
-                executor.submit(self._fetch_blog_total, keyword): keyword
+                executor.submit(bind_current_api_usage_context(self._fetch_blog_total, keyword)): keyword
                 for keyword in pending_keywords
             }
             for future in as_completed(future_map):
@@ -199,15 +200,47 @@ class NaverOpenSearchClient:
         try:
             with self._opener(request, timeout=self._timeout) as response:
                 raw_text = response.read().decode("utf-8", errors="ignore")
+            record_api_usage(
+                stage="analyzer",
+                service="naver_blog_search",
+                provider="naver_open_search",
+                endpoint=uri,
+                requested_units=1,
+                success=True,
+            )
         except HTTPError as exc:
             raw_text = exc.read().decode("utf-8", errors="ignore")
             detail = _extract_error_message(raw_text) or raw_text or str(exc.reason)
+            record_api_usage(
+                stage="analyzer",
+                service="naver_blog_search",
+                provider="naver_open_search",
+                endpoint=uri,
+                requested_units=1,
+                success=False,
+            )
             if exc.code in {401, 403}:
                 raise NaverOpenSearchAuthError(detail) from exc
             raise NaverOpenSearchResponseError(f"{exc.code} {detail}") from exc
         except URLError as exc:
+            record_api_usage(
+                stage="analyzer",
+                service="naver_blog_search",
+                provider="naver_open_search",
+                endpoint=uri,
+                requested_units=1,
+                success=False,
+            )
             raise NaverOpenSearchResponseError(str(exc.reason)) from exc
         except Exception as exc:  # pragma: no cover - runtime guard
+            record_api_usage(
+                stage="analyzer",
+                service="naver_blog_search",
+                provider="naver_open_search",
+                endpoint=uri,
+                requested_units=1,
+                success=False,
+            )
             raise NaverOpenSearchResponseError(str(exc)) from exc
 
         try:

@@ -11,7 +11,8 @@ from typing import Any, Callable
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.analyzer.main import analyze_keywords
+from app.analyzer.main import analyzer_module
+from app.core.api_usage import capture_api_usage, merge_api_usage_snapshots
 from app.core.keyword_inputs import coerce_collected_keyword_items
 from app.core.interfaces import ModuleRunner
 from app.expander.engines.autocomplete_engine import expand_autocomplete_engine
@@ -206,13 +207,26 @@ def run_with_progress(
     progress_callback: ExpansionProgressCallback | None = None,
     stop_event: Event | None = None,
 ) -> dict:
-    analysis_data = load_analysis_data(input_data.get("analysis_json_path"))
-    return _run_expander_internal(
-        input_data,
-        analysis_data,
-        progress_callback=progress_callback,
-        stop_event=stop_event,
-    )
+    with capture_api_usage() as api_usage:
+        analysis_data = load_analysis_data(input_data.get("analysis_json_path"))
+        result = _run_expander_internal(
+            input_data,
+            analysis_data,
+            progress_callback=progress_callback,
+            stop_event=stop_event,
+        )
+    result["debug"] = {
+        "stage": "expander",
+        "summary": api_usage.snapshot().get("summary", {}),
+        "api_usage": api_usage.snapshot(),
+        "expansion_summary": {
+            "expanded_keyword_count": len(
+                [item for item in result.get("expanded_keywords", []) if isinstance(item, dict)]
+            ),
+            "stopped": bool(result.get("stopped")),
+        },
+    }
+    return result
 
 
 def run_with_analysis_progress(
@@ -222,38 +236,16 @@ def run_with_analysis_progress(
     analysis_callback: ExpansionProgressCallback | None = None,
     stop_event: Event | None = None,
 ) -> dict:
-    analyzed_seen: set[str] = set()
-
     def forward_progress(event: dict[str, Any]) -> None:
         if progress_callback is not None:
             progress_callback(event)
-
-        if analysis_callback is None:
-            return
-
-        if event.get("type") not in {"keyword_results", "depth_completed"}:
-            return
-
-        analyzed_items = _analyze_progress_items(input_data, event.get("items"), analyzed_seen)
-        if not analyzed_items:
-            return
-
-        analysis_callback(
-            {
-                "type": "analyzed_items",
-                "depth": event.get("depth"),
-                "keyword": event.get("keyword"),
-                "origin": event.get("origin"),
-                "items": analyzed_items,
-                "total_analyzed": len(analyzed_seen),
-            }
-        )
 
     expanded_result = run_with_progress(
         input_data,
         progress_callback=forward_progress,
         stop_event=stop_event,
     )
+    expanded_debug = expanded_result.get("debug") if isinstance(expanded_result.get("debug"), dict) else {}
     expanded_keywords = [
         item
         for item in expanded_result.get("expanded_keywords", [])
@@ -264,12 +256,46 @@ def run_with_analysis_progress(
             "expanded_keywords": expanded_keywords,
             "analyzed_keywords": [],
             "stopped": True,
+            "debug": expanded_debug,
         }
-    analyzed_keywords = analyze_keywords(_build_analyzer_input(input_data, expanded_keywords))
+    if analysis_callback is not None:
+        analysis_callback(
+            {
+                "type": "analysis_started",
+                "total_candidates": len(expanded_keywords),
+            }
+        )
+    analyzed_result = analyzer_module.run(_build_analyzer_input(input_data, expanded_keywords))
+    analyzed_keywords = [
+        item
+        for item in analyzed_result.get("analyzed_keywords", [])
+        if isinstance(item, dict)
+    ]
+    analyzed_debug = analyzed_result.get("debug") if isinstance(analyzed_result.get("debug"), dict) else {}
+    merged_api_usage = merge_api_usage_snapshots(
+        expanded_debug.get("api_usage"),
+        analyzed_debug.get("api_usage"),
+    )
+    if analysis_callback is not None:
+        analysis_callback(
+            {
+                "type": "analysis_completed",
+                "total_analyzed": len(analyzed_keywords),
+            }
+        )
     return {
         "expanded_keywords": expanded_keywords,
         "analyzed_keywords": analyzed_keywords,
         "stopped": False,
+        "debug": {
+            "stage": "expand_analyze",
+            "summary": merged_api_usage.get("summary", {}),
+            "api_usage": merged_api_usage,
+            "stage_api_usage": {
+                "expander": expanded_debug.get("api_usage", {}),
+                "analyzer": analyzed_debug.get("api_usage", {}),
+            },
+        },
     }
 
 
@@ -509,39 +535,6 @@ def _collect_string_values(raw_items: Any) -> list[str]:
     if not isinstance(raw_items, list):
         return []
     return [text for text in (normalize_text(item) for item in raw_items) if text]
-
-
-def _analyze_progress_items(
-    input_data: dict[str, Any],
-    items: Any,
-    analyzed_seen: set[str],
-) -> list[dict[str, Any]]:
-    if not isinstance(items, list):
-        return []
-
-    pending_items: list[dict[str, Any]] = []
-    pending_keys: set[str] = set()
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        keyword = normalize_key(item.get("keyword"))
-        if not keyword or keyword in analyzed_seen or keyword in pending_keys:
-            continue
-        pending_keys.add(keyword)
-        pending_items.append(item)
-
-    if not pending_items:
-        return []
-
-    analyzed_items = analyze_keywords(_build_analyzer_input(input_data, pending_items))
-    fresh_items: list[dict[str, Any]] = []
-    for item in analyzed_items:
-        keyword = normalize_key(item.get("keyword"))
-        if not keyword or keyword in analyzed_seen:
-            continue
-        analyzed_seen.add(keyword)
-        fresh_items.append(item)
-    return fresh_items
 
 
 def _build_analyzer_input(input_data: dict[str, Any], expanded_keywords: list[dict[str, Any]]) -> dict[str, Any]:

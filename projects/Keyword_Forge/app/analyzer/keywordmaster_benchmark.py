@@ -10,6 +10,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from app.analyzer.keyword_stats import KeywordStats
+from app.core.api_usage import bind_current_api_usage_context, record_api_usage
 from app.expander.utils.tokenizer import normalize_key, normalize_text
 
 
@@ -115,7 +116,7 @@ class KeywordMasterBenchmarkClient:
         worker_count = max(1, min(max_workers, len(pending_keywords)))
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             future_map = {
-                executor.submit(self._fetch_keyword_stat, keyword): keyword
+                executor.submit(bind_current_api_usage_context(self._fetch_keyword_stat, keyword)): keyword
                 for keyword in pending_keywords
             }
             for future in as_completed(future_map):
@@ -155,12 +156,44 @@ class KeywordMasterBenchmarkClient:
         try:
             with self._opener(request, timeout=self._timeout) as response:
                 raw_text = response.read().decode("utf-8", errors="ignore")
+            record_api_usage(
+                stage="analyzer",
+                service="keywordmaster_benchmark",
+                provider="keywordmaster",
+                endpoint="/ajax/keywordAjax.php",
+                requested_units=1,
+                success=True,
+            )
         except HTTPError as exc:
             raw_text = exc.read().decode("utf-8", errors="ignore")
+            record_api_usage(
+                stage="analyzer",
+                service="keywordmaster_benchmark",
+                provider="keywordmaster",
+                endpoint="/ajax/keywordAjax.php",
+                requested_units=1,
+                success=False,
+            )
             raise KeywordMasterBenchmarkResponseError(raw_text or str(exc.reason)) from exc
         except URLError as exc:
+            record_api_usage(
+                stage="analyzer",
+                service="keywordmaster_benchmark",
+                provider="keywordmaster",
+                endpoint="/ajax/keywordAjax.php",
+                requested_units=1,
+                success=False,
+            )
             raise KeywordMasterBenchmarkResponseError(str(exc.reason)) from exc
         except Exception as exc:  # pragma: no cover - runtime guard
+            record_api_usage(
+                stage="analyzer",
+                service="keywordmaster_benchmark",
+                provider="keywordmaster",
+                endpoint="/ajax/keywordAjax.php",
+                requested_units=1,
+                success=False,
+            )
             raise KeywordMasterBenchmarkResponseError(str(exc)) from exc
 
         try:

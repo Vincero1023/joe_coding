@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from app.core.api_usage import record_api_usage
 from app.core.runtime_settings import report_naver_auth_error
 from app.expander.utils.throttle import wait_for_naver_keyword_request
 
@@ -195,14 +196,38 @@ class NaverTrendClient:
         try:
             with urlopen(request, timeout=self._timeout) as response:
                 payload = response.read().decode("utf-8", errors="ignore")
+            record_api_usage(
+                stage="collector",
+                service="creator_advisor_trend",
+                provider="creator_advisor",
+                endpoint=endpoint,
+                requested_units=1,
+                success=True,
+            )
         except HTTPError as exc:
             payload = exc.read().decode("utf-8", errors="ignore")
             message = _extract_error_message(payload) or _default_http_error_message(exc.code)
+            record_api_usage(
+                stage="collector",
+                service="creator_advisor_trend",
+                provider="creator_advisor",
+                endpoint=endpoint,
+                requested_units=1,
+                success=False,
+            )
             if exc.code in {401, 403}:
                 report_naver_auth_error(message)
                 raise NaverTrendAuthError(message) from exc
             raise NaverTrendResponseError(message) from exc
         except URLError as exc:
+            record_api_usage(
+                stage="collector",
+                service="creator_advisor_trend",
+                provider="creator_advisor",
+                endpoint=endpoint,
+                requested_units=1,
+                success=False,
+            )
             raise NaverTrendResponseError(f"Creator Advisor 연결에 실패했습니다: {exc.reason}") from exc
 
         try:

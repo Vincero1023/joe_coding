@@ -8,9 +8,10 @@ import re
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
+from app.core.api_usage import record_api_usage
 from app.expander.utils.tokenizer import normalize_key, normalize_text, tokenize_text
 from app.selector.serp_summary import build_search_url, fetch_naver_serp_html, parse_serp_titles
 from app.title.category_detector import detect_category
@@ -704,6 +705,9 @@ def _post_json(
 ) -> dict[str, Any]:
     raw_payload = json.dumps(payload).encode("utf-8")
     last_error: Exception | None = None
+    provider = _resolve_provider_from_url(url)
+    model = _resolve_model_from_payload(payload, url)
+    endpoint = _resolve_endpoint_from_url(url)
 
     for attempt in range(max_retries + 1):
         request = Request(
@@ -720,6 +724,14 @@ def _post_json(
         except HTTPError as exc:
             raw_text = exc.read().decode("utf-8", errors="ignore")
             detail = _extract_error_message(raw_text) or raw_text or exc.reason
+            record_api_usage(
+                stage="title",
+                service="title_llm",
+                provider=provider,
+                model=model,
+                endpoint=endpoint,
+                success=False,
+            )
             if attempt < max_retries and exc.code in {429, 500, 503}:
                 time.sleep(
                     _resolve_retry_delay_seconds(
@@ -732,12 +744,28 @@ def _post_json(
                 continue
             raise TitleProviderError(f"{exc.code} {detail}") from exc
         except URLError as exc:
+            record_api_usage(
+                stage="title",
+                service="title_llm",
+                provider=provider,
+                model=model,
+                endpoint=endpoint,
+                success=False,
+            )
             if attempt < max_retries:
                 time.sleep(_resolve_retry_delay_seconds(str(exc.reason), attempt=attempt))
                 last_error = exc
                 continue
             raise TitleProviderError(str(exc.reason)) from exc
         except Exception as exc:  # pragma: no cover - network runtime guard
+            record_api_usage(
+                stage="title",
+                service="title_llm",
+                provider=provider,
+                model=model,
+                endpoint=endpoint,
+                success=False,
+            )
             raise TitleProviderError(str(exc)) from exc
     else:  # pragma: no cover - defensive guard
         raise TitleProviderError(str(last_error) if last_error else "Provider request failed.")
@@ -749,7 +777,89 @@ def _post_json(
 
     if not isinstance(parsed, dict):
         raise TitleProviderError("Provider returned an unexpected payload.")
+    usage = _extract_provider_token_usage(provider, parsed)
+    record_api_usage(
+        stage="title",
+        service="title_llm",
+        provider=provider,
+        model=model,
+        endpoint=endpoint,
+        success=True,
+        prompt_tokens=usage["prompt_tokens"],
+        completion_tokens=usage["completion_tokens"],
+        total_tokens=usage["total_tokens"],
+    )
     return parsed
+
+
+def _resolve_provider_from_url(url: str) -> str:
+    normalized = str(url or "")
+    if "api.openai.com" in normalized:
+        return "openai"
+    if "generativelanguage.googleapis.com" in normalized:
+        return "gemini"
+    if "aiplatform.googleapis.com" in normalized:
+        return "vertex"
+    if "api.anthropic.com" in normalized:
+        return "anthropic"
+    return "unknown"
+
+
+def _resolve_model_from_payload(payload: dict[str, Any], url: str) -> str:
+    if normalize_text(payload.get("model")):
+        return normalize_text(payload.get("model"))
+    parsed = urlparse(str(url or ""))
+    path = parsed.path or ""
+    if ":generateContent" in path and "/models/" in path:
+        return path.split("/models/", 1)[1].split(":generateContent", 1)[0]
+    return ""
+
+
+def _resolve_endpoint_from_url(url: str) -> str:
+    parsed = urlparse(str(url or ""))
+    return parsed.path or str(url or "")
+
+
+def _extract_provider_token_usage(provider: str, response: dict[str, Any]) -> dict[str, int]:
+    normalized_provider = str(provider or "").strip().lower()
+    if normalized_provider == "openai":
+        usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
+        prompt_tokens = _coerce_int(usage.get("prompt_tokens"))
+        completion_tokens = _coerce_int(usage.get("completion_tokens"))
+        total_tokens = _coerce_int(usage.get("total_tokens")) or (prompt_tokens + completion_tokens)
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
+
+    if normalized_provider in {"gemini", "vertex"}:
+        usage = response.get("usageMetadata") if isinstance(response.get("usageMetadata"), dict) else {}
+        prompt_tokens = _coerce_int(usage.get("promptTokenCount") or usage.get("inputTokenCount"))
+        completion_tokens = _coerce_int(usage.get("candidatesTokenCount") or usage.get("outputTokenCount"))
+        total_tokens = _coerce_int(usage.get("totalTokenCount")) or (prompt_tokens + completion_tokens)
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
+
+    if normalized_provider == "anthropic":
+        usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
+        prompt_tokens = _coerce_int(usage.get("input_tokens"))
+        completion_tokens = _coerce_int(usage.get("output_tokens"))
+        total_tokens = _coerce_int(usage.get("total_tokens")) or (prompt_tokens + completion_tokens)
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
+
+    return {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
 
 
 def _build_gemini_like_payload(prompt: str, options: TitleGenerationOptions) -> dict[str, Any]:

@@ -29,7 +29,7 @@ from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_paylo
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260326-retry-off-threshold-75-v77"
+_ASSET_VERSION = "20260327-api-usage-csv-v79"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -278,6 +278,8 @@ def _render_guide_panel() -> str:
             <section class="guide-tab-panel{' active' if index == 0 else ''}" data-guide-panel="{escape(key)}" {'hidden' if index != 0 else ''}>
                 <div class="guide-card-grid">
                     {cards if cards else '<div class="placeholder">해당 분류의 문서가 없습니다.</div>'}
+                    <button type="button" class="ghost-chip" id="exportCollectedCsvButtonUtility">?섏쭛 CSV</button>
+                    <button type="button" class="ghost-chip" id="exportSelectedCsvButtonUtility">?좊퀎 CSV</button>
                 </div>
             </section>
             """
@@ -2292,7 +2294,9 @@ def _render_home() -> str:
                                 <div class="field-block field-block-wide">
                                     <span class="field-label">분석/출력</span>
                                     <div class="option-row">
+                                        <button type="button" class="ghost-chip" id="exportCollectedCsvButton">?섏쭛 寃곌낵 CSV</button>
                                         <button type="button" class="ghost-chip" id="exportCsvButton">분석 결과 CSV</button>
+                                        <button type="button" class="ghost-chip" id="exportSelectedCsvButton">?좊퀎 寃곌낵 CSV</button>
                                     </div>
                                 </div>
                                 <p class="input-help compact-help">확장 없이 분석만 실행하거나, 분석 결과를 내려받는 용도로 씁니다.</p>

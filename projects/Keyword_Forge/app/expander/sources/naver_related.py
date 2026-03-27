@@ -7,6 +7,7 @@ from urllib.request import Request, urlopen
 
 from bs4 import BeautifulSoup
 
+from app.core.api_usage import record_api_usage
 from app.expander.utils.throttle import wait_for_naver_keyword_request
 from app.expander.utils.tokenizer import normalize_key, normalize_text
 
@@ -57,6 +58,14 @@ def get_naver_related_queries(keyword: str) -> list[str]:
     try:
         with urlopen(request, timeout=5.0) as response:
             html = response.read().decode("utf-8", errors="ignore")
+        record_api_usage(
+            stage="expander",
+            service="naver_related_search",
+            provider="naver",
+            endpoint="/search.naver",
+            requested_units=1,
+            success=True,
+        )
         related_queries = _fetch_qra_related_queries(
             html=html,
             keyword=normalized_keyword,
@@ -65,6 +74,14 @@ def get_naver_related_queries(keyword: str) -> list[str]:
         if not related_queries:
             related_queries = _extract_related_queries(html, normalized_keyword)
     except Exception:
+        record_api_usage(
+            stage="expander",
+            service="naver_related_search",
+            provider="naver",
+            endpoint="/search.naver",
+            requested_units=1,
+            success=False,
+        )
         related_queries = []
 
     _CACHE[cache_key] = related_queries
@@ -90,7 +107,23 @@ def _fetch_qra_related_queries(*, html: str, keyword: str, referer_url: str) -> 
     try:
         with urlopen(request, timeout=5.0) as response:
             body = response.read().decode("utf-8", errors="ignore")
+        record_api_usage(
+            stage="expander",
+            service="naver_related_qra",
+            provider="naver",
+            endpoint="/p/qra/1/search.naver",
+            requested_units=1,
+            success=True,
+        )
     except Exception:
+        record_api_usage(
+            stage="expander",
+            service="naver_related_qra",
+            provider="naver",
+            endpoint="/p/qra/1/search.naver",
+            requested_units=1,
+            success=False,
+        )
         return []
 
     return _extract_related_queries_from_qra_response(body, keyword)

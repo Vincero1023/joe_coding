@@ -13,6 +13,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.analyzer.keyword_stats import KeywordStats, merge_keyword_stats
+from app.core.api_usage import bind_current_api_usage_context, record_api_usage
 from app.core.config import get_settings
 from app.expander.utils.tokenizer import normalize_key, normalize_text
 
@@ -215,7 +216,12 @@ class NaverSearchAdClient:
                     "items": [{"key": item["query_key"], "position": item["position"]} for item in request_items],
                 }
                 chunk_stats = parse_average_position_bid_response(
-                    self._post_json(_AVERAGE_POSITION_URI, payload),
+                    self._post_json(
+                        _AVERAGE_POSITION_URI,
+                        payload,
+                        telemetry_service="searchad_bid",
+                        requested_units=len(payload["items"]),
+                    ),
                     request_items=request_items,
                     device=device,
                 )
@@ -250,7 +256,7 @@ class NaverSearchAdClient:
 
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             future_map = {
-                executor.submit(self._fetch_keyword_tool_chunk_with_fallback, chunk): chunk
+                executor.submit(bind_current_api_usage_context(self._fetch_keyword_tool_chunk_with_fallback, chunk)): chunk
                 for chunk in chunks
             }
             for future in as_completed(future_map):
@@ -292,22 +298,42 @@ class NaverSearchAdClient:
                 "hintKeywords": ",".join(normalized_hints),
                 "showDetail": "1",
             },
+            telemetry_service="searchad_keyword_tool",
+            requested_units=len(keywords),
         )
         return parse_keyword_tool_response(
             payload,
             request_keywords=keywords,
         )
 
-    def _post_json(self, uri: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post_json(
+        self,
+        uri: str,
+        payload: dict[str, Any],
+        *,
+        telemetry_service: str = "",
+        requested_units: int = 0,
+    ) -> dict[str, Any]:
         request = Request(
             url=f"{_BASE_URL}{uri}",
             headers=self._build_headers("POST", uri),
             data=json.dumps(payload).encode("utf-8"),
             method="POST",
         )
-        return self._execute_json(request)
+        return self._execute_json(
+            request,
+            telemetry_service=telemetry_service,
+            requested_units=requested_units,
+        )
 
-    def _get_json(self, uri: str, *, query_params: dict[str, str]) -> dict[str, Any]:
+    def _get_json(
+        self,
+        uri: str,
+        *,
+        query_params: dict[str, str],
+        telemetry_service: str = "",
+        requested_units: int = 0,
+    ) -> dict[str, Any]:
         from urllib.parse import urlencode
 
         query = urlencode(query_params)
@@ -316,21 +342,65 @@ class NaverSearchAdClient:
             headers=self._build_headers("GET", uri),
             method="GET",
         )
-        return self._execute_json(request)
+        return self._execute_json(
+            request,
+            telemetry_service=telemetry_service,
+            requested_units=requested_units,
+        )
 
-    def _execute_json(self, request: Request) -> dict[str, Any]:
+    def _execute_json(
+        self,
+        request: Request,
+        *,
+        telemetry_service: str = "",
+        requested_units: int = 0,
+    ) -> dict[str, Any]:
+        service = telemetry_service or "searchad_request"
+        endpoint = request.selector.split("?", 1)[0] if isinstance(request.selector, str) else ""
         try:
             with self._opener(request, timeout=self._timeout) as response:
                 raw_text = response.read().decode("utf-8", errors="ignore")
+            record_api_usage(
+                stage="analyzer",
+                service=service,
+                provider="naver_searchad",
+                endpoint=endpoint,
+                requested_units=requested_units,
+                success=True,
+            )
         except HTTPError as exc:
             raw_text = exc.read().decode("utf-8", errors="ignore")
             detail = _extract_error_message(raw_text) or raw_text or str(exc.reason)
+            record_api_usage(
+                stage="analyzer",
+                service=service,
+                provider="naver_searchad",
+                endpoint=endpoint,
+                requested_units=requested_units,
+                success=False,
+            )
             if exc.code in {401, 403}:
                 raise NaverSearchAdAuthError(detail) from exc
             raise NaverSearchAdResponseError(f"{exc.code} {detail}") from exc
         except URLError as exc:
+            record_api_usage(
+                stage="analyzer",
+                service=service,
+                provider="naver_searchad",
+                endpoint=endpoint,
+                requested_units=requested_units,
+                success=False,
+            )
             raise NaverSearchAdResponseError(str(exc.reason)) from exc
         except Exception as exc:  # pragma: no cover - runtime guard
+            record_api_usage(
+                stage="analyzer",
+                service=service,
+                provider="naver_searchad",
+                endpoint=endpoint,
+                requested_units=requested_units,
+                success=False,
+            )
             raise NaverSearchAdResponseError(str(exc)) from exc
 
         try:

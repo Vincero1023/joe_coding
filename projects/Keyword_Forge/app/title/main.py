@@ -14,6 +14,7 @@ if _PROJECT_ROOT not in sys.path:
 from threading import Event
 from typing import Any, Callable
 
+from app.core.api_usage import capture_api_usage
 from app.core.interfaces import ModuleRunner
 from app.expander.utils.tokenizer import normalize_text
 from app.title.ai_client import TitleGenerationOptions, resolve_issue_context
@@ -30,57 +31,60 @@ class TitleService:
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         stop_event: Event | None = None,
     ) -> Any:
-        if isinstance(input_data, dict):
-            items, target_summary = build_title_targets(input_data)
-            options = TitleGenerationOptions.from_input(input_data)
-            items = _attach_issue_context_from_input(items, input_data, options=options)
-        else:
-            items = _coerce_input_items(input_data)
-            target_summary = {}
-            options = None
-        generated, meta = generate_titles(
-            items,
-            options=options,
-            progress_callback=progress_callback,
-            stop_event=stop_event,
-        )
-        if target_summary:
-            meta["target_summary"] = target_summary
-        if isinstance(input_data, dict):
-            try:
-                _publish_title_service_progress(
-                    progress_callback,
-                    phase="export",
-                    progress_percent=98,
-                    total_count=len(generated),
-                    message="제목 결과 저장 중",
-                )
-                export_payload = export_generated_titles(input_data, generated)
-            except Exception as exc:  # pragma: no cover - defensive runtime guard
-                meta["export_artifact_error"] = str(exc)
+        with capture_api_usage() as api_usage:
+            if isinstance(input_data, dict):
+                items, target_summary = build_title_targets(input_data)
+                options = TitleGenerationOptions.from_input(input_data)
+                items = _attach_issue_context_from_input(items, input_data, options=options)
             else:
-                if isinstance(export_payload, dict):
-                    primary_artifact = (
-                        export_payload.get("primary_artifact")
-                        if isinstance(export_payload.get("primary_artifact"), dict)
-                        else {}
+                items = _coerce_input_items(input_data)
+                target_summary = {}
+                options = None
+            generated, meta = generate_titles(
+                items,
+                options=options,
+                progress_callback=progress_callback,
+                stop_event=stop_event,
+            )
+            if target_summary:
+                meta["target_summary"] = target_summary
+            if isinstance(input_data, dict):
+                try:
+                    _publish_title_service_progress(
+                        progress_callback,
+                        phase="export",
+                        progress_percent=98,
+                        total_count=len(generated),
+                        message="제목 결과 저장 중",
                     )
-                    artifact_list = (
-                        export_payload.get("artifacts")
-                        if isinstance(export_payload.get("artifacts"), list)
-                        else []
-                    )
-                    if primary_artifact:
-                        meta["export_artifact"] = primary_artifact
-                    if artifact_list:
-                        meta["export_artifacts"] = artifact_list
-                    queue_export = (
-                        export_payload.get("queue_export")
-                        if isinstance(export_payload.get("queue_export"), dict)
-                        else {}
-                    )
-                    if queue_export:
-                        meta["queue_export"] = queue_export
+                    export_payload = export_generated_titles(input_data, generated)
+                except Exception as exc:  # pragma: no cover - defensive runtime guard
+                    meta["export_artifact_error"] = str(exc)
+                else:
+                    if isinstance(export_payload, dict):
+                        primary_artifact = (
+                            export_payload.get("primary_artifact")
+                            if isinstance(export_payload.get("primary_artifact"), dict)
+                            else {}
+                        )
+                        artifact_list = (
+                            export_payload.get("artifacts")
+                            if isinstance(export_payload.get("artifacts"), list)
+                            else []
+                        )
+                        if primary_artifact:
+                            meta["export_artifact"] = primary_artifact
+                        if artifact_list:
+                            meta["export_artifacts"] = artifact_list
+                        queue_export = (
+                            export_payload.get("queue_export")
+                            if isinstance(export_payload.get("queue_export"), dict)
+                            else {}
+                        )
+                        if queue_export:
+                            meta["queue_export"] = queue_export
+            api_usage_snapshot = api_usage.snapshot()
+        meta["api_usage"] = api_usage_snapshot
         _publish_title_service_progress(
             progress_callback,
             phase="completed",
@@ -95,6 +99,12 @@ class TitleService:
         return {
             "generated_titles": generated,
             "generation_meta": meta,
+            "debug": {
+                "stage": "title",
+                "summary": api_usage_snapshot.get("summary", {}),
+                "api_usage": api_usage_snapshot,
+                "generated_title_count": len(generated),
+            },
         }
 
 

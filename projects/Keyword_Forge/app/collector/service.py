@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from bs4 import BeautifulSoup
 
+from app.core.api_usage import capture_api_usage
 from app.collector.categories import (
     DEFAULT_CATEGORY_SOURCE,
     get_category_queries,
@@ -158,6 +159,55 @@ class CollectorService:
             debug=debug,
         )
         return self._build_result(raw_entries, debug, started_at)
+
+    def run(self, input_data: dict) -> dict:
+        with capture_api_usage() as api_usage:
+            request = CollectorRequest.from_dict(input_data)
+            debug = self._start_debug_context(request) if request.debug else None
+            started_at = time.perf_counter()
+
+            resolved_category = resolve_category_name(request.category)
+            if debug:
+                debug.resolved_category = resolved_category
+
+            if request.mode == "category":
+                if not resolved_category:
+                    _record_warning(
+                        debug,
+                        code="category_not_found",
+                        message="?붿껌??移댄뀒怨좊━瑜?李얠? 紐삵뻽?듬땲??",
+                        detail={"requested_category": request.category},
+                    )
+                    return self._build_result(
+                        [],
+                        debug,
+                        started_at,
+                        api_usage_snapshot=api_usage.snapshot(),
+                    )
+
+                raw_entries = self._collect_category_entries(
+                    category=resolved_category,
+                    request=request,
+                    debug=debug,
+                )
+                return self._build_result(
+                    raw_entries,
+                    debug,
+                    started_at,
+                    api_usage_snapshot=api_usage.snapshot(),
+                )
+
+            raw_entries = self._collect_by_seed(
+                seed_input=request.seed_input,
+                options=request.options,
+                debug=debug,
+            )
+            return self._build_result(
+                raw_entries,
+                debug,
+                started_at,
+                api_usage_snapshot=api_usage.snapshot(),
+            )
 
     def _collect_category_entries(
         self,
@@ -669,6 +719,43 @@ class CollectorService:
         debug.deduped_keyword_count = len(deduped)
         debug.duration_ms = _elapsed_ms(started_at)
         result["debug"] = _build_debug_payload(debug)
+        return result
+
+    def _build_result(
+        self,
+        raw_entries: list[dict[str, Any]],
+        debug: CollectorDebugContext | None,
+        started_at: float,
+        *,
+        api_usage_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        deduped = _dedupe_keyword_entries(raw_entries)
+        result: dict[str, Any] = {"collected_keywords": deduped}
+        usage_snapshot = (
+            api_usage_snapshot
+            if isinstance(api_usage_snapshot, dict)
+            else {"summary": {}, "services": []}
+        )
+
+        if debug is None:
+            result["debug"] = {
+                "stage": "collector",
+                "summary": usage_snapshot.get("summary", {}),
+                "api_usage": usage_snapshot,
+                "collector_summary": {
+                    "raw_keyword_count": len(raw_entries),
+                    "deduped_keyword_count": len(deduped),
+                    "duration_ms": _elapsed_ms(started_at),
+                },
+            }
+            return result
+
+        debug.raw_keyword_count = len(raw_entries)
+        debug.deduped_keyword_count = len(deduped)
+        debug.duration_ms = _elapsed_ms(started_at)
+        debug_payload = _build_debug_payload(debug)
+        debug_payload["api_usage"] = usage_snapshot
+        result["debug"] = debug_payload
         return result
 
     def _start_debug_context(self, request: CollectorRequest) -> CollectorDebugContext:
