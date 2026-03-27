@@ -2008,6 +2008,131 @@ body.utility-drawer-open {
 .title-item-actions .inline-action-btn {
     background: rgba(255, 255, 255, 0.86);
 }
+.title-keyword-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.title-rank-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 42px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(15, 118, 110, 0.12);
+    color: var(--brand-strong);
+    font-size: 0.76rem;
+    font-weight: 800;
+}
+.selection-summary-board {
+    display: grid;
+    gap: 12px;
+}
+.selection-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+}
+.selection-summary-card {
+    padding: 14px 16px;
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(245, 248, 247, 0.82));
+    border: 1px solid rgba(20, 32, 51, 0.08);
+}
+.selection-summary-card span,
+.selection-summary-card small {
+    display: block;
+    color: var(--muted);
+}
+.selection-summary-card span {
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+.selection-summary-card strong {
+    display: block;
+    margin-top: 8px;
+    font-size: 1.05rem;
+    letter-spacing: -0.02em;
+}
+.selection-summary-card small {
+    margin-top: 6px;
+    font-size: 0.8rem;
+    line-height: 1.5;
+}
+.selection-summary-overview {
+    display: grid;
+    gap: 8px;
+}
+.selection-summary-overview > strong {
+    font-size: 0.84rem;
+    letter-spacing: -0.01em;
+}
+.selection-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.selection-reason-cell {
+    min-width: 220px;
+}
+.selection-reason-empty {
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+.selection-reason-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(20, 32, 51, 0.08);
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+.selection-reason-chip.profitability {
+    background: rgba(236, 253, 245, 0.95);
+    border-color: rgba(34, 197, 94, 0.18);
+    color: #166534;
+}
+.selection-reason-chip.attackability {
+    background: rgba(239, 246, 255, 0.95);
+    border-color: rgba(59, 130, 246, 0.16);
+    color: #1d4ed8;
+}
+.selection-reason-chip.mode {
+    background: rgba(255, 247, 237, 0.95);
+    border-color: rgba(217, 119, 6, 0.16);
+    color: #9a3412;
+}
+.selection-reason-chip.reason {
+    background: rgba(250, 245, 255, 0.95);
+    border-color: rgba(147, 51, 234, 0.14);
+    color: #7c3aed;
+}
+.selection-reason-chip.bucket.gold {
+    background: rgba(254, 249, 195, 0.95);
+    border-color: rgba(202, 138, 4, 0.2);
+    color: #854d0e;
+}
+.selection-reason-chip.bucket.promising {
+    background: rgba(224, 242, 254, 0.95);
+    border-color: rgba(2, 132, 199, 0.18);
+    color: #0f766e;
+}
+.selection-reason-chip.bucket.experimental {
+    background: rgba(245, 243, 255, 0.95);
+    border-color: rgba(124, 58, 237, 0.14);
+    color: #6d28d9;
+}
+.selection-reason-chip.bucket.hold {
+    background: rgba(255, 237, 213, 0.95);
+    border-color: rgba(234, 88, 12, 0.16);
+    color: #c2410c;
+}
 .keyword-meta, .metric-meta, .title-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; }
 .keyword-select {
     display: inline-flex;
@@ -2572,6 +2697,42 @@ body.utility-drawer-open {
 .title-quality-summary.retry {
     background: rgba(254, 242, 242, 0.9);
     border-color: rgba(220, 38, 38, 0.14);
+}
+.title-surface-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.title-surface-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(20, 32, 51, 0.08);
+    font-size: 0.76rem;
+    line-height: 1.2;
+}
+.title-surface-chip strong {
+    color: var(--ink-strong);
+    font-size: 0.76rem;
+}
+.title-surface-chip span {
+    color: var(--muted);
+    font-size: 0.76rem;
+}
+.title-surface-chip.ready {
+    background: rgba(236, 253, 245, 0.96);
+    border-color: rgba(34, 197, 94, 0.18);
+    color: #166534;
+    font-weight: 800;
+}
+.title-surface-chip.review {
+    background: rgba(255, 247, 237, 0.96);
+    border-color: rgba(217, 119, 6, 0.16);
+    color: #9a3412;
+    font-weight: 800;
 }
 .title-quality-issues {
     margin-top: 10px;

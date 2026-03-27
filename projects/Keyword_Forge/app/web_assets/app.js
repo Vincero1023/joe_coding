@@ -245,6 +245,35 @@ const TITLE_SURFACE_EXPORT_SEGMENTS = {
     blog: "blog",
     hybrid: "both",
 };
+const SELECTION_MODE_LABELS = {
+    default: "자동 선별",
+    combo_filter: "2축 통과",
+    grade_filter: "등급 통과",
+    golden_combo: "자동 조합",
+    editorial_support: "에디토리얼 보강",
+    fallback: "점수 보강",
+    seed_anchor: "시드 보존",
+};
+const SELECTION_REASON_LABELS = {
+    allowed_axes: "선택 조합 통과",
+    allowed_grade: "허용 등급 통과",
+    editorial_longtail_seed: "롱테일 씨앗",
+    high_exposure_seed: "노출 우선 보강",
+    measured_seed: "실측 데이터 보강",
+    top_scored_candidate: "상위 점수 보강",
+    seed_intent_preserved: "시드 의도 보존",
+    gold: "황금 조합",
+    promising: "유망 조합",
+    experimental: "실험 조합",
+    hold: "노출 탐색 조합",
+    golden_combo: "자동 조합",
+};
+const GOLDEN_BUCKET_LABELS = {
+    gold: "황금 조합",
+    promising: "유망 조합",
+    experimental: "실험 조합",
+    hold: "노출 탐색",
+};
 const DEFAULT_TITLE_SURFACE_COUNTS = {
     naver_home: 2,
     blog: 2,
@@ -9977,10 +10006,183 @@ function renderContentMapBoard() {
     `;
 }
 
+function normalizeSelectionMode(value) {
+    return String(value || "").trim().toLowerCase();
+}
+
+function normalizeSelectionReason(value) {
+    return String(value || "").trim().toLowerCase();
+}
+
+function normalizeGoldenBucket(value) {
+    const safeValue = String(value || "").trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(GOLDEN_BUCKET_LABELS, safeValue) ? safeValue : "";
+}
+
+function formatSelectionModeLabel(value) {
+    return SELECTION_MODE_LABELS[normalizeSelectionMode(value)] || "자동 선별";
+}
+
+function formatSelectionReasonLabel(value) {
+    return SELECTION_REASON_LABELS[normalizeSelectionReason(value)] || "";
+}
+
+function formatGoldenBucketLabel(value) {
+    return GOLDEN_BUCKET_LABELS[normalizeGoldenBucket(value)] || "";
+}
+
+function summarizeSelectionCounts(items, resolveValue) {
+    const counts = new Map();
+    (items || []).forEach((item) => {
+        const value = String(resolveValue(item) || "").trim();
+        if (!value) {
+            return;
+        }
+        counts.set(value, (counts.get(value) || 0) + 1);
+    });
+    return [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "ko"));
+}
+
+function buildSelectionAxisSummary(profile) {
+    const profitability = PROFITABILITY_ORDER.filter((grade) => Array.isArray(profile?.allowed_profitability_grades) && profile.allowed_profitability_grades.includes(grade));
+    const attackability = ATTACKABILITY_ORDER.filter((grade) => Array.isArray(profile?.allowed_attackability_grades) && profile.allowed_attackability_grades.includes(grade));
+    const legacyGrades = GRADE_ORDER.filter((grade) => Array.isArray(profile?.allowed_grades) && profile.allowed_grades.includes(grade));
+
+    if (profitability.length || attackability.length) {
+        return [
+            profitability.length ? `수익성 ${profitability.join(", ")}` : "",
+            attackability.length ? `노출도 ${attackability.join(", ")}` : "",
+        ].filter(Boolean).join(" / ");
+    }
+    if (legacyGrades.length) {
+        return `등급 ${legacyGrades.join(", ")}`;
+    }
+    return "자동 선별 기준";
+}
+
+function renderSelectionCountChips(entries, formatter, classNameResolver) {
+    if (!entries.length) {
+        return "";
+    }
+    return `
+        <div class="selection-chip-row">
+            ${entries.map(([value, count]) => `
+                <span class="selection-reason-chip ${escapeHtml(classNameResolver(value))}">
+                    ${escapeHtml(formatter(value))} ${escapeHtml(String(count))}건
+                </span>
+            `).join("")}
+        </div>
+    `;
+}
+
+function renderSelectionSummaryBoard(items, profile) {
+    const selectedItems = Array.isArray(items) ? items : [];
+    if (!selectedItems.length && !profile) {
+        return "";
+    }
+
+    const selectedCount = countItems(selectedItems);
+    const candidateCount = Math.max(0, Number(profile?.candidate_count ?? state.results.analyzed?.analyzed_keywords?.length ?? 0) || 0);
+    const title = typeof window.buildSelectionResultTitle === "function"
+        ? window.buildSelectionResultTitle(selectedItems, profile)
+        : "선별 결과";
+    const subtitle = typeof window.buildSelectionResultSubtitle === "function"
+        ? window.buildSelectionResultSubtitle(selectedItems, profile)
+        : "";
+    const axisSummary = buildSelectionAxisSummary(profile);
+    const modeEntries = summarizeSelectionCounts(selectedItems, (item) => normalizeSelectionMode(item?.selection_mode));
+    const bucketEntries = summarizeSelectionCounts(selectedItems, (item) => normalizeGoldenBucket(item?.golden_bucket));
+    const editorialCount = selectedItems.filter((item) => normalizeSelectionMode(item?.selection_mode) === "editorial_support").length;
+
+    return `
+        <section class="selection-summary-board">
+            <div class="selection-summary-grid">
+                <article class="selection-summary-card">
+                    <span>현재 선별</span>
+                    <strong>${escapeHtml(title)}</strong>
+                    <small>${escapeHtml(subtitle || "현재 조건에 맞는 키워드를 추려 다음 단계 후보로 고정한 상태입니다.")}</small>
+                </article>
+                <article class="selection-summary-card">
+                    <span>통과 현황</span>
+                    <strong>${escapeHtml(String(selectedCount))} / ${escapeHtml(String(candidateCount || selectedCount))}</strong>
+                    <small>분석 ${escapeHtml(String(candidateCount || selectedCount))}건 중 선별 ${escapeHtml(String(selectedCount))}건</small>
+                </article>
+                <article class="selection-summary-card">
+                    <span>선별 축</span>
+                    <strong>${escapeHtml(axisSummary)}</strong>
+                    <small>${editorialCount ? `에디토리얼 보강 ${editorialCount}건 포함` : "2축 또는 자동 선별 기준을 그대로 보여줍니다."}</small>
+                </article>
+            </div>
+            ${modeEntries.length ? `
+                <div class="selection-summary-overview">
+                    <strong>선별 방식</strong>
+                    ${renderSelectionCountChips(
+                        modeEntries,
+                        (value) => formatSelectionModeLabel(value),
+                        (value) => `mode ${normalizeSelectionMode(value) || "default"}`
+                    )}
+                </div>
+            ` : ""}
+            ${bucketEntries.length ? `
+                <div class="selection-summary-overview">
+                    <strong>조합 분포</strong>
+                    ${renderSelectionCountChips(
+                        bucketEntries,
+                        (value) => formatGoldenBucketLabel(value) || value,
+                        (value) => `bucket ${normalizeGoldenBucket(value) || "default"}`
+                    )}
+                </div>
+            ` : ""}
+        </section>
+    `;
+}
+
+function renderSelectionReasonChips(item) {
+    const profitabilityGrade = PROFITABILITY_ORDER.includes(String(item?.profitability_grade || "").trim().toUpperCase())
+        ? String(item.profitability_grade).trim().toUpperCase()
+        : "";
+    const attackabilityGrade = ATTACKABILITY_ORDER.includes(String(item?.attackability_grade || "").trim())
+        ? String(item.attackability_grade).trim()
+        : "";
+    const selectionMode = normalizeSelectionMode(item?.selection_mode);
+    const selectionReason = normalizeSelectionReason(item?.selection_reason);
+    const goldenBucket = normalizeGoldenBucket(item?.golden_bucket);
+    const chips = [];
+
+    if (profitabilityGrade) {
+        chips.push(`<span class="selection-reason-chip profitability">수익성 ${escapeHtml(profitabilityGrade)}</span>`);
+    }
+    if (attackabilityGrade) {
+        chips.push(`<span class="selection-reason-chip attackability">노출도 ${escapeHtml(attackabilityGrade)}</span>`);
+    }
+    if (goldenBucket) {
+        chips.push(`<span class="selection-reason-chip bucket ${escapeHtml(goldenBucket)}">${escapeHtml(formatGoldenBucketLabel(goldenBucket))}</span>`);
+    }
+    if (selectionMode) {
+        chips.push(`<span class="selection-reason-chip mode ${escapeHtml(selectionMode)}">${escapeHtml(formatSelectionModeLabel(selectionMode))}</span>`);
+    }
+    if (
+        selectionReason
+        && !["allowed_axes", "allowed_grade", "golden_combo", "gold", "promising", "experimental", "hold"].includes(selectionReason)
+    ) {
+        const reasonLabel = formatSelectionReasonLabel(selectionReason);
+        if (reasonLabel) {
+            chips.push(`<span class="selection-reason-chip reason">${escapeHtml(reasonLabel)}</span>`);
+        }
+    }
+
+    return chips.length
+        ? `<div class="selection-chip-row">${chips.join("")}</div>`
+        : '<span class="selection-reason-empty">자동 선별 기준</span>';
+}
+
 function renderSelectedList(items) {
-    const rows = (items || []).map((item, index) => `
+    const selectedItems = Array.isArray(items) ? items : [];
+    const selectionProfile = state.results.selected?.selection_profile || null;
+    const rows = selectedItems.map((item, index) => `
         <tr>
             <td class="num-cell">${escapeHtml(String(index + 1))}</td>
+            <td class="selected-reason-cell">${renderSelectionReasonChips(item)}</td>
             <td>${renderAnalysisKeywordCell(item)}</td>
             <td>${renderGradeBadge(resolveAnalysisGrade(item))}</td>
             <td class="num-cell">${escapeHtml(formatNumber(item.score))}</td>
@@ -9997,11 +10199,13 @@ function renderSelectedList(items) {
     return `
         <div class="analysis-console">
             ${renderContentMapBoard()}
+            ${renderSelectionSummaryBoard(selectedItems, selectionProfile)}
             <div class="expanded-table-wrap">
                 <table class="expanded-table selected-table compact">
                     <thead>
                         <tr>
                             <th>#</th>
+                            <th>선별 근거</th>
                             <th>키워드</th>
                             <th>등급</th>
                             <th>점수</th>
@@ -10014,7 +10218,7 @@ function renderSelectedList(items) {
                             <th>출처</th>
                         </tr>
                     </thead>
-                    <tbody>${rows || `<tr><td colspan="11">선별 결과가 없습니다.</td></tr>`}</tbody>
+                    <tbody>${rows || `<tr><td colspan="12">선별 결과가 없습니다.</td></tr>`}</tbody>
                 </table>
             </div>
         </div>
@@ -10451,6 +10655,43 @@ function renderTitleResultControls(items) {
             <span class="title-sort-count">표시 ${escapeHtml(String(displayedCount))} / 전체 ${escapeHtml(String(totalCount))}</span>
         </div>
     `;
+}
+
+function getActiveTitleSurfaceChannelsForItem(item) {
+    return TITLE_SURFACE_ORDER.filter((channel) => Array.isArray(item?.titles?.[channel]) && item.titles[channel].length);
+}
+
+function renderTitleSurfaceSummaryStrip(item, activeChannels, channelScores, qualityReport) {
+    const chips = activeChannels.map((channel) => {
+        const titleCount = Array.isArray(item?.titles?.[channel]) ? item.titles[channel].length : 0;
+        return `
+            <span class="title-surface-chip">
+                <strong>${escapeHtml(TITLE_SURFACE_SHORT_LABELS[channel] || channel)}</strong>
+                <span>${escapeHtml(String(titleCount))}개 · ${escapeHtml(String(channelScores?.[channel] || 0))}점</span>
+            </span>
+        `;
+    });
+
+    if (qualityReport?.recommended_pair_ready) {
+        chips.push('<span class="title-surface-chip ready">추천 조합 준비</span>');
+    } else if (qualityReport?.usable_pair_ready) {
+        chips.push('<span class="title-surface-chip review">대체안 포함</span>');
+    }
+
+    return chips.length ? `<div class="title-surface-strip">${chips.join("")}</div>` : "";
+}
+
+function renderTitleSurfaceColumns(item, activeChannels, titleChecks) {
+    return activeChannels.map((channel) => {
+        const titles = Array.isArray(item?.titles?.[channel]) ? item.titles[channel] : [];
+        const checks = Array.isArray(titleChecks?.[channel]) ? titleChecks[channel] : [];
+        return `
+            <div class="title-column">
+                <h4>${escapeHtml(TITLE_SURFACE_COLUMN_LABELS[channel] || channel)} <small>${escapeHtml(String(titles.length))}개</small></h4>
+                ${renderRecommendedTitleBlock(titles, checks)}
+            </div>
+        `;
+    }).join("");
 }
 
 
@@ -11422,8 +11663,8 @@ function renderTitleList(items) {
     if (!entries.length) {
         return '<div class="collector-empty">선택한 조건에 맞는 제목 결과가 없습니다.</div>';
     }
-    return `<div class="title-list">${entries.map(({ item, qualityReport }) => {
-        const activeChannels = TITLE_SURFACE_ORDER.filter((channel) => Array.isArray(item.titles?.[channel]) && item.titles[channel].length);
+    return `<div class="title-list">${entries.map(({ item, qualityReport }, entryIndex) => {
+        const activeChannels = getActiveTitleSurfaceChannelsForItem(item);
         const totalTitleCount = activeChannels.reduce(
             (sum, channel) => sum + (Array.isArray(item.titles?.[channel]) ? item.titles[channel].length : 0),
             0,
@@ -11433,21 +11674,21 @@ function renderTitleList(items) {
         const summary = qualityReport.summary || "제목 문장을 확인하는 중입니다.";
         const channelScores = qualityReport.channel_scores || {};
         const titleChecks = qualityReport.title_checks || {};
-        const recommendedPairReady = Boolean(qualityReport.recommended_pair_ready);
-        const usablePairReady = Boolean(qualityReport.usable_pair_ready);
-        const pairReadyLabel = recommendedPairReady
-            ? "추천 홈판형 1개 / 블로그형 1개 확보"
-            : (usablePairReady ? "대체안 포함 1+1 확보" : "");
         const targetIdentity = getTitleTargetIdentity(item);
+        const surfaceSummary = renderTitleSurfaceSummaryStrip(item, activeChannels, channelScores, qualityReport);
+        const columnsHtml = renderTitleSurfaceColumns(item, activeChannels, titleChecks);
         return `
             <div class="title-item">
                 <div class="title-item-head">
                     <div class="title-keyword">
                         <div class="title-keyword-copy">
-                            <strong>${escapeHtml(item.keyword || "-")}</strong>
+                            <div class="title-keyword-heading">
+                                <span class="title-rank-chip">#${escapeHtml(String(entryIndex + 1))}</span>
+                                <strong>${escapeHtml(item.keyword || "-")}</strong>
+                                <span class="badge">제목 ${escapeHtml(String(totalTitleCount))}개</span>
+                            </div>
                             ${renderKeywordWorkflowInline(item.keyword, { suppressRecentDuplicate: true })}
                         </div>
-                        <span class="badge">제목 ${escapeHtml(String(totalTitleCount))}개</span>
                     </div>
                     <div class="title-item-actions">
                         <span class="title-quality-chip ${escapeHtml(qualityStatus)}">품질 ${escapeHtml(String(qualityReport.bundle_score || 0))}점</span>
@@ -11460,32 +11701,14 @@ function renderTitleList(items) {
                         >이 키워드만 다시 생성</button>
                     </div>
                 </div>
-                ${renderTitleTargetMeta(item)}
                 <div class="title-quality-summary ${escapeHtml(qualityStatus)}">
                     <strong>${escapeHtml(summary)}</strong>
-                    <span class="title-score-line">
-                        네이버홈 ${escapeHtml(String(channelScores.naver_home || 0))}점 / 블로그 ${escapeHtml(String(channelScores.blog || 0))}점
-                        ${pairReadyLabel ? ` / ${escapeHtml(pairReadyLabel)}` : ""}
-                        ${Array.isArray(item.titles?.hybrid) && item.titles.hybrid.length ? ` / ${escapeHtml(TITLE_SURFACE_COLUMN_LABELS.hybrid)} ${escapeHtml(String(channelScores.hybrid || 0))}점` : ""}
-                    </span>
-                    <small class="title-target-note">${escapeHtml(activeChannels.map((channel) => `${TITLE_SURFACE_COLUMN_LABELS[channel] || channel} ${String(channelScores[channel] || 0)}점`).join(" / "))}</small>
+                    ${surfaceSummary}
                 </div>
+                ${renderTitleTargetMeta(item)}
                 ${renderTitleQualityIssues(qualityReport)}
-                <div class="title-columns">
-                    <div class="title-column">
-                        <h4>네이버홈형</h4>
-                        ${renderRecommendedTitleBlock(item.titles?.naver_home || [], titleChecks.naver_home || [])}
-                    </div>
-                    <div class="title-column">
-                        <h4>블로그형</h4>
-                        ${renderRecommendedTitleBlock(item.titles?.blog || [], titleChecks.blog || [])}
-                    </div>
-                    ${Array.isArray(item.titles?.hybrid) && item.titles.hybrid.length ? `
-                        <div class="title-column">
-                            <h4>${escapeHtml(TITLE_SURFACE_COLUMN_LABELS.hybrid)}</h4>
-                            ${renderRecommendedTitleBlock(item.titles?.hybrid || [], titleChecks.hybrid || [])}
-                        </div>
-                    ` : ""}
+                <div class="title-columns" style="grid-template-columns: repeat(${escapeHtml(String(Math.max(1, activeChannels.length)))}, minmax(0, 1fr));">
+                    ${columnsHtml}
                 </div>
             </div>
         `;
