@@ -2004,6 +2004,30 @@ def _render_home() -> str:
                     </div>
                 </div>
 
+                <section class="quickstart-panel">
+                    <div class="quickstart-head">
+                        <div>
+                            <p class="panel-kicker">모드</p>
+                            <h3>시작 모드</h3>
+                        </div>
+                        <span class="badge" id="quickStartModeBadge">키워드 발굴</span>
+                    </div>
+                    <div class="quickstart-mode-grid">
+                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="discover">키워드 발굴</button>
+                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="analyze">보유 키워드 분석</button>
+                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="title">제목 생성</button>
+                    </div>
+                    <div class="quickstart-summary">
+                        <strong id="quickStartSummaryTitle">카테고리/시드에서 전체 파이프라인을 새로 시작합니다.</strong>
+                        <p id="quickStartSummaryText">수집, 확장, 분석, 선별, 제목 생성까지 한 번에 이어서 실행합니다.</p>
+                        <div id="quickStartSummaryMeta" class="quickstart-meta"></div>
+                    </div>
+                    <div class="quickstart-actions">
+                        <button type="button" class="primary-btn" id="quickStartPrimaryButton">전체 실행 시작</button>
+                        <button type="button" class="ghost-chip" id="quickStartSecondaryButton">관련 설정 보기</button>
+                    </div>
+                </section>
+
                 <div class="control-stack" id="controlStack">
                 <section class="control-stage-block control-stage-collect" data-control-block="collect">
                     <div class="control-stage-head">
@@ -2223,35 +2247,12 @@ def _render_home() -> str:
             <section class="panel launcher-panel" id="section-launcher">
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">빠른 시작</p>
-                        <h2>빠른 시작</h2>
+                        <p class="panel-kicker">세부 실행</p>
+                        <h2>확장 · 분석 · 제목</h2>
                     </div>
                 </div>
-                <section class="quickstart-panel">
-                    <div class="quickstart-head">
-                        <div>
-                            <p class="panel-kicker">모드</p>
-                            <h3>시작 모드</h3>
-                        </div>
-                        <span class="badge" id="quickStartModeBadge">키워드 발굴</span>
-                    </div>
-                    <div class="quickstart-mode-grid">
-                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="discover">키워드 발굴</button>
-                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="analyze">보유 키워드 분석</button>
-                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="title">제목 생성</button>
-                    </div>
-                    <div class="quickstart-summary">
-                        <strong id="quickStartSummaryTitle">카테고리/시드에서 전체 파이프라인을 새로 시작합니다.</strong>
-                        <p id="quickStartSummaryText">수집, 확장, 분석, 선별, 제목 생성까지 한 번에 이어서 실행합니다.</p>
-                        <div id="quickStartSummaryMeta" class="quickstart-meta"></div>
-                    </div>
-                    <div class="quickstart-actions">
-                        <button type="button" class="primary-btn" id="quickStartPrimaryButton">전체 실행 시작</button>
-                        <button type="button" class="ghost-chip" id="quickStartSecondaryButton">관련 설정 보기</button>
-                    </div>
-                </section>
                 <p class="input-help compact-help launcher-panel-note">
-                    시작 모드만 고르면 아래 카드에서 세부 설정을 이어서 다듬을 수 있습니다. 운영 제한과 예약 작업은 상단 버튼에서 바로 엽니다.
+                    상단 시작 모드로 큰 흐름을 정하고, 여기서는 확장·분석·제목 단계의 세부 입력과 옵션만 조정하면 됩니다.
                 </p>
 
                 <div class="control-launcher-column">

@@ -468,6 +468,9 @@ button:disabled {
     border: 1px solid rgba(15, 118, 110, 0.14);
     box-shadow: 0 16px 30px rgba(15, 118, 110, 0.08);
 }
+.control-panel .quickstart-panel {
+    margin-bottom: 18px;
+}
 .quickstart-head {
     display: flex;
     justify-content: space-between;
@@ -5697,7 +5700,7 @@ body {
         grid-column: 1;
         grid-row: 1;
         display: grid;
-        grid-template-columns: minmax(0, 1.18fr) minmax(360px, 0.82fr);
+        grid-template-columns: minmax(0, 1fr);
         gap: 18px;
         align-self: start;
     }
@@ -5742,8 +5745,8 @@ body {
     }
 
     .workspace-side-column .control-launcher-column {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 14px;
     }
 
     .workspace-side-column .control-launcher-column .launcher-card,
@@ -5754,6 +5757,10 @@ body {
 
     .workspace-side-column .control-stage-title {
         grid-column: 1 / -1;
+    }
+
+    .workspace-side-column .launcher-panel {
+        width: 100%;
     }
 
     .workspace-sidebar,
