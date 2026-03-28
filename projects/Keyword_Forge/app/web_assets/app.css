@@ -1781,6 +1781,13 @@ body.utility-drawer-open {
     min-width: 0;
 }
 
+.workspace-nav-output-panel {
+    flex: 1 0 100%;
+    width: 100%;
+    margin: 2px 0 0;
+    padding-top: 2px;
+}
+
 .workspace-nav-stage-dock .result-stage-dock-switcher {
     display: flex;
     grid-template-columns: none;
@@ -1835,6 +1842,10 @@ body.utility-drawer-open {
     min-height: 48px;
     padding: 10px 14px;
     border-radius: 16px;
+}
+
+.workspace-nav-output-panel .results-tool-group {
+    background: rgba(255, 255, 255, 0.9);
 }
 
 .workspace-nav-stage-dock .results-stage-step {
@@ -5460,6 +5471,7 @@ body {
     top: calc(var(--nav-height) + 14px);
     z-index: 40;
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     margin: 0 0 24px;
     padding: 10px 12px;
@@ -5468,8 +5480,7 @@ body {
     background: rgba(255, 255, 255, 0.72);
     backdrop-filter: blur(18px);
     box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
-    overflow-x: auto;
-    scrollbar-width: none;
+    overflow: visible;
 }
 
 .workspace-nav::-webkit-scrollbar {

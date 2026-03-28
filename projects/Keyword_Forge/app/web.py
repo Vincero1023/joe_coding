@@ -1919,6 +1919,35 @@ def _render_home() -> str:
                 <span>빠른 시작</span>
             </a>
             <div id="resultStageDock" class="result-stage-dock workspace-nav-stage-dock"></div>
+            <div class="results-panel-tools workspace-nav-output-panel" id="resultsPanelTools" hidden>
+                <div class="results-tool-group">
+                    <span class="results-tool-label">단계 파일</span>
+                    <button type="button" class="ghost-chip" id="resultsExportCollectedCsvButton">수집 CSV</button>
+                    <button type="button" class="ghost-chip" id="resultsExportCollectedTxtButton">수집 TXT</button>
+                    <button type="button" class="ghost-chip" id="resultsCopyCollectedLinesButton">수집 복사(줄)</button>
+                    <button type="button" class="ghost-chip" id="resultsCopyCollectedCommaButton">수집 복사(,)</button>
+                    <button type="button" class="ghost-chip" id="resultsExportExpandedCsvButton">확장 CSV</button>
+                    <button type="button" class="ghost-chip" id="resultsExportExpandedTxtButton">확장 TXT</button>
+                    <button type="button" class="ghost-chip" id="resultsCopyExpandedLinesButton">확장 복사(줄)</button>
+                    <button type="button" class="ghost-chip" id="resultsCopyExpandedCommaButton">확장 복사(,)</button>
+                    <button type="button" class="ghost-chip" id="resultsExportAnalyzedCsvButton">분석 CSV</button>
+                    <button type="button" class="ghost-chip" id="resultsExportAnalyzedTxtButton">분석 TXT</button>
+                    <button type="button" class="ghost-chip" id="resultsCopyAnalyzedLinesButton">분석 복사(줄)</button>
+                    <button type="button" class="ghost-chip" id="resultsCopyAnalyzedCommaButton">분석 복사(,)</button>
+                    <button type="button" class="ghost-chip" id="resultsExportSelectedCsvButton">선별 CSV</button>
+                    <button type="button" class="ghost-chip" id="resultsExportSelectedTxtButton">선별 TXT</button>
+                    <button type="button" class="ghost-chip" id="resultsCopySelectedLinesButton">선별 복사(줄)</button>
+                    <button type="button" class="ghost-chip" id="resultsCopySelectedCommaButton">선별 복사(,)</button>
+                </div>
+                <div class="results-tool-group">
+                    <span class="results-tool-label">보조 도구</span>
+                    <button type="button" class="ghost-chip" data-utility-open="history" aria-pressed="false">실행 기록</button>
+                    <button type="button" class="ghost-chip" data-utility-open="vault" aria-pressed="false">키워드 보관함</button>
+                    <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">오류 / 진단</button>
+                    <button type="button" class="ghost-chip" data-utility-open="logs" aria-pressed="false">실행 로그</button>
+                    <button type="button" class="ghost-chip" id="exportTitleCsvButton">제목 결과 CSV</button>
+                </div>
+            </div>
         </nav>
 
         <main class="layout-grid workspace-cockpit">
@@ -1959,35 +1988,6 @@ def _render_home() -> str:
                     <div class="results-panel-badges">
                         <span class="badge">실시간 선별 우선</span>
                         <span class="badge">CSV / TXT / 클립보드</span>
-                    </div>
-                </div>
-                <div class="results-panel-tools" id="resultsPanelTools">
-                    <div class="results-tool-group">
-                        <span class="results-tool-label">단계 파일</span>
-                        <button type="button" class="ghost-chip" id="resultsExportCollectedCsvButton">수집 CSV</button>
-                        <button type="button" class="ghost-chip" id="resultsExportCollectedTxtButton">수집 TXT</button>
-                        <button type="button" class="ghost-chip" id="resultsCopyCollectedLinesButton">수집 복사(줄)</button>
-                        <button type="button" class="ghost-chip" id="resultsCopyCollectedCommaButton">수집 복사(,)</button>
-                        <button type="button" class="ghost-chip" id="resultsExportExpandedCsvButton">확장 CSV</button>
-                        <button type="button" class="ghost-chip" id="resultsExportExpandedTxtButton">확장 TXT</button>
-                        <button type="button" class="ghost-chip" id="resultsCopyExpandedLinesButton">확장 복사(줄)</button>
-                        <button type="button" class="ghost-chip" id="resultsCopyExpandedCommaButton">확장 복사(,)</button>
-                        <button type="button" class="ghost-chip" id="resultsExportAnalyzedCsvButton">분석 CSV</button>
-                        <button type="button" class="ghost-chip" id="resultsExportAnalyzedTxtButton">분석 TXT</button>
-                        <button type="button" class="ghost-chip" id="resultsCopyAnalyzedLinesButton">분석 복사(줄)</button>
-                        <button type="button" class="ghost-chip" id="resultsCopyAnalyzedCommaButton">분석 복사(,)</button>
-                        <button type="button" class="ghost-chip" id="resultsExportSelectedCsvButton">선별 CSV</button>
-                        <button type="button" class="ghost-chip" id="resultsExportSelectedTxtButton">선별 TXT</button>
-                        <button type="button" class="ghost-chip" id="resultsCopySelectedLinesButton">선별 복사(줄)</button>
-                        <button type="button" class="ghost-chip" id="resultsCopySelectedCommaButton">선별 복사(,)</button>
-                    </div>
-                    <div class="results-tool-group">
-                        <span class="results-tool-label">보조 도구</span>
-                        <button type="button" class="ghost-chip" data-utility-open="history" aria-pressed="false">실행 기록</button>
-                        <button type="button" class="ghost-chip" data-utility-open="vault" aria-pressed="false">키워드 보관함</button>
-                        <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">오류 / 진단</button>
-                        <button type="button" class="ghost-chip" data-utility-open="logs" aria-pressed="false">실행 로그</button>
-                        <button type="button" class="ghost-chip" id="exportTitleCsvButton">제목 결과 CSV</button>
                     </div>
                 </div>
                 <div id="resultsGrid" class="results-grid"></div>
