@@ -878,6 +878,10 @@ button:disabled {
     margin: 0 0 16px;
     flex-wrap: wrap;
 }
+
+.results-panel-tools[hidden] {
+    display: none !important;
+}
 body.utility-drawer-open {
     overflow: hidden;
 }
