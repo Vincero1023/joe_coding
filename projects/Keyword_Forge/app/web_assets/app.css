@@ -406,6 +406,9 @@ button:disabled {
     border: 1px solid rgba(20, 32, 51, 0.08);
     min-width: 0;
 }
+.control-stage-quickstart {
+    min-width: 0;
+}
 .control-stage-collect {
     grid-column: 1 / -1;
 }
@@ -470,6 +473,10 @@ button:disabled {
 }
 .control-panel .quickstart-panel {
     margin-bottom: 18px;
+}
+.control-stack > .quickstart-panel {
+    margin-bottom: 0;
+    grid-column: 1 / -1;
 }
 .quickstart-head {
     display: flex;
@@ -5706,15 +5713,22 @@ body {
     }
 
     .workspace-side-column .control-stack {
-        grid-template-columns: minmax(0, 1.18fr) minmax(300px, 0.82fr);
+        grid-template-columns: minmax(0, 0.96fr) minmax(320px, 1.04fr);
     }
 
-    .workspace-side-column .control-stage-collect {
+    .workspace-side-column .control-stack > .control-stage-quickstart {
         grid-column: 1;
+        grid-row: 1;
     }
 
     .workspace-side-column .control-stage-pipeline {
         grid-column: 2;
+        grid-row: 1;
+    }
+
+    .workspace-side-column .control-stage-collect {
+        grid-column: 1 / -1;
+        grid-row: 2;
     }
 
     .workspace-side-column .form-grid {

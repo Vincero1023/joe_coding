@@ -2004,7 +2004,8 @@ def _render_home() -> str:
                     </div>
                 </div>
 
-                <section class="quickstart-panel">
+                <div class="control-stack" id="controlStack">
+                <section class="quickstart-panel control-stage-quickstart">
                     <div class="quickstart-head">
                         <div>
                             <p class="panel-kicker">모드</p>
@@ -2027,8 +2028,6 @@ def _render_home() -> str:
                         <button type="button" class="ghost-chip" id="quickStartSecondaryButton">관련 설정 보기</button>
                     </div>
                 </section>
-
-                <div class="control-stack" id="controlStack">
                 <section class="control-stage-block control-stage-collect" data-control-block="collect">
                     <div class="control-stage-head">
                         <div>
