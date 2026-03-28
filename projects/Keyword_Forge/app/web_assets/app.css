@@ -5700,7 +5700,7 @@ body {
         grid-column: 1;
         grid-row: 1;
         display: grid;
-        grid-template-columns: minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr);
         gap: 18px;
         align-self: start;
     }
@@ -5745,22 +5745,45 @@ body {
     }
 
     .workspace-side-column .control-launcher-column {
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        grid-template-columns: 1fr;
         gap: 14px;
     }
 
     .workspace-side-column .control-launcher-column .launcher-card,
     .workspace-side-column .control-launcher-column .title-settings-card {
         max-width: none;
-        height: 100%;
+        height: auto;
     }
 
     .workspace-side-column .control-stage-title {
-        grid-column: 1 / -1;
+        grid-column: auto;
     }
 
     .workspace-side-column .launcher-panel {
         width: 100%;
+    }
+
+    .workspace-side-column .launcher-panel .title-settings-card .title-mode-block {
+        grid-template-columns: 1fr;
+    }
+
+    .workspace-side-column .launcher-panel .title-settings-card .title-surface-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .workspace-side-column .launcher-panel .title-settings-card #titleKeywordModes {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .workspace-side-column .launcher-panel .title-settings-card .title-surface-card {
+        gap: 8px;
+        padding: 10px 12px;
+    }
+
+    .workspace-side-column .launcher-panel .title-settings-card .mode-card strong {
+        white-space: normal;
     }
 
     .workspace-sidebar,
