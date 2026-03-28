@@ -2504,7 +2504,7 @@ function renderAnalyzedList(items) {
             </div>
             <div class="analysis-filter-tip">
                 <strong>선별 프리셋</strong>
-                <span>균형형은 A~D · 1~4, 황금형은 A~C · 1~3, 수익형은 A~C · 1~6, 노출형은 A~F · 1~3, 롱테일 탐색형은 C~F · 1~4 조합입니다. 자동 선별은 상위 조합이 부족할 때 글감 후보까지 함께 남깁니다.</span>
+                <span>현재 등급은 수익성 A~F, 노출도 1~6으로 나뉩니다. 균형형은 A~D · 1~4, 황금형은 A~C · 1~3, 수익형은 A~C · 1~6, 노출형은 A~F · 1~3, 롱테일 탐색형은 C~F · 1~4 조합입니다. 자동 선별은 상위 조합이 부족할 때 글감 후보까지 함께 남깁니다.</span>
             </div>
             <div class="queue-form-actions result-inline-actions">
                 <span class="queue-inline-meta">표시 목록 ${filteredItems.length}건</span>
@@ -3584,14 +3584,18 @@ function renderWorkbenchAside(expandedItems, analyzedItems) {
             </div>
             <div class="workbench-guide-list">
                 ${[
-                    [renderProfitabilityBadge("A"), "A: 72+ 높은 수익성"],
-                    [renderProfitabilityBadge("B"), "B: 56+ 양호한 수익성"],
-                    [renderProfitabilityBadge("C"), "C: 38+ 보통 수익성"],
-                    [renderProfitabilityBadge("D"), "D: 38 미만 낮은 수익성"],
-                    [renderAttackabilityBadge("1"), "1: 74+ 상위 노출 가능성 높음"],
-                    [renderAttackabilityBadge("2"), "2: 58+ 노출 여지 있음"],
-                    [renderAttackabilityBadge("3"), "3: 40+ 경쟁 주의"],
-                    [renderAttackabilityBadge("4"), "4: 40 미만 노출 어려움"],
+                    [renderProfitabilityBadge("A"), "A: 72+ 최상위 수익성"],
+                    [renderProfitabilityBadge("B"), "B: 64+ 강한 수익성"],
+                    [renderProfitabilityBadge("C"), "C: 56+ 양호한 수익성"],
+                    [renderProfitabilityBadge("D"), "D: 47+ 보통 수익성"],
+                    [renderProfitabilityBadge("E"), "E: 38+ 낮은 수익성"],
+                    [renderProfitabilityBadge("F"), "F: 38 미만 실험 구간"],
+                    [renderAttackabilityBadge("1"), "1: 74+ 최상위 노출 가능성"],
+                    [renderAttackabilityBadge("2"), "2: 66+ 강한 노출 가능성"],
+                    [renderAttackabilityBadge("3"), "3: 58+ 노출 여지 있음"],
+                    [renderAttackabilityBadge("4"), "4: 49+ 경쟁 주의"],
+                    [renderAttackabilityBadge("5"), "5: 40+ 진입 부담 큼"],
+                    [renderAttackabilityBadge("6"), "6: 40 미만 롱테일/실험 구간"],
                 ].map(([badgeHtml, label]) => `
                     <div class="workbench-guide-row">
                         ${badgeHtml}
