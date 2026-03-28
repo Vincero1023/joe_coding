@@ -145,6 +145,13 @@ function renderResultStageDock() {
                     </button>
                 `;
             }).join("")}
+            <button
+                type="button"
+                class="ghost-chip result-stage-tools-toggle${state.resultsToolsVisible ? " active" : ""}"
+                data-inline-action="toggle_results_tools"
+                aria-pressed="${state.resultsToolsVisible ? "true" : "false"}"
+                ${activeViewKey ? "" : "disabled"}
+            >출력 및 복사</button>
         </div>
     `;
 }
@@ -156,6 +163,10 @@ renderResultStageTabs = window.renderResultStageTabs;
 
 window.renderResults = function renderResultsOverride(...args) {
     const result = originalRenderResults?.(...args);
+    if (elements.resultsPanelTools) {
+        const hasAvailableStages = buildResultStageDockItems().some((item) => item.available);
+        elements.resultsPanelTools.hidden = !hasAvailableStages || !state.resultsToolsVisible;
+    }
     renderResultStageDock();
     return result;
 };
@@ -3736,6 +3747,14 @@ function handleResultsGridClick(event) {
     const inlineTrigger = event.target.closest("[data-inline-action]");
     if (inlineTrigger) {
         const action = inlineTrigger.getAttribute("data-inline-action") || "";
+        if (action === "toggle_results_tools") {
+            toggleResultsToolsVisibility();
+            return;
+        }
+        if (action === "seedify_keyword") {
+            applyKeywordAsSeed(inlineTrigger.getAttribute("data-keyword") || "");
+            return;
+        }
         if (action === "toggle_analysis_grade") {
             toggleGradeFilter(inlineTrigger.getAttribute("data-grade-toggle") || "");
             return;
