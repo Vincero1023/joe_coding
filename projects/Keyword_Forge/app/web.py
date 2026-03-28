@@ -2029,7 +2029,7 @@ def _render_home() -> str:
                         <button type="button" class="ghost-chip" id="quickStartSecondaryButton">관련 설정 보기</button>
                     </div>
                 </section>
-                <section class="control-stage-block control-stage-collect" data-control-block="collect">
+                <section class="control-stage-block control-stage-collect" data-control-block="collect" hidden>
                     <div class="control-stage-head">
                         <div>
                             <p class="panel-kicker">수집 설정</p>
@@ -2196,7 +2196,20 @@ def _render_home() -> str:
                     <button type="button" class="ghost-btn" id="stopStreamButton" disabled>중지</button>
                     <button type="button" class="ghost-btn" id="resetButton">결과 초기화</button>
                 </div>
-                <section class="grade-select-panel pipeline-grade-select">
+                <p class="input-help compact-help">
+                    상단 실행 버튼은 현재 입력값 기준으로 새로 시작합니다. 결과 카드의 `이 결과로 ...` 버튼은 지금 화면의 결과를 이어서 사용합니다.
+                </p>
+
+                </section>
+
+                <section class="control-stage-block grade-select-panel control-stage-select" data-control-block="select">
+                    <div class="control-stage-head">
+                        <div>
+                            <p class="panel-kicker">2축 선별</p>
+                            <h3>2축 선별</h3>
+                        </div>
+                        <span class="badge">선별 기준</span>
+                    </div>
                     <div class="grade-select-head">
                         <div>
                             <span class="field-label">2축 선별</span>
@@ -2235,17 +2248,12 @@ def _render_home() -> str:
                         <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">선택 조합 적용</button>
                     </div>
                 </section>
-                <p class="input-help compact-help">
-                    상단 실행 버튼은 현재 입력값 기준으로 새로 시작합니다. 결과 카드의 `이 결과로 ...` 버튼은 지금 화면의 결과를 이어서 사용합니다.
-                </p>
-
-                </section>
 
                 </div>
             </section>
             </div>
 
-            <section class="panel launcher-panel" id="section-launcher">
+            <section class="panel launcher-panel" id="section-launcher" hidden>
                 <div class="panel-head">
                     <div>
                         <p class="panel-kicker">세부 실행</p>

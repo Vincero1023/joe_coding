@@ -350,6 +350,7 @@ const state = {
     titleModeFilter: "all",
     titleSort: "mode_quality_desc",
     quickStartMode: "discover",
+    relatedSettingsOpen: false,
     operationSettingsSnapshot: null,
     operationModePresets: [...OPERATION_MODE_PRESET_FALLBACKS],
     operationCustomPresetKey: "balanced",
@@ -2079,7 +2080,40 @@ function focusControlBlock(controlBlockKey) {
     if (!target) {
         return;
     }
+    const requiresRelatedSettings = ["collect", "expand", "analyze", "title"].includes(String(controlBlockKey || ""));
+    if (requiresRelatedSettings && !state.relatedSettingsOpen) {
+        setRelatedSettingsOpen(true, { focusTarget: target });
+        return;
+    }
     target.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderRelatedSettingsVisibility() {
+    const isOpen = Boolean(state.relatedSettingsOpen);
+    if (elements.collectSettingsPanel) {
+        elements.collectSettingsPanel.hidden = !isOpen;
+    }
+    if (elements.launcherPanel) {
+        elements.launcherPanel.hidden = !isOpen;
+    }
+    if (elements.workspaceSideColumn) {
+        elements.workspaceSideColumn.classList.toggle("related-settings-open", isOpen);
+    }
+    if (elements.quickStartSecondaryButton) {
+        elements.quickStartSecondaryButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    }
+}
+
+function setRelatedSettingsOpen(nextOpen, options = {}) {
+    state.relatedSettingsOpen = Boolean(nextOpen);
+    renderRelatedSettingsVisibility();
+
+    const focusTarget = options?.focusTarget || null;
+    if (state.relatedSettingsOpen && focusTarget) {
+        window.requestAnimationFrame(() => {
+            focusTarget.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+    }
 }
 
 function focusResultsWorkbench() {
@@ -2193,6 +2227,10 @@ function focusQuickStartDetails() {
         openUtilityDrawer("settings");
         return;
     }
+    if (state.relatedSettingsOpen) {
+        setRelatedSettingsOpen(false);
+        return;
+    }
     focusControlBlock(config.focusBlockKey);
 }
 
@@ -2226,9 +2264,10 @@ function renderQuickStartState() {
     if (elements.quickStartSecondaryButton) {
         elements.quickStartSecondaryButton.textContent = config.openSettingsWhenBlocked
             ? "운영 설정 열기"
-            : "관련 설정 보기";
+            : (state.relatedSettingsOpen ? "관련 설정 숨기기" : "관련 설정 보기");
         elements.quickStartSecondaryButton.disabled = Boolean(state.isBusy);
     }
+    renderRelatedSettingsVisibility();
 }
 
 
@@ -4719,6 +4758,9 @@ function bindElements() {
     elements.quickStartSummaryMeta = document.getElementById("quickStartSummaryMeta");
     elements.quickStartPrimaryButton = document.getElementById("quickStartPrimaryButton");
     elements.quickStartSecondaryButton = document.getElementById("quickStartSecondaryButton");
+    elements.workspaceSideColumn = document.querySelector(".workspace-side-column");
+    elements.collectSettingsPanel = document.querySelector('[data-control-block="collect"]');
+    elements.launcherPanel = document.getElementById("section-launcher");
     elements.analyzeSourceVisibilityBlocks = Array.from(document.querySelectorAll("[data-analyze-source-visibility]"));
     elements.selectedCollectedCount = document.getElementById("selectedCollectedCount");
     elements.manualAnalyzeCount = document.getElementById("manualAnalyzeCount");
@@ -4809,16 +4851,17 @@ function bindElements() {
     elements.statusList = document.getElementById("statusList");
     elements.controlStack = document.getElementById("controlStack");
     elements.controlLauncherColumn = document.querySelector(".control-launcher-column");
-    elements.controlPrimaryBlocks = ["collect", "pipeline"]
+    elements.controlPrimaryBlocks = ["pipeline", "select"]
         .map((key) => document.querySelector(`[data-control-block="${key}"]`))
         .filter(Boolean);
     elements.controlLauncherBlocks = ["expand", "analyze", "title"]
         .map((key) => document.querySelector(`[data-control-block="${key}"]`))
         .filter(Boolean);
     elements.controlBlocks = [
+        document.querySelector('[data-control-block="collect"]'),
         ...elements.controlPrimaryBlocks,
         ...elements.controlLauncherBlocks,
-    ];
+    ].filter(Boolean);
     elements.controlCards = elements.controlLauncherBlocks.filter((block) => block.dataset.controlCard);
     elements.resultsRailPanel = document.getElementById("resultsRailPanel");
     elements.resultsRail = document.getElementById("resultsRail");
@@ -6139,8 +6182,7 @@ function syncControlFocus() {
 
     elements.controlBlocks?.forEach((block) => {
         const key = block.dataset.controlBlock || "";
-        const isFocused = key === focusStage
-            || (focusStage === "select" && key === "pipeline");
+        const isFocused = key === focusStage;
         block.classList.toggle("focus-stage", isFocused);
     });
 

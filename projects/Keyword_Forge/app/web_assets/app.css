@@ -403,6 +403,10 @@ button:disabled {
     min-width: 0;
     grid-column: 1 / -1;
 }
+.control-stage-collect[hidden],
+.launcher-panel[hidden] {
+    display: none !important;
+}
 .control-stage-block {
     display: grid;
     gap: 12px;
@@ -482,6 +486,10 @@ button:disabled {
 }
 .control-primary-column > .quickstart-panel {
     margin-bottom: 0;
+}
+.control-stage-select.grade-select-panel {
+    margin-top: 0;
+    height: 100%;
 }
 .quickstart-head {
     display: flex;
@@ -5628,6 +5636,10 @@ body {
     grid-template-columns: 1fr;
 }
 
+.workspace-side-column.related-settings-open {
+    align-items: start;
+}
+
 .workspace-side-column .session-helper-actions,
 .workspace-side-column .collector-option-row {
     width: 100%;
@@ -5712,13 +5724,17 @@ body {
         grid-column: 1;
         grid-row: 1;
         display: grid;
-        grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr);
+        grid-template-columns: minmax(0, 1fr);
         gap: 18px;
         align-self: start;
     }
 
+    .layout-grid.workspace-cockpit > .workspace-side-column.related-settings-open {
+        grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr);
+    }
+
     .workspace-side-column .control-stack {
-        grid-template-columns: minmax(0, 0.96fr) minmax(320px, 1.04fr);
+        grid-template-columns: minmax(240px, 0.82fr) minmax(320px, 1.02fr) minmax(320px, 1.02fr);
     }
 
     .workspace-side-column .control-primary-column {
@@ -5728,6 +5744,11 @@ body {
 
     .workspace-side-column .control-stage-pipeline {
         grid-column: 2;
+        grid-row: 1;
+    }
+
+    .workspace-side-column .control-stage-select {
+        grid-column: 3;
         grid-row: 1;
     }
 
@@ -5801,6 +5822,8 @@ body {
     }
 
     .workspace-side-column .launcher-panel {
+        grid-column: 2;
+        grid-row: 1;
         width: 100%;
     }
 
