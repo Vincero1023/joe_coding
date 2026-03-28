@@ -350,7 +350,9 @@ const state = {
     titleModeFilter: "all",
     titleSort: "mode_quality_desc",
     quickStartMode: "discover",
-    relatedSettingsOpen: false,
+    workspaceSettingsOpen: false,
+    workspaceSettingsBlockKey: "",
+    workspaceSettingsPortal: null,
     operationSettingsSnapshot: null,
     operationModePresets: [...OPERATION_MODE_PRESET_FALLBACKS],
     operationCustomPresetKey: "balanced",
@@ -2080,40 +2082,94 @@ function focusControlBlock(controlBlockKey) {
     if (!target) {
         return;
     }
-    const requiresRelatedSettings = ["collect", "expand", "analyze", "title"].includes(String(controlBlockKey || ""));
-    if (requiresRelatedSettings && !state.relatedSettingsOpen) {
-        setRelatedSettingsOpen(true, { focusTarget: target });
+    const modalBlockKeys = ["collect", "expand", "analyze", "title"];
+    if (modalBlockKeys.includes(String(controlBlockKey || ""))) {
+        openWorkspaceSettingsModal(String(controlBlockKey || ""));
         return;
     }
     target.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function renderRelatedSettingsVisibility() {
-    const isOpen = Boolean(state.relatedSettingsOpen);
-    if (elements.collectSettingsPanel) {
-        elements.collectSettingsPanel.hidden = !isOpen;
+function resolveWorkspaceSettingsTitle(blockKey) {
+    const titleMap = {
+        collect: "수집 설정",
+        expand: "확장 시작점",
+        analyze: "분석 시작점",
+        title: "제목 생성 시작점",
+    };
+    return titleMap[String(blockKey || "")] || "관련 설정";
+}
+
+function restoreWorkspaceSettingsPortal() {
+    const portalState = state.workspaceSettingsPortal;
+    if (!portalState?.element || !portalState.parent) {
+        return;
     }
-    if (elements.launcherPanel) {
-        elements.launcherPanel.hidden = !isOpen;
+    const { element, parent, nextSibling, hidden } = portalState;
+    if (nextSibling && nextSibling.parentNode === parent) {
+        parent.insertBefore(element, nextSibling);
+    } else {
+        parent.appendChild(element);
     }
-    if (elements.workspaceSideColumn) {
-        elements.workspaceSideColumn.classList.toggle("related-settings-open", isOpen);
+    element.hidden = Boolean(hidden);
+    state.workspaceSettingsPortal = null;
+}
+
+function renderWorkspaceSettingsModalState() {
+    const isOpen = Boolean(state.workspaceSettingsOpen);
+    if (elements.workspaceSettingsModal) {
+        elements.workspaceSettingsModal.hidden = !isOpen;
     }
     if (elements.quickStartSecondaryButton) {
         elements.quickStartSecondaryButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
     }
+    document.body.classList.toggle("workspace-settings-modal-open", isOpen);
 }
 
-function setRelatedSettingsOpen(nextOpen, options = {}) {
-    state.relatedSettingsOpen = Boolean(nextOpen);
-    renderRelatedSettingsVisibility();
+function closeWorkspaceSettingsModal() {
+    restoreWorkspaceSettingsPortal();
+    state.workspaceSettingsOpen = false;
+    state.workspaceSettingsBlockKey = "";
+    renderWorkspaceSettingsModalState();
+}
 
-    const focusTarget = options?.focusTarget || null;
-    if (state.relatedSettingsOpen && focusTarget) {
-        window.requestAnimationFrame(() => {
-            focusTarget.scrollIntoView({ behavior: "smooth", block: "start" });
-        });
+function openWorkspaceSettingsModal(blockKey) {
+    const normalizedBlockKey = String(blockKey || "").trim();
+    const target = document.querySelector(`[data-control-block="${normalizedBlockKey}"]`);
+    if (!target || !elements.workspaceSettingsBody) {
+        return;
     }
+    if (state.workspaceSettingsOpen && state.workspaceSettingsBlockKey === normalizedBlockKey) {
+        closeWorkspaceSettingsModal();
+        return;
+    }
+
+    restoreWorkspaceSettingsPortal();
+    state.workspaceSettingsPortal = {
+        element: target,
+        parent: target.parentNode,
+        nextSibling: target.nextSibling,
+        hidden: Boolean(target.hidden),
+    };
+    target.hidden = false;
+    elements.workspaceSettingsBody.replaceChildren(target);
+    state.workspaceSettingsOpen = true;
+    state.workspaceSettingsBlockKey = normalizedBlockKey;
+    if (elements.workspaceSettingsTitle) {
+        elements.workspaceSettingsTitle.textContent = resolveWorkspaceSettingsTitle(normalizedBlockKey);
+    }
+    renderWorkspaceSettingsModalState();
+}
+
+function resolveQuickStartSettingsBlockKey() {
+    const mode = normalizeQuickStartMode(state.quickStartMode);
+    if (mode === "analyze") {
+        return "analyze";
+    }
+    if (mode === "title") {
+        return "title";
+    }
+    return "collect";
 }
 
 function focusResultsWorkbench() {
@@ -2227,11 +2283,7 @@ function focusQuickStartDetails() {
         openUtilityDrawer("settings");
         return;
     }
-    if (state.relatedSettingsOpen) {
-        setRelatedSettingsOpen(false);
-        return;
-    }
-    focusControlBlock(config.focusBlockKey);
+    openWorkspaceSettingsModal(resolveQuickStartSettingsBlockKey());
 }
 
 function renderQuickStartState() {
@@ -2264,10 +2316,10 @@ function renderQuickStartState() {
     if (elements.quickStartSecondaryButton) {
         elements.quickStartSecondaryButton.textContent = config.openSettingsWhenBlocked
             ? "운영 설정 열기"
-            : (state.relatedSettingsOpen ? "관련 설정 숨기기" : "관련 설정 보기");
+            : (state.workspaceSettingsOpen ? "관련 설정 닫기" : "관련 설정 보기");
         elements.quickStartSecondaryButton.disabled = Boolean(state.isBusy);
     }
-    renderRelatedSettingsVisibility();
+    renderWorkspaceSettingsModalState();
 }
 
 
@@ -4758,9 +4810,14 @@ function bindElements() {
     elements.quickStartSummaryMeta = document.getElementById("quickStartSummaryMeta");
     elements.quickStartPrimaryButton = document.getElementById("quickStartPrimaryButton");
     elements.quickStartSecondaryButton = document.getElementById("quickStartSecondaryButton");
-    elements.workspaceSideColumn = document.querySelector(".workspace-side-column");
     elements.collectSettingsPanel = document.querySelector('[data-control-block="collect"]');
     elements.launcherPanel = document.getElementById("section-launcher");
+    elements.workspaceSettingsModal = document.getElementById("workspaceSettingsModal");
+    elements.workspaceSettingsPanel = document.querySelector(".workspace-settings-panel");
+    elements.workspaceSettingsBody = document.getElementById("workspaceSettingsBody");
+    elements.workspaceSettingsTitle = document.getElementById("workspaceSettingsTitle");
+    elements.workspaceSettingsClose = document.getElementById("workspaceSettingsClose");
+    elements.workspaceSettingsBackdrop = document.getElementById("workspaceSettingsBackdrop");
     elements.analyzeSourceVisibilityBlocks = Array.from(document.querySelectorAll("[data-analyze-source-visibility]"));
     elements.selectedCollectedCount = document.getElementById("selectedCollectedCount");
     elements.manualAnalyzeCount = document.getElementById("manualAnalyzeCount");
@@ -4900,6 +4957,8 @@ function bindEvents() {
     });
     elements.quickStartPrimaryButton?.addEventListener("click", runQuickStartPrimaryAction);
     elements.quickStartSecondaryButton?.addEventListener("click", focusQuickStartDetails);
+    elements.workspaceSettingsClose?.addEventListener("click", closeWorkspaceSettingsModal);
+    elements.workspaceSettingsBackdrop?.addEventListener("click", closeWorkspaceSettingsModal);
     document.querySelectorAll("[data-run-action='collect']").forEach((button) => {
         button.addEventListener("click", () => {
             runWithGuard(runFreshCollectFlow, "\uc218\uc9d1 \ub2e8\uacc4 \uc0c8\ub85c \uc2e4\ud589 \uc911");
@@ -6167,15 +6226,16 @@ function reorderControlNodes(container, nodes, order, dataKey) {
 
 function syncControlFocus() {
     const focusStage = resolveControlFocusStage();
+    const portaledElement = state.workspaceSettingsPortal?.element || null;
     reorderControlNodes(
         elements.controlStack,
-        elements.controlPrimaryBlocks,
-        ["collect", "pipeline"],
+        elements.controlPrimaryBlocks.filter((block) => block !== portaledElement),
+        ["pipeline", "select"],
         "controlBlock",
     );
     reorderControlNodes(
         elements.controlLauncherColumn || elements.controlStack,
-        elements.controlLauncherBlocks,
+        elements.controlLauncherBlocks.filter((block) => block !== portaledElement),
         ["expand", "analyze", "title"],
         "controlBlock",
     );

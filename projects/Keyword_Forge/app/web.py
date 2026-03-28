@@ -2709,6 +2709,24 @@ def _render_home() -> str:
             </section>
             </div>
         </main>
+        <div id="workspaceSettingsModal" class="workspace-settings-modal" hidden>
+            <button
+                type="button"
+                class="workspace-settings-backdrop"
+                id="workspaceSettingsBackdrop"
+                aria-label="관련 설정 닫기"
+            ></button>
+            <section class="workspace-settings-panel" role="dialog" aria-modal="true" aria-labelledby="workspaceSettingsTitle">
+                <div class="workspace-settings-head">
+                    <div>
+                        <p class="panel-kicker">관련 설정</p>
+                        <h2 id="workspaceSettingsTitle">수집 설정</h2>
+                    </div>
+                    <button type="button" class="ghost-btn" id="workspaceSettingsClose">닫기</button>
+                </div>
+                <div id="workspaceSettingsBody" class="workspace-settings-body"></div>
+            </section>
+        </div>
         <div id="utilityDrawer" class="utility-drawer" hidden>
             <button type="button" class="utility-drawer-backdrop" id="utilityDrawerBackdrop" aria-label="보조 패널 닫기"></button>
             <section class="utility-drawer-panel">

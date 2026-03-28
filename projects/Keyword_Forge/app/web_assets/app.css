@@ -908,6 +908,57 @@ button:disabled {
 body.utility-drawer-open {
     overflow: hidden;
 }
+body.workspace-settings-modal-open {
+    overflow: hidden;
+}
+.workspace-settings-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 46;
+}
+.workspace-settings-backdrop {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: rgba(20, 32, 51, 0.42);
+}
+.workspace-settings-panel {
+    position: relative;
+    width: min(840px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    margin: 16px auto;
+    padding: 16px;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.97);
+    border: 1px solid rgba(20, 32, 51, 0.08);
+    box-shadow: 0 24px 60px rgba(20, 32, 51, 0.24);
+    display: grid;
+    gap: 14px;
+}
+.workspace-settings-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+.workspace-settings-head h2 {
+    margin: 0;
+}
+.workspace-settings-body {
+    min-height: 0;
+    overflow: auto;
+    display: grid;
+    gap: 14px;
+    padding-right: 4px;
+}
+.workspace-settings-body > * {
+    width: 100%;
+    max-width: none !important;
+}
+.workspace-settings-body .launcher-panel {
+    display: block !important;
+}
+
 .utility-drawer {
     position: fixed;
     inset: 0;
