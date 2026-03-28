@@ -2005,6 +2005,7 @@ def _render_home() -> str:
                 </div>
 
                 <div class="control-stack" id="controlStack">
+                <div class="control-primary-column">
                 <section class="quickstart-panel control-stage-quickstart">
                     <div class="quickstart-head">
                         <div>
@@ -2176,6 +2177,7 @@ def _render_home() -> str:
                 </p>
 
                 </section>
+                </div>
 
                 <section class="control-stage-block control-stage-pipeline" data-control-block="pipeline">
                     <div class="control-stage-head">
