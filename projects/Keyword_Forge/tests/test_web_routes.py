@@ -39,11 +39,11 @@ def test_title_quality_prompt_editor_page_loads() -> None:
     assert "KEYWORD_FORGE_TITLE_PROMPT_SETTINGS" in response.text
 
 
-def test_recommended_usage_page_loads() -> None:
+def _legacy_recommended_usage_page_loads_early() -> None:
     response = client.get("/recommended-usage")
 
     assert response.status_code == 200
-    assert "추천 사용법" in response.text
+    assert "추천 사용 순서" in response.text
     assert "자동화 블로그 작성 기준 운영안" in response.text
 
 
@@ -83,7 +83,7 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "submitQueueSeedBatchButton" in response.text
     assert "toggleTitleAdvancedButton" in response.text
     assert 'href="/recommended-usage"' in response.text
-    assert "추천 사용법" in response.text
+    assert "추천 사용 순서" in response.text
     assert "titleIssueSourceMode" in response.text
     assert "titleCommunityCustomDomains" in response.text
     assert "data-title-community-source" in response.text
@@ -172,3 +172,29 @@ def test_home_page_injects_custom_title_preset_profiles() -> None:
 
     assert response.status_code == 200
     assert "Custom preset" in response.text
+
+
+def _legacy_recommended_usage_page_loads() -> None:
+    response = client.get("/recommended-usage")
+
+    assert response.status_code == 200
+    assert "추천 사용 순서" in response.text
+    assert "누구나 바로 따라 할 수 있는 수익형 운영 루틴" in response.text
+    assert "/guides/quickstart-basics" in response.text
+
+
+def test_guides_index_page_loads_app_specific_docs() -> None:
+    response = client.get("/guides")
+
+    assert response.status_code == 200
+    assert "현재 버전 기준 운영 문서" in response.text
+    assert "/guides/dual-axis-selection" in response.text
+    assert "지금 화면 구조와 실제 동작에 맞는 설명만 추려서 다시 정리했습니다." in response.text
+
+
+def test_guide_detail_page_loads_app_specific_content() -> None:
+    response = client.get("/guides/dual-axis-selection")
+
+    assert response.status_code == 200
+    assert "2축 선별을 제대로 쓰는 방법" in response.text
+    assert "수익성과 노출도는 비슷해 보여도 역할이 다릅니다" in response.text

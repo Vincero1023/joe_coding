@@ -40,6 +40,309 @@ _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 )
 
 
+_GUIDE_GROUPS = (
+    ("basics", "시작하기", ()),
+    ("discovery", "발굴과 선별", ()),
+    ("titles", "제목 만들기", ()),
+    ("operations", "운영과 재사용", ()),
+)
+
+_GUIDE_BLUEPRINTS: tuple[dict[str, object], ...] = (
+    {
+        "slug": "quickstart-basics",
+        "title": "처음 시작할 때 보는 3패널",
+        "subtitle": "상단의 시작모드, 실행버튼, 2축선별만 이해하면 첫 실행은 바로 할 수 있습니다.",
+        "group": "basics",
+        "sections": (
+            {"title": "시작모드", "summary": "키워드 발굴, 보유 키워드 분석, 제목 생성 중 오늘 할 일을 먼저 고릅니다."},
+            {"title": "실행버튼", "summary": "실행, 확장만, 분석만, 제목만 등 현재 목적에 맞는 흐름을 한 번에 시작합니다."},
+            {"title": "관련 설정 보기", "summary": "상세 설정은 모달로 열어 화면을 어지럽히지 않고, 필요할 때만 펼칠 수 있습니다."},
+        ),
+        "detail_sections": (
+            {
+                "kicker": "빠른 진입",
+                "title": "처음에는 상단 3패널만 보세요",
+                "paragraphs": (
+                    "이 앱은 처음부터 모든 패널을 이해하는 방식이 아니라, 상단의 세 블록만 보고 실행을 시작하는 흐름에 맞춰져 있습니다.",
+                    "시작모드는 오늘 할 일을 정하고, 실행버튼은 실제 파이프라인을 돌리며, 2축선별은 결과를 어떤 기준으로 남길지 결정합니다.",
+                ),
+                "points": (
+                    "키워드 발굴: 시드에서 수집, 확장, 분석, 선별까지 한 번에 이어집니다.",
+                    "보유 키워드 분석: 이미 가진 키워드나 외부 결과를 붙여 넣고 분석과 선별만 빠르게 돌립니다.",
+                    "제목 생성: 선별된 키워드나 직접 입력한 키워드에서 제목만 집중적으로 만듭니다.",
+                ),
+            },
+            {
+                "kicker": "모달 설정",
+                "title": "관련 설정 보기는 모드별로 다르게 열립니다",
+                "paragraphs": (
+                    "키워드 발굴에서는 수집 설정이 열리고, 보유 키워드 분석에서는 분석 시작점, 제목 생성에서는 제목 시작점 설정이 열립니다.",
+                    "자주 쓰는 값은 최소한만 바꾸고, 나머지는 실행 후 결과를 보면서 조정하는 편이 더 빠릅니다.",
+                ),
+                "points": (
+                    "시작모드를 먼저 고른 뒤 관련 설정을 여는 순서가 가장 덜 헷갈립니다.",
+                    "상단에서 바로 보이지 않는 상세 값은 모달 안에서만 바꾸고 닫으면 됩니다.",
+                ),
+            },
+            {
+                "kicker": "결과 중심",
+                "title": "실행 후에는 결과와 선별이 메인입니다",
+                "paragraphs": (
+                    "이 앱의 핵심은 표 전체보다 살아남은 선별 결과를 빠르게 보고, 다시 시드화하거나 출력으로 이어지는 루프에 있습니다.",
+                    "실행 중에는 선별 결과가 먼저 보이면 그걸 우선 검토하고, 선별 0건이면 분석이나 확장 결과로 바로 내려가 다음 결정을 하면 됩니다.",
+                ),
+            },
+        ),
+    },
+    {
+        "slug": "discovery-workflow",
+        "title": "키워드 발굴은 어떻게 흘러가는가",
+        "subtitle": "수집과 확장은 백엔드에서 처리하고, 결과는 단계별로 저장·복사·재활용하는 흐름을 권장합니다.",
+        "group": "discovery",
+        "sections": (
+            {"title": "수집 설정", "summary": "카테고리, 수집 소스, 트렌드 날짜, 로그인 브라우저를 모달에서 정리한 뒤 실행합니다."},
+            {"title": "실시간 선별", "summary": "확장과 분석이 진행되는 동안 조건에 맞는 후보는 선별 결과로 먼저 확인할 수 있습니다."},
+            {"title": "0건 대응", "summary": "선별이 0건이어도 확장·분석 결과는 남으므로 다음 시드를 찾는 재료로 쓸 수 있습니다."},
+        ),
+        "detail_sections": (
+            {
+                "kicker": "발굴 루프",
+                "title": "키워드 발굴 모드의 기본 순서",
+                "paragraphs": (
+                    "시드 입력 또는 주제 시드 생성을 준비한 뒤 실행하면, 수집과 확장은 백엔드에서 무겁게 처리되고 프론트는 결과를 소비하는 쪽에 집중합니다.",
+                    "이 구조는 브라우저 부담을 줄이면서도 실행 중 살아남는 후보를 빨리 확인할 수 있게 하려는 의도입니다.",
+                ),
+                "points": (
+                    "수집: 카테고리, 트렌드 소스, 로그인 상태가 반영됩니다.",
+                    "확장: 연관·자동완성·조합 전략이 누적되며 다음 분석 대상으로 이어집니다.",
+                    "분석: 조회수, 블로그 수, 입찰가, 경쟁 신호를 정리합니다.",
+                    "선별: 2축 조합 조건을 만족한 후보만 앞단에 남깁니다.",
+                ),
+            },
+            {
+                "kicker": "실행 중 판단",
+                "title": "선별 결과가 먼저 보이면 바로 활용하세요",
+                "paragraphs": (
+                    "선별된 키워드는 실행이 완전히 끝나기 전에도 결과 작업대에서 먼저 확인할 수 있습니다.",
+                    "좋은 키워드는 보관함으로 넘기거나 제목 생성 전 단계로 묶어두고, 애매한 키워드는 시드화 버튼으로 다시 탐색하는 것이 가장 효율적입니다.",
+                ),
+            },
+            {
+                "kicker": "실패가 아닌 재료",
+                "title": "선별 0건도 다음 실행의 재료입니다",
+                "paragraphs": (
+                    "선별이 0건이라고 해서 실행이 헛돈 것은 아닙니다. 확장과 분석에서 나온 후보가 그대로 남아 있으므로, 왜 탈락했는지 보고 다음 시드나 프리셋을 바꾸면 됩니다.",
+                    "수익성은 좋지만 노출도가 약한지, 반대로 노출 가능성은 있으나 수익성이 약한지 먼저 가른 뒤 재실행하는 편이 빠릅니다.",
+                ),
+            },
+        ),
+    },
+    {
+        "slug": "dual-axis-selection",
+        "title": "2축 선별을 제대로 쓰는 방법",
+        "subtitle": "수익성 A~F와 노출도 1~6을 조합해, 황금형과 롱테일 탐색형 사이를 세밀하게 고릅니다.",
+        "group": "discovery",
+        "sections": (
+            {"title": "수익성 축", "summary": "입찰가 비중이 가장 크고, 검색량과 클릭 잠재력은 보조 신호로만 반영됩니다."},
+            {"title": "노출도 축", "summary": "경쟁, 기회비율, 검색량, 클릭 신호를 묶어 실제 공략 가능성을 봅니다."},
+            {"title": "프리셋", "summary": "전체, 균형형, 황금형, 수익형, 노출형, 롱테일 탐색형을 상황에 따라 바꿔 씁니다."},
+        ),
+        "detail_sections": (
+            {
+                "kicker": "축의 의미",
+                "title": "수익성과 노출도는 비슷해 보여도 역할이 다릅니다",
+                "paragraphs": (
+                    "수익성 축은 광고 단가를 중심에 두고, 검색량과 클릭 잠재력을 약하게 보정합니다. 검색량이 적더라도 고단가 키워드를 완전히 버리지 않도록 설계된 축입니다.",
+                    "노출도 축은 경쟁비율, 기회비율, 검색량, 클릭 신호를 묶어 실제로 뚫을 수 있는지에 더 가깝게 봅니다.",
+                ),
+                "points": (
+                    "수익성 A가 곧 노출형 키워드라는 뜻은 아닙니다.",
+                    "노출도 1이 곧 고수익 키워드라는 뜻도 아닙니다.",
+                    "좋은 키워드는 두 축이 모두 일정 수준 이상인 지점에서 주로 나옵니다.",
+                ),
+            },
+            {
+                "kicker": "프리셋 운용",
+                "title": "6개 프리셋은 이렇게 나눠 쓰면 됩니다",
+                "points": (
+                    "전체: 처음 시장을 넓게 볼 때 가장 안전한 기본값입니다.",
+                    "균형형: 과도한 모험 없이 발굴 품질을 유지할 때 좋습니다.",
+                    "황금형: 높은 수익성과 높은 노출 가능성이 동시에 필요한 경우에 씁니다.",
+                    "수익형: 보험, 금융, 고단가 제휴처럼 단가 중심 발굴에 유리합니다.",
+                    "노출형: 트래픽과 확장 아이디어가 더 중요한 주제에 맞습니다.",
+                    "롱테일 탐색형: 메인 키워드보다 파생 글감과 빈틈을 찾는 데 적합합니다.",
+                ),
+            },
+            {
+                "kicker": "실전 팁",
+                "title": "최대 수익을 노릴 때의 기본 원칙",
+                "paragraphs": (
+                    "처음부터 황금형만 고집하면 시드가 약할 때 아무것도 안 남을 수 있습니다. 전체나 균형형으로 한 번 시장을 넓게 본 뒤, 좋은 묶음이 보이면 수익형이나 황금형으로 다시 조이는 방식이 안정적입니다.",
+                    "선별 결과가 적게 남아도, 그 안에서 시드화와 제목 생성을 바로 이어 붙이면 작은 고단가 키워드를 연속적으로 공략할 수 있습니다.",
+                ),
+            },
+        ),
+    },
+    {
+        "slug": "results-export-and-seedify",
+        "title": "결과를 다시 돈이 되는 입력으로 바꾸는 법",
+        "subtitle": "출력 및 복사, 시드화, 단계별 파일 내보내기를 이용하면 좋은 키워드를 다음 사이클로 바로 넘길 수 있습니다.",
+        "group": "operations",
+        "sections": (
+            {"title": "출력 및 복사", "summary": "상단 플로팅의 출력 및 복사에서 CSV, TXT, 줄바꿈 복사, 콤마 복사를 단계별로 바로 실행합니다."},
+            {"title": "시드화", "summary": "확장·분석 결과에서 좋은 후보를 눌러 시드 입력으로 바로 올리고 다음 탐색의 시작점으로 씁니다."},
+            {"title": "단계 보존", "summary": "수집, 확장, 분석, 선별 결과는 각각 저장할 수 있으므로 실험 기록을 남기기 쉽습니다."},
+        ),
+        "detail_sections": (
+            {
+                "kicker": "도크 활용",
+                "title": "출력 및 복사는 상단 도크에서 여는 것이 기준입니다",
+                "paragraphs": (
+                    "결과 작업대 안에 버튼을 늘어놓는 대신, 상단 플로팅 도크에서 필요할 때만 펼쳐 쓰는 구조로 바뀌었습니다.",
+                    "이제 실행 화면은 깔끔하게 두고, 저장과 복사는 작업 흐름이 필요할 때만 꺼내 쓰는 방식이 자연스럽습니다.",
+                ),
+            },
+            {
+                "kicker": "재발굴",
+                "title": "시드화는 좋은 후보를 즉시 다음 탐색으로 연결합니다",
+                "paragraphs": (
+                    "확장 결과나 분석 결과에서 가능성이 보이는 키워드는 시드화 버튼으로 바로 시드 입력칸으로 올릴 수 있습니다.",
+                    "실행은 자동으로 시작하지 않으므로, 여러 개를 모아서 다시 돌리거나 2축 프리셋을 바꾼 뒤 재실행하는 데 유리합니다.",
+                ),
+            },
+            {
+                "kicker": "보존 전략",
+                "title": "단계별 파일은 비교와 복기에 쓸 때 강합니다",
+                "points": (
+                    "수집 결과: 소스 품질과 시드 방향을 비교할 때 사용합니다.",
+                    "확장 결과: 어떤 조합 전략이 후보를 가장 잘 늘렸는지 확인할 때 좋습니다.",
+                    "분석 결과: 조회수, 블로그 수, 입찰가 기준으로 다시 필터링할 때 씁니다.",
+                    "선별 결과: 실제 운영 후보를 보관함, 제목, 외부 시트로 넘길 때 가장 많이 쓰입니다.",
+                ),
+            },
+        ),
+    },
+    {
+        "slug": "title-generation-setup",
+        "title": "제목 생성은 필요한 만큼만 만드는 것이 핵심",
+        "subtitle": "홈판, 블로그형, 둘다를 각각 켜고 개수까지 따로 정할 수 있으므로 한 번에 과하게 만들 필요가 없습니다.",
+        "group": "titles",
+        "sections": (
+            {"title": "영역 선택", "summary": "홈판, 블로그형, 둘다를 각각 켜고 끌 수 있으며, 목적에 맞는 영역만 남길 수 있습니다."},
+            {"title": "개수 조절", "summary": "영역별로 1~4개를 따로 정해 최소 1개부터 최대 12개까지 유연하게 생성할 수 있습니다."},
+            {"title": "평가와 정렬", "summary": "생성 뒤에는 빠른 평가를 거쳐 높은 점수 순으로 정렬되므로 검토 시간이 줄어듭니다."},
+        ),
+        "detail_sections": (
+            {
+                "kicker": "표면 선택",
+                "title": "세 영역을 모두 켤 필요는 없습니다",
+                "paragraphs": (
+                    "홈판은 클릭률과 이슈 반영, 블로그형은 검색 의도와 정보형 문장, 둘다는 두 성격을 함께 노리는 공용 제목에 가깝습니다.",
+                    "주제가 명확할수록 필요한 영역만 켜는 편이 결과 관리가 쉽고, API 사용량도 덜 낭비됩니다.",
+                ),
+                "points": (
+                    "빠른 검토가 목적이면 홈판 1~2개만 먼저 만드는 방식이 가볍습니다.",
+                    "정보형 글감이면 블로그형 위주로 개수를 늘리는 편이 낫습니다.",
+                    "둘다는 메인 제목이 아니라 후보 확장용으로 보는 것이 안전합니다.",
+                ),
+            },
+            {
+                "kicker": "정렬 기준",
+                "title": "결과는 많이 만드는 것보다 점수순으로 버리는 것이 중요합니다",
+                "paragraphs": (
+                    "동일 키워드에서 제목을 여러 개 생성해도 빠른 평가와 정렬이 먼저 이뤄지므로, 실제로는 상위 몇 개만 검토하면 됩니다.",
+                    "내보내기 파일에는 홈판, 블로그형, 둘다 구분이 붙으므로 작업 전달이나 기록 정리도 편합니다.",
+                ),
+            },
+            {
+                "kicker": "권장 루틴",
+                "title": "제목은 선별 이후에 붙여도 충분합니다",
+                "paragraphs": (
+                    "이 앱의 우선순위는 발굴과 선별입니다. 제목은 선별된 키워드가 어느 정도 모인 뒤 한 번에 생성해도 흐름이 끊기지 않습니다.",
+                    "제목 생성 중에는 현재 이슈 반영, 자동 재시도, 평가 프롬프트 같은 옵션을 상황에 맞게만 켜고 나머지는 기본값으로 두는 편이 안정적입니다.",
+                ),
+            },
+        ),
+    },
+    {
+        "slug": "history-vault-and-queue",
+        "title": "기록, 보관함, 예약 큐를 같이 써야 반복 수익이 쌓입니다",
+        "subtitle": "좋은 키워드를 한 번 쓰고 버리지 않으려면 기록과 재실행 체계를 같이 굴려야 합니다.",
+        "group": "operations",
+        "sections": (
+            {"title": "실행 기록", "summary": "어떤 시드와 어떤 프리셋이 잘 먹혔는지 복기할 때 가장 먼저 보는 곳입니다."},
+            {"title": "보관함", "summary": "좋은 키워드 묶음을 발행 전, 발행 후, 다시보기 기준으로 나눠 관리할 수 있습니다."},
+            {"title": "예약 큐", "summary": "오늘 바로 못 돌릴 주제나 루틴 발굴 작업을 쌓아두고 순차 실행하는 데 쓸 수 있습니다."},
+        ),
+        "detail_sections": (
+            {
+                "kicker": "복기",
+                "title": "실행 기록은 잘된 시드를 재현하는 용도입니다",
+                "paragraphs": (
+                    "수익이 난 키워드는 결과 자체보다도 어떤 시작모드, 어떤 2축 프리셋, 어떤 소스 조합에서 나왔는지가 더 중요합니다.",
+                    "실행 기록은 이 조합을 다시 불러오기 위한 장부라고 생각하면 됩니다.",
+                ),
+            },
+            {
+                "kicker": "누적 자산",
+                "title": "보관함은 운영 단계별 후보 창고입니다",
+                "points": (
+                    "발행 전: 제목과 본문 작업 대기 중인 후보",
+                    "발행 완료: 이미 사용했지만 시즌이나 업데이트로 다시 볼 수 있는 후보",
+                    "다시 보기: 선별 당시에는 보류했지만 나중에 가치가 생길 수 있는 후보",
+                ),
+            },
+            {
+                "kicker": "반복 실행",
+                "title": "예약 큐는 루틴을 고정할 때 힘을 발휘합니다",
+                "paragraphs": (
+                    "좋은 주제를 찾았다고 해서 매번 손으로 다시 입력할 필요는 없습니다. 큐와 루틴을 이용하면 고수익 주제를 일정 주기로 다시 탐색할 수 있습니다.",
+                    "특히 금융, 보험, 비교 키워드처럼 시즌별로 변하는 분야에서는 큐를 써 두는 편이 꾸준한 수익 관리에 유리합니다.",
+                ),
+            },
+        ),
+    },
+    {
+        "slug": "session-and-safety",
+        "title": "로그인 세션과 보호 설정은 실무 안정장치입니다",
+        "subtitle": "트렌드 수집과 로그인 기반 기능을 오래 안정적으로 쓰려면 세션과 보호값을 가볍게 점검해야 합니다.",
+        "group": "operations",
+        "sections": (
+            {"title": "현재 브라우저 쿠키 읽기", "summary": "로그인해 둔 브라우저에서 쿠키를 읽어와 수집에 필요한 세션을 재사용합니다."},
+            {"title": "로그인 상태 확인", "summary": "세션이 유효한지 먼저 확인하면 실행 중 불필요한 실패를 줄일 수 있습니다."},
+            {"title": "보호 설정", "summary": "운영 드로어의 지연·보호 옵션을 함께 쓰면 장시간 실행에서 더 안정적입니다."},
+        ),
+        "detail_sections": (
+            {
+                "kicker": "세션 관리",
+                "title": "Creator Advisor 로그인은 보조 카드로 분리됐습니다",
+                "paragraphs": (
+                    "수집 설정 안에서는 카테고리와 트렌드 값을 먼저 고르고, 로그인 관련 작업은 하단의 넓은 카드에서 따로 처리하게 바뀌었습니다.",
+                    "이 구조는 설정을 읽기 쉽게 만들고, 로그인 버튼이 좁은 칸을 밀어내지 않게 하기 위한 조정입니다.",
+                ),
+            },
+            {
+                "kicker": "실행 전 확인",
+                "title": "세션이 불안하면 상태 확인부터 누르세요",
+                "paragraphs": (
+                    "로그인이 풀린 상태에서 장시간 실행을 시작하면 수집 품질이 급격히 흔들릴 수 있습니다.",
+                    "짧게 상태를 확인하고, 필요하면 현재 브라우저 쿠키 읽기로 다시 맞춘 뒤 실행하는 습관이 좋습니다.",
+                ),
+            },
+            {
+                "kicker": "안정성",
+                "title": "보호 설정은 속도보다 지속 가능성을 위한 옵션입니다",
+                "points": (
+                    "짧은 테스트는 기본값으로 충분합니다.",
+                    "장시간 발굴은 요청 간격과 보호 옵션을 조금 높이는 편이 안전합니다.",
+                    "큐를 오래 돌릴 때일수록 진단 로그와 기록을 함께 보는 습관이 중요합니다.",
+                ),
+            },
+        ),
+    },
+)
+
+
 def _render_category_options() -> str:
     rendered_groups: list[str] = []
     for group_name, categories in CATEGORY_GROUPS:
@@ -104,7 +407,7 @@ def _replace_sample_site_name(value: str) -> str:
 
 
 def _clean_text(value: str) -> str:
-    return " ".join(_replace_sample_site_name(value).split())
+    return " ".join(str(value or "").split())
 
 
 def _render_help_tooltip(text: str, *, label: str = "도움말") -> str:
@@ -169,67 +472,51 @@ def _sanitize_guide_content(article_html: str, *, title_map: dict[str, str]) -> 
     return str(soup)
 
 
+def _render_doc_list(items: list[object] | tuple[object, ...]) -> str:
+    entries = [f"<li>{escape(str(item))}</li>" for item in items if str(item).strip()]
+    return f"<ul>{''.join(entries)}</ul>" if entries else ""
+
+
+def _render_guide_content_html(sections: list[dict[str, object]] | tuple[dict[str, object], ...]) -> str:
+    rendered: list[str] = []
+    for section in sections:
+        title = str(section.get("title") or "").strip()
+        if not title:
+            continue
+        kicker = str(section.get("kicker") or "").strip()
+        paragraphs = "".join(
+            f"<p>{escape(str(text))}</p>"
+            for text in section.get("paragraphs", [])
+            if str(text).strip()
+        )
+        points = _render_doc_list(section.get("points", []))
+        rendered.append(
+            f"""
+            <section class="doc-section">
+                <div class="doc-section-head">
+                    {f'<p class="panel-kicker">{escape(kicker)}</p>' if kicker else ''}
+                    <h2>{escape(title)}</h2>
+                </div>
+                {paragraphs}
+                {points}
+            </section>
+            """
+        )
+    return "".join(rendered)
+
+
 @lru_cache
 def _load_study_guides() -> list[dict[str, object]]:
-    if not _STUDY_DIR.exists():
-        return []
-
-    raw_guides: list[dict[str, object]] = []
-    for index, path in enumerate(sorted(_STUDY_DIR.glob("*.html")), start=1):
-        soup = BeautifulSoup(path.read_text(encoding="utf-8", errors="ignore"), "html.parser")
-        article = soup.select_one("article.blog-article") or soup.find("article") or soup
-        title_tag = article.find("h1") or soup.title
-        subtitle_tag = article.select_one(".blog-hero-sub") or article.find("p")
-        title = _clean_text(title_tag.get_text(" ", strip=True) if title_tag else path.stem)
-        subtitle = _clean_text(subtitle_tag.get_text(" ", strip=True) if subtitle_tag else "")
-
-        sections: list[dict[str, str]] = []
-        for heading in article.find_all("h2")[:5]:
-            heading_text = _clean_text(heading.get_text(" ", strip=True))
-            summary_parts: list[str] = []
-            sibling = heading.find_next_sibling()
-            while sibling is not None and getattr(sibling, "name", None) != "h2" and len(summary_parts) < 2:
-                if getattr(sibling, "name", None) == "p":
-                    text = _clean_text(sibling.get_text(" ", strip=True))
-                    if text:
-                        summary_parts.append(text)
-                elif getattr(sibling, "name", None) == "ul":
-                    for li in sibling.find_all("li", recursive=False):
-                        text = _clean_text(li.get_text(" ", strip=True))
-                        if text:
-                            summary_parts.append(text)
-                        if len(summary_parts) >= 2:
-                            break
-                sibling = sibling.find_next_sibling()
-            sections.append(
-                {
-                    "title": heading_text,
-                    "summary": " ".join(summary_parts[:2]),
-                }
-            )
-
-        raw_guides.append(
-            {
-                "slug": _build_guide_slug(index, path),
-                "title": title,
-                "subtitle": subtitle,
-                "group": _pick_guide_group(title),
-                "sections": sections,
-                "article_html": str(article),
-            }
-        )
-
-    title_map = {str(guide["title"]): str(guide["slug"]) for guide in raw_guides}
     return [
         {
-            "slug": guide["slug"],
-            "title": guide["title"],
-            "subtitle": guide["subtitle"],
-            "group": guide["group"],
-            "sections": guide["sections"],
-            "content_html": _sanitize_guide_content(str(guide["article_html"]), title_map=title_map),
+            "slug": str(guide["slug"]),
+            "title": str(guide["title"]),
+            "subtitle": str(guide["subtitle"]),
+            "group": str(guide["group"]),
+            "sections": list(guide.get("sections", [])),
+            "content_html": _render_guide_content_html(list(guide.get("detail_sections", []))),
         }
-        for guide in raw_guides
+        for guide in _GUIDE_BLUEPRINTS
     ]
 
 
@@ -1903,7 +2190,7 @@ def _render_home() -> str:
                     <button type="button" class="ghost-chip" data-utility-open="queue" aria-pressed="false">예약 / 대기열</button>
                     <button type="button" class="ghost-chip" data-utility-open="diagnostics" aria-pressed="false">진단 / 로그</button>
                     <a class="secondary-link" href="/guides">사용 가이드</a>
-                    <a class="secondary-link" href="/recommended-usage">추천 사용법</a>
+                    <a class="secondary-link" href="/recommended-usage">추천 사용 순서</a>
                     <a class="secondary-link" href="/api-docs" target="_blank" rel="noopener noreferrer">API 문서</a>
                 </div>
             </div>
@@ -3235,6 +3522,309 @@ def _render_home() -> str:
 </body>
 </html>
 """
+
+
+def _render_static_shell(*, title: str, description: str, body: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{escape(title)} | Keyword Forge</title>
+    <meta name="description" content="{escape(description)}" />
+    <link rel="stylesheet" href="/assets/app.css?v={_ASSET_VERSION}" />
+</head>
+<body>
+    <div class="app-topbar">
+        <div class="app-topbar-inner">
+            <a class="app-topbar-brand" href="/#section-progress" aria-label="Keyword Forge 홈으로 이동">
+                <span class="app-topbar-brand-mark">KF</span>
+                <span class="app-topbar-brand-copy">
+                    <strong>Keyword Forge</strong>
+                    <span>Local-first keyword workflow</span>
+                </span>
+            </a>
+            <nav class="app-topbar-links" aria-label="주요 탐색">
+                <a class="app-topbar-link" href="/#section-controls">실행 조건</a>
+                <a class="app-topbar-link" href="/#section-results">결과 작업대</a>
+                <a class="app-topbar-link" href="/recommended-usage">도움말</a>
+                <a class="app-topbar-link" href="/guides">가이드</a>
+            </nav>
+            <div class="app-topbar-actions">
+                <a class="ghost-chip topbar-chip" href="/#utilityDrawer" data-utility-open="history">실행 기록</a>
+                <a class="ghost-chip topbar-chip" href="/#utilityDrawer" data-utility-open="vault">보관함</a>
+                <a class="ghost-chip topbar-chip" href="/#utilityDrawer" data-utility-open="queue">예약</a>
+            </div>
+        </div>
+    </div>
+    <div class="bg-orb bg-orb-a"></div>
+    <div class="bg-orb bg-orb-b"></div>
+    <div class="bg-grid"></div>
+    {body}
+</body>
+</html>
+"""
+
+
+def _render_guide_card(guide: dict[str, object]) -> str:
+    section_items = "".join(
+        f"<li><strong>{escape(str(section['title']))}</strong><span>{escape(str(section['summary']))}</span></li>"
+        for section in guide.get("sections", [])
+        if str(section.get("title") or "").strip()
+    )
+    return f"""
+        <article class="guide-article-card">
+            <div class="guide-article-head">
+                <h4>{escape(str(guide['title']))}</h4>
+                <p>{escape(str(guide['subtitle']))}</p>
+            </div>
+            <ul class="guide-article-points">
+                {section_items}
+            </ul>
+            <a class="secondary-link guide-article-link" href="/guides/{escape(str(guide['slug']))}">문서 보기</a>
+        </article>
+    """
+
+
+def _render_guide_panel() -> str:
+    guides = _load_study_guides()
+    if not guides:
+        return ""
+
+    grouped: dict[str, list[dict[str, object]]] = {key: [] for key, _label, _keywords in _GUIDE_GROUPS}
+    for guide in guides:
+        group_key = str(guide.get("group") or "discovery")
+        grouped.setdefault(group_key, []).append(guide)
+
+    tab_buttons = "".join(
+        f'<button type="button" class="guide-tab-button{" active" if index == 0 else ""}" '
+        f'data-guide-tab="{escape(key)}">{escape(label)}</button>'
+        for index, (key, label, _keywords) in enumerate(_GUIDE_GROUPS)
+    )
+    tab_panels = []
+    for index, (key, _label, _keywords) in enumerate(_GUIDE_GROUPS):
+        cards = "".join(_render_guide_card(guide) for guide in grouped.get(key, []))
+        tab_panels.append(
+            f"""
+            <section class="guide-tab-panel{' active' if index == 0 else ''}" data-guide-panel="{escape(key)}" {'hidden' if index != 0 else ''}>
+                <div class="guide-card-grid">
+                    {cards if cards else '<div class="placeholder">해당 분류에 문서가 없습니다.</div>'}
+                </div>
+            </section>
+            """
+        )
+
+    return f"""
+        <section class="panel guide-panel">
+            <div class="panel-head">
+                <div>
+                    <p class="panel-kicker">가이드</p>
+                    <h2>사용 가이드</h2>
+                </div>
+                <span class="status-pill success">핵심 문서 {len(guides)}편</span>
+            </div>
+            <p class="input-help compact-help">
+                현재 앱의 실제 흐름만 기준으로 정리한 문서입니다. 화면 구조와 기능이 바뀌면 이 문서 세트도 함께 갱신됩니다.
+            </p>
+            <div class="guide-tab-strip">
+                {tab_buttons}
+            </div>
+            <div class="guide-tab-panels">
+                {''.join(tab_panels)}
+            </div>
+        </section>
+    """
+
+
+def _render_guides_index() -> str:
+    guides = _load_study_guides()
+    grouped: dict[str, list[dict[str, object]]] = {key: [] for key, _label, _keywords in _GUIDE_GROUPS}
+    for guide in guides:
+        grouped.setdefault(str(guide.get("group") or "discovery"), []).append(guide)
+
+    sections: list[str] = []
+    for key, label, _keywords in _GUIDE_GROUPS:
+        cards = "".join(_render_guide_card(guide) for guide in grouped.get(key, []))
+        sections.append(
+            f"""
+            <section class="doc-section">
+                <div class="doc-section-head">
+                    <p class="panel-kicker">가이드 묶음</p>
+                    <h2>{escape(label)}</h2>
+                </div>
+                <div class="guide-card-grid">
+                    {cards if cards else '<div class="placeholder">해당 분류에 문서가 없습니다.</div>'}
+                </div>
+            </section>
+            """
+        )
+
+    return _render_static_shell(
+        title="사용 가이드",
+        description="현재 Keyword Forge의 화면 구조와 기능을 기준으로 다시 정리한 사용 가이드입니다.",
+        body=f"""
+        <div class="doc-shell">
+            <header class="doc-hero">
+                <div class="doc-breadcrumbs"><a href="/">홈</a><span>/</span><strong>사용 가이드</strong></div>
+                <div class="doc-actions">
+                    <a class="secondary-link" href="/">대시보드</a>
+                    <a class="secondary-link" href="/recommended-usage">추천 사용 순서</a>
+                </div>
+                <div class="doc-hero-copy">
+                    <p class="eyebrow">가이드</p>
+                    <h1>현재 버전 기준 운영 문서</h1>
+                    <p>지금 화면 구조와 실제 동작에 맞는 설명만 추려서 다시 정리했습니다.</p>
+                </div>
+            </header>
+            <main class="doc-stack">
+                {''.join(sections)}
+            </main>
+        </div>
+        """,
+    )
+
+
+def _render_guide_detail(guide_slug: str) -> str:
+    guide = next((item for item in _load_study_guides() if str(item.get("slug")) == guide_slug), None)
+    if guide is None:
+        raise HTTPException(status_code=404, detail="가이드를 찾을 수 없습니다.")
+
+    return _render_static_shell(
+        title=str(guide["title"]),
+        description=str(guide.get("subtitle") or ""),
+        body=f"""
+        <div class="doc-shell">
+            <header class="doc-hero doc-hero-compact">
+                <div class="doc-breadcrumbs">
+                    <a href="/">홈</a><span>/</span><a href="/guides">사용 가이드</a><span>/</span><strong>{escape(str(guide['title']))}</strong>
+                </div>
+                <div class="doc-actions">
+                    <a class="secondary-link" href="/guides">가이드 목록</a>
+                    <a class="secondary-link" href="/recommended-usage">추천 사용 순서</a>
+                </div>
+                <div class="doc-hero-copy">
+                    <p class="eyebrow">가이드 상세</p>
+                    <h1>{escape(str(guide['title']))}</h1>
+                    <p>{escape(str(guide.get('subtitle') or ''))}</p>
+                </div>
+            </header>
+            <main class="doc-content">
+                <article class="doc-article">
+                    {str(guide.get("content_html") or "")}
+                </article>
+            </main>
+        </div>
+        """,
+    )
+
+
+def _render_recommended_usage() -> str:
+    guides = {str(item["slug"]): item for item in _load_study_guides()}
+    featured_slugs = (
+        "quickstart-basics",
+        "dual-axis-selection",
+        "results-export-and-seedify",
+    )
+    featured_cards = "".join(
+        _render_guide_card(guides[slug])
+        for slug in featured_slugs
+        if slug in guides
+    )
+    return _render_static_shell(
+        title="추천 사용 순서",
+        description="지금 앱에서 수익형 키워드를 빠르게 발굴하고 재활용하는 가장 실전적인 순서를 정리했습니다.",
+        body=f"""
+        <div class="doc-shell">
+            <header class="doc-hero">
+                <div class="doc-breadcrumbs">
+                    <a href="/">홈</a><span>/</span><strong>추천 사용 순서</strong>
+                </div>
+                <div class="doc-actions">
+                    <a class="secondary-link" href="/">대시보드</a>
+                    <a class="secondary-link" href="/guides">사용 가이드</a>
+                </div>
+                <div class="doc-hero-copy">
+                    <p class="eyebrow">추천 사용법</p>
+                    <h1>누구나 바로 따라 할 수 있는 수익형 운영 루틴</h1>
+                    <p>처음부터 모든 옵션을 건드리기보다, 발굴과 선별을 먼저 안정화한 뒤 좋은 후보만 제목과 보관함으로 넘기는 순서가 가장 수익화에 유리합니다.</p>
+                </div>
+            </header>
+            <main class="doc-stack">
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">가장 쉬운 순서</p>
+                            <h2>처음에는 이 5단계만 반복하세요</h2>
+                        </div>
+                    </div>
+                    <ul class="guide-article-points">
+                        <li><strong>1. 시작모드에서 키워드 발굴을 고릅니다.</strong><span>특별한 이유가 없으면 키워드 발굴부터 시작하는 편이 가장 무난합니다.</span></li>
+                        <li><strong>2. 2축 선별은 전체나 균형형으로 먼저 넓게 봅니다.</strong><span>시드가 강한지 먼저 확인한 뒤 황금형이나 수익형으로 다시 조이는 편이 안정적입니다.</span></li>
+                        <li><strong>3. 관련 설정 보기에서 수집 설정만 확인하고 실행합니다.</strong><span>카테고리, 트렌드 날짜, 로그인 상태만 점검해도 첫 실행 품질은 충분히 나옵니다.</span></li>
+                        <li><strong>4. 선별 결과가 뜨면 먼저 검토합니다.</strong><span>좋은 후보는 보관하거나 시드화하고, 필요할 때만 출력 및 복사로 외부 시트에 넘기면 됩니다.</span></li>
+                        <li><strong>5. 선별된 키워드가 모이면 제목 생성으로 넘어갑니다.</strong><span>홈판, 블로그형, 둘다를 필요한 만큼만 켜고 상위 점수 결과만 고릅니다.</span></li>
+                    </ul>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">상황별 프리셋</p>
+                            <h2>목표에 따라 2축 시작점을 다르게 잡으세요</h2>
+                        </div>
+                    </div>
+                    <div class="guide-card-grid">
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>처음 시장을 볼 때</h4>
+                                <p>전체 또는 균형형으로 넓게 보고, 반응이 있는 주제만 다음 실행에서 더 조입니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>고단가 주제를 노릴 때</h4>
+                                <p>수익형으로 묶고, 살아남은 후보를 시드화해서 더 작은 하위 시장까지 파고듭니다.</p>
+                            </div>
+                        </article>
+                        <article class="guide-article-card">
+                            <div class="guide-article-head">
+                                <h4>롱테일 글감을 채울 때</h4>
+                                <p>노출형이나 롱테일 탐색형으로 빈틈을 찾고, 선별 결과를 제목보다 먼저 보관함에 쌓는 편이 좋습니다.</p>
+                            </div>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">바로 쓰는 기능</p>
+                            <h2>선별 이후는 빠르게 재활용하는 것이 핵심입니다</h2>
+                        </div>
+                    </div>
+                    <div class="guide-card-grid">
+                        {featured_cards}
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="panel-kicker">운영 팁</p>
+                            <h2>반복 수익을 위해 지켜둘 기본 원칙</h2>
+                        </div>
+                    </div>
+                    <ul class="guide-article-points">
+                        <li><strong>선별 0건도 버리지 마세요.</strong><span>확장과 분석 결과는 그대로 남으므로, 다음 시드와 프리셋을 고르는 재료가 됩니다.</span></li>
+                        <li><strong>좋은 후보는 바로 시드화하거나 보관하세요.</strong><span>좋은 키워드는 한 번 보고 끝내지 않을수록 수익 기회가 늘어납니다.</span></li>
+                        <li><strong>제목은 필요한 만큼만 만드세요.</strong><span>과하게 많이 만들기보다 홈판, 블로그형, 둘다 중 필요한 영역만 켜고 점수순으로 빠르게 고르는 편이 효율적입니다.</span></li>
+                        <li><strong>실행 기록과 예약 큐를 같이 쓰세요.</strong><span>잘된 조합을 재현하고 시즌 키워드를 반복 공략할 수 있어 장기적으로 더 강합니다.</span></li>
+                    </ul>
+                </section>
+            </main>
+        </div>
+        """,
+    )
 
 
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
