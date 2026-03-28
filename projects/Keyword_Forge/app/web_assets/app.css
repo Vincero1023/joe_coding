@@ -920,6 +920,9 @@ body.workspace-settings-modal-open {
     padding: 16px;
     overflow: auto;
 }
+.workspace-settings-modal[hidden] {
+    display: none !important;
+}
 .workspace-settings-backdrop {
     position: absolute;
     inset: 0;
