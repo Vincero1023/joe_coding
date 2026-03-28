@@ -1961,7 +1961,7 @@ def _render_home() -> str:
                         <span class="badge">CSV / TXT / 클립보드</span>
                     </div>
                 </div>
-                <div class="results-panel-tools">
+                <div class="results-panel-tools" id="resultsPanelTools">
                     <div class="results-tool-group">
                         <span class="results-tool-label">단계 파일</span>
                         <button type="button" class="ghost-chip" id="resultsExportCollectedCsvButton">수집 CSV</button>

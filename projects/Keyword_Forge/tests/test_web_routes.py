@@ -123,6 +123,7 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "exportSelectedTxtButton" in response.text
     assert "resultsExportExpandedCsvButton" in response.text
     assert "resultsExportExpandedTxtButton" in response.text
+    assert "resultsPanelTools" in response.text
     assert "resultsCopyCollectedLinesButton" in response.text
     assert "resultsCopyCollectedCommaButton" in response.text
     assert "resultsCopyExpandedLinesButton" in response.text

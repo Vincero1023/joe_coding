@@ -343,6 +343,7 @@ const state = {
     selectAttackabilityFilters: [...ATTACKABILITY_ORDER],
     gradeSelectionTouched: false,
     activeResultView: "",
+    resultsToolsVisible: false,
     lastError: null,
     isBusy: false,
     tickerId: null,
@@ -1953,6 +1954,15 @@ function setActiveResultView(viewKey) {
     state.activeResultView = normalizedViewKey;
 }
 
+function toggleResultsToolsVisibility(forceVisible) {
+    const nextVisible = typeof forceVisible === "boolean"
+        ? forceVisible
+        : !state.resultsToolsVisible;
+    state.resultsToolsVisible = nextVisible;
+    renderResults();
+    scheduleDashboardSessionSave();
+}
+
 function resolveActiveResultView(resultViews) {
     const availableViews = new Set((resultViews || []).map((view) => view.key));
     const activeView = normalizeResultViewKey(state.activeResultView);
@@ -3165,6 +3175,7 @@ function buildDashboardSessionPayload() {
         selectAttackabilityFilters: state.selectAttackabilityFilters,
         gradeSelectionTouched: state.gradeSelectionTouched,
         activeResultView: state.activeResultView,
+        resultsToolsVisible: state.resultsToolsVisible,
         titleModeFilter: state.titleModeFilter,
         titleSort: state.titleSort,
         lastError: state.lastError,
@@ -3239,6 +3250,7 @@ function restoreDashboardSession() {
     );
     state.gradeSelectionTouched = Boolean(snapshot.gradeSelectionTouched);
     state.activeResultView = normalizeResultViewKey(snapshot.activeResultView) || "";
+    state.resultsToolsVisible = Boolean(snapshot.resultsToolsVisible);
     state.titleModeFilter = normalizeTitleResultModeFilter(snapshot.titleModeFilter);
     state.titleSort = normalizeTitleResultSort(snapshot.titleSort);
     state.lastError = snapshot.lastError || null;
@@ -4811,6 +4823,7 @@ function bindElements() {
     elements.resultsRailPanel = document.getElementById("resultsRailPanel");
     elements.resultsRail = document.getElementById("resultsRail");
     elements.resultsGrid = document.getElementById("resultsGrid");
+    elements.resultsPanelTools = document.getElementById("resultsPanelTools");
     elements.activityLog = document.getElementById("activityLog");
     elements.pipelineStatus = document.getElementById("pipelineStatus");
     elements.progressBar = document.getElementById("progressBar");
@@ -6413,6 +6426,16 @@ function renderResultStageTabs(resultViews, activeViewKey, options = {}) {
         ? "results-stage-switcher result-stage-dock-switcher"
         : "results-stage-switcher";
     const tabClassName = dockMode ? " result-stage-dock-tab" : "";
+    const toolsToggleHtml = dockMode
+        ? `
+            <button
+                type="button"
+                class="ghost-chip result-stage-tools-toggle${state.resultsToolsVisible ? " active" : ""}"
+                data-inline-action="toggle_results_tools"
+                aria-pressed="${state.resultsToolsVisible ? "true" : "false"}"
+            >출력 및 복사</button>
+        `
+        : "";
     return `
         <div class="${switcherClassName}">
             ${resultViews.map((view) => `
@@ -6427,6 +6450,7 @@ function renderResultStageTabs(resultViews, activeViewKey, options = {}) {
                     <span class="results-stage-meta">${escapeHtml(view.countLabel)}</span>
                 </button>
             `).join("")}
+            ${toolsToggleHtml}
         </div>
     `;
 }
@@ -6606,6 +6630,9 @@ function renderResults() {
         elements.resultStageDock.innerHTML = activeView
             ? renderResultStageTabs(resultViews, activeViewKey, { dockMode: true })
             : "";
+    }
+    if (elements.resultsPanelTools) {
+        elements.resultsPanelTools.hidden = !activeView || !state.resultsToolsVisible;
     }
     elements.resultsGrid.innerHTML = activeView
         ? `
@@ -7138,6 +7165,10 @@ function handleResultsGridClick(event) {
     const inlineTrigger = event.target.closest("[data-inline-action]");
     if (inlineTrigger) {
         const action = inlineTrigger.getAttribute("data-inline-action") || "";
+        if (action === "toggle_results_tools") {
+            toggleResultsToolsVisibility();
+            return;
+        }
         if (action === "seedify_keyword") {
             applyKeywordAsSeed(inlineTrigger.getAttribute("data-keyword") || "");
             return;
@@ -11439,12 +11470,14 @@ function applyKeywordAsSeed(keyword) {
     const seedModeRadio = document.querySelector("input[name='collectorMode'][value='seed']");
     if (seedModeRadio instanceof HTMLInputElement) {
         seedModeRadio.checked = true;
+        seedModeRadio.dispatchEvent(new Event("change", { bubbles: true }));
     }
     elements.seedInput.value = normalizedKeyword;
-    persistTrendSettings();
-    renderInputState();
+    elements.seedInput.dispatchEvent(new Event("input", { bubbles: true }));
+    handleTrendSettingsChange();
     elements.seedInput.focus();
     elements.seedInput.select();
+    scheduleDashboardSessionSave();
     const message = `시드 키워드에 "${normalizedKeyword}"를 올렸습니다. 실행은 직접 눌러 주세요.`;
     addLog(message, "success");
     showUserNotice({

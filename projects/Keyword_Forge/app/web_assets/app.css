@@ -1783,6 +1783,15 @@ body.utility-drawer-open {
     gap: 10px;
 }
 
+.result-stage-tools-toggle {
+    flex: 0 0 auto;
+    align-self: stretch;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+}
+
 .results-stage-switcher {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
@@ -1816,6 +1825,12 @@ body.utility-drawer-open {
     padding: 10px 14px;
     border-radius: 16px;
     background: rgba(255, 255, 255, 0.7);
+}
+
+.workspace-nav-stage-dock .result-stage-tools-toggle {
+    min-height: 48px;
+    padding: 10px 14px;
+    border-radius: 16px;
 }
 
 .workspace-nav-stage-dock .results-stage-step {
