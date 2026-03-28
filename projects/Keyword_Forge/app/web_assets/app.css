@@ -5682,17 +5682,78 @@ body {
 
 @media (min-width: 1181px) {
     .layout-grid.workspace-cockpit {
-        grid-template-columns: minmax(0, 1.18fr) minmax(320px, 400px);
+        grid-template-columns: minmax(0, 1fr);
         gap: 18px;
     }
 
     .layout-grid.workspace-cockpit > .workspace-main-column {
         grid-column: 1;
+        grid-row: 2;
+        grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr);
+        gap: 18px;
     }
 
     .layout-grid.workspace-cockpit > .workspace-side-column {
-        grid-column: 2;
+        grid-column: 1;
+        grid-row: 1;
+        display: grid;
+        grid-template-columns: minmax(0, 1.18fr) minmax(360px, 0.82fr);
+        gap: 18px;
         align-self: start;
+    }
+
+    .workspace-side-column .control-stack {
+        grid-template-columns: minmax(0, 1.18fr) minmax(300px, 0.82fr);
+    }
+
+    .workspace-side-column .control-stage-collect {
+        grid-column: 1;
+    }
+
+    .workspace-side-column .control-stage-pipeline {
+        grid-column: 2;
+    }
+
+    .workspace-side-column .form-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .workspace-side-column .category-settings-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .workspace-side-column .topic-seed-generator-row {
+        grid-template-columns: minmax(0, 1.8fr) 140px 110px auto;
+    }
+
+    .workspace-side-column .session-helper-actions,
+    .workspace-side-column .collector-option-row {
+        width: auto;
+    }
+
+    .workspace-side-column .session-helper-btn,
+    .workspace-side-column .collector-run-btn,
+    .workspace-side-column .collector-toggle-chip {
+        width: auto;
+    }
+
+    .workspace-side-column .collector-toggle-chip {
+        flex: 0 1 auto;
+    }
+
+    .workspace-side-column .control-launcher-column {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+    .workspace-side-column .control-launcher-column .launcher-card,
+    .workspace-side-column .control-launcher-column .title-settings-card {
+        max-width: none;
+        height: 100%;
+    }
+
+    .workspace-side-column .control-stage-title {
+        grid-column: 1 / -1;
     }
 
     .workspace-sidebar,
