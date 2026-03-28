@@ -2093,26 +2093,26 @@ def _render_home() -> str:
                                 <option value="firefox">Mozilla Firefox</option>
                             </select>
                         </label>
+                    </div>
 
-                        <div class="field-block category-setting-card session-helper-card">
-                            <span class="field-label field-label-row">
-                                <span>Creator Advisor 로그인</span>
-                                {creator_login_help}
-                            </span>
-                            <input
-                                id="trendCookieInput"
-                                type="hidden"
-                                value=""
-                            />
-                            <div class="session-helper-actions">
-                                <button type="button" class="primary-btn session-helper-btn" id="loadLocalCookieButton">현재 브라우저 쿠키 읽기</button>
-                                <button type="button" class="ghost-chip session-helper-btn" id="validateTrendSessionButton">로그인 상태 확인</button>
-                                <button type="button" class="ghost-chip session-helper-btn" id="launchLoginBrowserButton">전용 로그인 브라우저 열기</button>
-                            </div>
-                            <p class="input-help session-helper-status" id="localCookieStatus">
-                                현재 브라우저 세션이나 저장된 전용 세션으로 로그인 상태를 확인할 수 있습니다.
-                            </p>
+                    <div class="field-block field-block-wide session-helper-card session-helper-wide-card" data-mode-visibility="category">
+                        <span class="field-label field-label-row">
+                            <span>Creator Advisor 로그인</span>
+                            {creator_login_help}
+                        </span>
+                        <input
+                            id="trendCookieInput"
+                            type="hidden"
+                            value=""
+                        />
+                        <div class="session-helper-actions">
+                            <button type="button" class="primary-btn session-helper-btn" id="loadLocalCookieButton">현재 브라우저 쿠키 읽기</button>
+                            <button type="button" class="ghost-chip session-helper-btn" id="validateTrendSessionButton">로그인 상태 확인</button>
+                            <button type="button" class="ghost-chip session-helper-btn" id="launchLoginBrowserButton">전용 로그인 브라우저 열기</button>
                         </div>
+                        <p class="input-help session-helper-status" id="localCookieStatus">
+                            현재 브라우저 세션이나 저장된 전용 세션으로 로그인 상태를 확인할 수 있습니다.
+                        </p>
                     </div>
 
                     <label class="field-block" data-mode-visibility="seed" hidden>

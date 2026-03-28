@@ -353,6 +353,9 @@ button:disabled {
     background: rgba(247, 243, 234, 0.5);
     border: 1px solid rgba(20, 32, 51, 0.08);
 }
+.session-helper-wide-card {
+    width: 100%;
+}
 
 .title-surface-grid {
     display: grid;
