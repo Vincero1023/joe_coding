@@ -5727,8 +5727,35 @@ body {
     }
 
     .workspace-side-column .control-stage-collect {
-        grid-column: 1 / -1;
+        grid-column: 1;
         grid-row: 2;
+    }
+
+    .workspace-side-column .control-stage-collect .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .workspace-side-column .control-stage-collect .category-settings-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .workspace-side-column .control-stage-collect .topic-seed-generator-row {
+        grid-template-columns: 1fr;
+    }
+
+    .workspace-side-column .control-stage-collect .session-helper-actions,
+    .workspace-side-column .control-stage-collect .collector-option-row {
+        width: 100%;
+    }
+
+    .workspace-side-column .control-stage-collect .session-helper-btn,
+    .workspace-side-column .control-stage-collect .collector-run-btn,
+    .workspace-side-column .control-stage-collect .collector-toggle-chip {
+        width: 100%;
+    }
+
+    .workspace-side-column .control-stage-collect .collector-toggle-chip {
+        flex: 1 1 100%;
     }
 
     .workspace-side-column .form-grid {
