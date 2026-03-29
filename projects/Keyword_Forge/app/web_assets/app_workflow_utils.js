@@ -37,6 +37,34 @@ const TOPIC_SEED_ACTION_FEEDBACK_LABELS = {
 const SECTION_NAV_LINK_SELECTOR = ".app-topbar-link[href^='#section-'], .workspace-nav-link[href^='#section-']";
 let topicSeedInputFlashTimer = 0;
 
+window.captureWorkflowUiPreferenceSnapshot = function captureWorkflowUiPreferenceSnapshot() {
+    const utilityDrawerTab = typeof getUtilityDrawerTab === "function"
+        ? getUtilityDrawerTab()
+        : String(state.utilityDrawerTab || "diagnostics").trim() || "diagnostics";
+    return {
+        utilityDrawerTab,
+        utilityDrawerOpen: elements.utilityDrawer ? !elements.utilityDrawer.hidden : false,
+    };
+};
+
+window.applyWorkflowUiPreferenceSnapshot = function applyWorkflowUiPreferenceSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") {
+        return;
+    }
+
+    const utilityDrawerTab = String(snapshot.utilityDrawerTab || "").trim();
+    if (utilityDrawerTab) {
+        state.utilityDrawerTab = utilityDrawerTab;
+        if (typeof setUtilityDrawerTab === "function") {
+            setUtilityDrawerTab(utilityDrawerTab);
+        }
+    }
+
+    if (snapshot.utilityDrawerOpen && typeof openUtilityDrawer === "function") {
+        openUtilityDrawer(utilityDrawerTab || "diagnostics");
+    }
+};
+
 window.bindElements = function bindElementsOverride() {
     originalBindElements?.();
     elements.gradePresetButtons = Array.from(document.querySelectorAll("[data-selection-preset]"));

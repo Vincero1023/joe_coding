@@ -256,6 +256,16 @@ def _attach_selection_profile(
         profile["allowed_attackability_grades"] = allowed_attackability_grades
     if allowed_grades:
         profile["allowed_grades"] = allowed_grades
+    rejection_summary = _build_selection_rejection_summary(
+        source_items,
+        selected,
+        mode=normalized_mode,
+        allowed_profitability_grades=set(allowed_profitability_grades),
+        allowed_attackability_grades=set(allowed_attackability_grades),
+        allowed_grades=set(allowed_grades),
+    )
+    if rejection_summary:
+        profile["rejection_summary"] = rejection_summary
     payload["selection_profile"] = profile
 
 
@@ -367,6 +377,95 @@ def _normalize_allowed_attackability_grades(grades: Any) -> set[str]:
         for grade in grades
         if _normalize_attackability_grade(grade)
     }
+
+
+def _count_non_empty_values(values: list[str], allowed_order: list[str]) -> dict[str, int]:
+    counts = {key: 0 for key in allowed_order}
+    for value in values:
+        if value in counts:
+            counts[value] += 1
+    return {key: count for key, count in counts.items() if count > 0}
+
+
+def _build_selection_rejection_summary(
+    source_items: list[dict[str, Any]],
+    selected: list[dict[str, Any]],
+    *,
+    mode: str,
+    allowed_profitability_grades: set[str],
+    allowed_attackability_grades: set[str],
+    allowed_grades: set[str],
+) -> dict[str, Any]:
+    if not source_items:
+        return {}
+
+    profitability_values = [_resolve_profitability_grade(item) for item in source_items]
+    attackability_values = [_resolve_attackability_grade(item) for item in source_items]
+    grade_values = [_resolve_grade(item) for item in source_items]
+    golden_bucket_values = [_resolve_golden_bucket(item) for item in source_items]
+
+    blocked_by_profitability_count = 0
+    blocked_by_attackability_count = 0
+    blocked_by_grade_count = 0
+    rejected_count = 0
+
+    for item, profitability_grade, attackability_grade, grade in zip(
+        source_items,
+        profitability_values,
+        attackability_values,
+        grade_values,
+        strict=False,
+    ):
+        blocked = False
+        if (
+            mode == "combo_filter"
+            and allowed_profitability_grades
+            and profitability_grade not in allowed_profitability_grades
+        ):
+            blocked_by_profitability_count += 1
+            blocked = True
+        if (
+            mode == "combo_filter"
+            and allowed_attackability_grades
+            and attackability_grade not in allowed_attackability_grades
+        ):
+            blocked_by_attackability_count += 1
+            blocked = True
+        if mode == "grade_filter" and allowed_grades and grade not in allowed_grades:
+            blocked_by_grade_count += 1
+            blocked = True
+        if blocked:
+            rejected_count += 1
+
+    summary: dict[str, Any] = {
+        "candidate_count": len(source_items),
+        "selected_count": len(selected),
+        "rejected_count": max(0, rejected_count if rejected_count else len(source_items) - len(selected)),
+        "profitability_distribution": _count_non_empty_values(
+            profitability_values,
+            list(PROFITABILITY_GRADE_ORDER),
+        ),
+        "attackability_distribution": _count_non_empty_values(
+            attackability_values,
+            list(ATTACKABILITY_GRADE_ORDER),
+        ),
+        "grade_distribution": _count_non_empty_values(
+            grade_values,
+            ["S", "A", "B", "C", "D", "F"],
+        ),
+        "golden_bucket_distribution": _count_non_empty_values(
+            golden_bucket_values,
+            ["gold", "promising", "experimental", "hold"],
+        ),
+    }
+
+    if mode == "combo_filter":
+        summary["blocked_by_profitability_count"] = blocked_by_profitability_count
+        summary["blocked_by_attackability_count"] = blocked_by_attackability_count
+    if mode == "grade_filter":
+        summary["blocked_by_grade_count"] = blocked_by_grade_count
+
+    return summary
 
 
 def _resolve_profitability_grade(item: dict[str, Any]) -> str:

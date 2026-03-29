@@ -2260,6 +2260,11 @@ def _render_home() -> str:
                         </div>
                     </div>
 
+                    <div id="recoveryGuide" class="recovery-guide-card empty">
+                        <strong>다음 액션 안내</strong>
+                        <p>실행 상태에 맞는 복구 힌트가 여기에 표시됩니다.</p>
+                    </div>
+
                     <div class="status-list" id="statusList"></div>
 
                 </section>

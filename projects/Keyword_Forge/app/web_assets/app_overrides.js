@@ -458,6 +458,11 @@ function buildSelectionResultSubtitle(items, profile) {
         return countItems(items) ? "선별 결과를 다음 단계에 바로 넘길 수 있습니다." : "";
     }
 
+    const emptyReason = String(profile.empty_reason || "").trim();
+    if (!countItems(items) && emptyReason) {
+        return emptyReason;
+    }
+
     if (profile.mode === "combo_filter") {
         const presetKey = String(profile.preset_key || "").trim();
         const presetLabel = String(profile.preset_label || resolveSelectionPresetLabel(presetKey)).trim();
@@ -865,7 +870,28 @@ async function runSelectStage(options = {}) {
         const noticeMessage = hasExplicitFilters
             ? `선택한 조건에 맞는 검색 결과가 없습니다.\n수익성 ${allowedProfitabilityGrades.join(", ")} · 노출도 ${allowedAttackabilityGrades.join(", ")} 조합을 넓혀서 다시 시도해 주세요.`
             : "선별할 검색 결과가 없습니다.\n먼저 수집/확장/분석 결과를 확인해 주세요.";
-        applyEmptySelectedResult(noticeMessage);
+        applyEmptySelectedResult(noticeMessage, {
+            mode: hasExplicitFilters ? "combo_filter" : "default",
+            allowed_profitability_grades: [...allowedProfitabilityGrades],
+            allowed_attackability_grades: [...allowedAttackabilityGrades],
+            candidate_count: analyzedKeywords.length,
+            selected_count: 0,
+            preset_key: hasExplicitFilters
+                ? resolveSelectionPresetKey(allowedProfitabilityGrades, allowedAttackabilityGrades)
+                : "auto",
+            preset_label: hasExplicitFilters
+                ? resolveSelectionPresetLabel(
+                    resolveSelectionPresetKey(allowedProfitabilityGrades, allowedAttackabilityGrades),
+                )
+                : "auto",
+            rejection_summary: typeof buildLocalSelectionRejectionSummary === "function"
+                ? buildLocalSelectionRejectionSummary(
+                    analyzedKeywords,
+                    allowedProfitabilityGrades,
+                    allowedAttackabilityGrades,
+                )
+                : null,
+        });
         throw createUserNoticeError(noticeMessage, {
             code: "empty_selection_notice",
             stageKey: "selected",
@@ -1015,6 +1041,11 @@ async function runSelectStage(options = {}) {
         Number(resultProfile.candidate_count ?? selectionCandidates.length ?? 0) || 0,
     );
     resultProfile.has_editorial_support = hasEditorialSupportSelection(result.selected_keywords || []);
+    if (!countItems(result.selected_keywords || [])) {
+        resultProfile.empty_reason = hasExplicitFilters
+            ? "현재 2축 조합에 맞는 키워드가 없습니다."
+            : "현재 자동 선별 기준에 맞는 키워드가 없습니다.";
+    }
     if (resultProfile.mode === "combo_filter") {
         resultProfile.preset_key = resolveSelectionPresetKey(
             resultProfile.allowed_profitability_grades || allowedProfitabilityGrades,
@@ -2264,6 +2295,9 @@ function setUtilityDrawerTab(tabKey) {
         renderQueuePanel();
         void refreshQueueSnapshot({ silent: true, background: true });
     }
+    if (typeof window.scheduleDashboardPersistence === "function") {
+        window.scheduleDashboardPersistence();
+    }
 }
 
 function openUtilityDrawer(tabKey = "diagnostics") {
@@ -2273,6 +2307,9 @@ function openUtilityDrawer(tabKey = "diagnostics") {
     elements.utilityDrawer.hidden = false;
     document.body.classList.add("utility-drawer-open");
     setUtilityDrawerTab(tabKey);
+    if (typeof window.scheduleDashboardPersistence === "function") {
+        window.scheduleDashboardPersistence();
+    }
 }
 
 function closeUtilityDrawer() {
@@ -2285,6 +2322,9 @@ function closeUtilityDrawer() {
         button.classList.remove("active");
         button.setAttribute("aria-pressed", "false");
     });
+    if (typeof window.scheduleDashboardPersistence === "function") {
+        window.scheduleDashboardPersistence();
+    }
 }
 
 function isBusySafeButton(button) {

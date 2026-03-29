@@ -253,6 +253,17 @@ def test_selector_combo_filter_returns_matching_two_axis_keywords() -> None:
         "has_editorial_support": False,
         "allowed_profitability_grades": ["A", "B", "C"],
         "allowed_attackability_grades": ["1", "2", "3"],
+        "rejection_summary": {
+            "candidate_count": 2,
+            "selected_count": 1,
+            "rejected_count": 1,
+            "blocked_by_profitability_count": 1,
+            "blocked_by_attackability_count": 1,
+            "profitability_distribution": {"A": 1, "D": 1},
+            "attackability_distribution": {"2": 1, "4": 1},
+            "grade_distribution": {"A": 1, "D": 1},
+            "golden_bucket_distribution": {"gold": 1, "hold": 1},
+        },
     }
 
 
@@ -297,6 +308,15 @@ def test_selector_default_selection_response_includes_profile() -> None:
         "selected_count": 1,
         "longtail_option_keys": ["checklist"],
         "has_editorial_support": False,
+        "rejection_summary": {
+            "candidate_count": 1,
+            "selected_count": 1,
+            "rejected_count": 0,
+            "profitability_distribution": {"A": 1},
+            "attackability_distribution": {"2": 1},
+            "grade_distribution": {"A": 1},
+            "golden_bucket_distribution": {"gold": 1},
+        },
     }
 
 

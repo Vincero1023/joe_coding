@@ -52,6 +52,7 @@ const KEYWORD_STATUS_VERSION = 1;
 const KEYWORD_RECENT_DUPLICATE_WINDOW_DAYS = 14;
 const OPERATION_SETTINGS_STORAGE_KEY = "keyword_forge_operation_settings";
 const DASHBOARD_SESSION_STORAGE_KEY = "keyword_forge_dashboard_session_v1";
+const DASHBOARD_PREFERENCES_STORAGE_KEY = "keyword_forge_dashboard_preferences_v1";
 const STREAM_RENDER_THROTTLE_MS = 350;
 const STREAM_SESSION_RESULT_LIMIT = 120;
 const STREAM_SESSION_LOG_LIMIT = 60;
@@ -366,6 +367,8 @@ const state = {
     keywordStatusRegistry: null,
     keywordLatestUsageMap: new Map(),
     keywordRecentUsageMap: new Map(),
+    dashboardPreferencesRestored: false,
+    dashboardSessionRestored: false,
 };
 
 const elements = {};
@@ -382,10 +385,16 @@ document.addEventListener("DOMContentLoaded", () => {
     loadTitleSettings();
     loadKeywordWorkflowState();
     void loadOperationSettings();
+    const restoredPreferences = restoreDashboardPreferences();
     const restoredDashboard = restoreDashboardSession();
+    state.dashboardPreferencesRestored = restoredPreferences;
+    state.dashboardSessionRestored = restoredDashboard;
     syncTrendDateToToday();
     bindEvents();
-    window.addEventListener("pagehide", persistDashboardSessionNow);
+    window.addEventListener("pagehide", () => {
+        persistDashboardSessionNow();
+        persistDashboardPreferencesNow();
+    });
     window.addEventListener("storage", handleTitleSettingsStorageSync);
     document.addEventListener("visibilitychange", handleTitleSettingsVisibilitySync);
     void refreshTitlePromptSettingsFromServer();
@@ -393,6 +402,9 @@ document.addEventListener("DOMContentLoaded", () => {
     addLog("대시보드가 준비되었습니다. 단계별 실행과 디버그 정보를 바로 확인할 수 있습니다.", "success");
     if (restoredDashboard && elements.activityLog?.firstElementChild) {
         elements.activityLog.removeChild(elements.activityLog.firstElementChild);
+        addLog("?댁쟾 ?ㅽ뻾 ?붾㈃怨?寃곌낵瑜?蹂듦뎄?덉뒿?덈떎. ?대? ?곹깭?먯꽌 諛붾줈 ?댁뼱???묒뾽???섏닔 ?덉뒿?덈떎.", "info");
+    } else if (restoredPreferences) {
+        addLog("?댁쟾 ?낅젰媛믪낵 ?붾낫湲?議곌굔???덈윭?쇱? ?덉뒿?덈떎.", "info");
     }
     renderAll();
 });
@@ -1560,6 +1572,9 @@ function syncTrendDateToToday() {
     if (!elements.trendDateInput) {
         return;
     }
+    if (String(elements.trendDateInput.value || "").trim()) {
+        return;
+    }
 
     elements.trendDateInput.value = getDefaultTrendDate();
     persistTrendSettings();
@@ -1644,6 +1659,8 @@ function clearPipelineResults(options = {}) {
     state.requestAbortStageKey = "";
     state.requestAbortEndpoint = "";
     state.requestAbortRequested = false;
+    state.dashboardSessionRestored = false;
+    state.dashboardPreferencesRestored = false;
     if (!preserveGlobalStatus) {
         setGlobalStatus("대기 중", "idle");
     }
@@ -1866,12 +1883,25 @@ function decorateSelectedResult(selectedResult, analyzedCount) {
     };
 }
 
-function applyEmptySelectedResult(message) {
+function applyEmptySelectedResult(message, selectionProfile = null) {
     clearStageAndDownstream("selected");
 
     const stage = getStage("selected");
     const finishedAt = Date.now();
-    const result = createEmptySelectedResult();
+    const result = decorateSelectedResult(
+        {
+            ...createEmptySelectedResult(),
+            selection_profile: selectionProfile && typeof selectionProfile === "object"
+                ? {
+                    ...selectionProfile,
+                    empty_reason: String(message || "").trim(),
+                }
+                : {
+                    empty_reason: String(message || "").trim(),
+                },
+        },
+        countItems(state.results.analyzed?.analyzed_keywords || []),
+    );
 
     state.results.selected = result;
     state.stageStatus.selected = {
@@ -1981,6 +2011,7 @@ function resolveActiveResultView(resultViews) {
 function renderAll() {
     renderCounts();
     renderProgress();
+    renderRecoveryGuide();
     renderStageList();
     renderInputState();
     renderTrendSettingsState();
@@ -3176,6 +3207,81 @@ function applyDashboardFormSnapshot(formState) {
     }
 }
 
+function buildDashboardPreferenceFormSnapshot() {
+    const formState = {
+        ...buildDashboardFormSnapshot(),
+    };
+    delete formState.trendCookieInput;
+    delete formState.localCookieStatus;
+    delete formState.titleProvider;
+    delete formState.titleModel;
+    delete formState.titleTemperature;
+    delete formState.titleFallback;
+    delete formState.titleMode;
+
+    return {
+        ...formState,
+        titleKeywordModes: typeof getTitleKeywordModeState === "function"
+            ? getTitleKeywordModeState()
+            : null,
+        titleSurfaceSettings: typeof getTitleSurfaceSettingsState === "function"
+            ? getTitleSurfaceSettingsState()
+            : null,
+        titleIssueSourceMode: elements.titleIssueSourceMode?.value || "",
+        titleIssueContextEnabled: Boolean(elements.titleIssueContextEnabled?.checked),
+        titleIssueContextLimit: elements.titleIssueContextLimit?.value || "",
+        titleCommunitySourceKeys: typeof getSelectedTitleCommunitySourceKeys === "function"
+            ? getSelectedTitleCommunitySourceKeys()
+            : [],
+        titleCommunityCustomDomains: typeof normalizeTitleCommunityCustomDomains === "function"
+            ? normalizeTitleCommunityCustomDomains(elements.titleCommunityCustomDomains?.value || "")
+            : [],
+        operationSettings: typeof getOperationSettingsFormState === "function"
+            ? getOperationSettingsFormState()
+            : null,
+    };
+}
+
+function applyDashboardPreferenceFormSnapshot(formState) {
+    if (!formState || typeof formState !== "object") {
+        return;
+    }
+
+    applyDashboardFormSnapshot({
+        ...formState,
+        trendCookieInput: "",
+        localCookieStatus: "",
+    });
+
+    if (formState.titleKeywordModes && typeof applyTitleKeywordModes === "function") {
+        applyTitleKeywordModes(formState.titleKeywordModes);
+    }
+    if (formState.titleSurfaceSettings && typeof applyTitleSurfaceSelection === "function") {
+        applyTitleSurfaceSelection(
+            formState.titleSurfaceSettings.surface_modes || [],
+            formState.titleSurfaceSettings.surface_counts || {},
+        );
+    }
+    if (elements.titleIssueSourceMode && typeof formState.titleIssueSourceMode === "string") {
+        elements.titleIssueSourceMode.value = formState.titleIssueSourceMode;
+    }
+    if (elements.titleIssueContextEnabled) {
+        elements.titleIssueContextEnabled.checked = Boolean(formState.titleIssueContextEnabled);
+    }
+    if (elements.titleIssueContextLimit && formState.titleIssueContextLimit !== undefined) {
+        elements.titleIssueContextLimit.value = String(formState.titleIssueContextLimit || "");
+    }
+    if (typeof applyTitleCommunitySourceSelection === "function") {
+        applyTitleCommunitySourceSelection(formState.titleCommunitySourceKeys || [], true);
+    }
+    if (elements.titleCommunityCustomDomains && Array.isArray(formState.titleCommunityCustomDomains)) {
+        elements.titleCommunityCustomDomains.value = formState.titleCommunityCustomDomains.join("\n");
+    }
+    if (formState.operationSettings && typeof applyOperationSettingsToForm === "function") {
+        applyOperationSettingsToForm(formState.operationSettings);
+    }
+}
+
 function captureDashboardLogEntries(limit = 200) {
     return Array.from(elements.activityLog?.querySelectorAll(".log-entry") || [])
         .slice(0, limit)
@@ -3288,6 +3394,23 @@ function buildDashboardSessionPayload() {
     };
 }
 
+function buildDashboardPreferencePayload() {
+    return {
+        formState: buildDashboardPreferenceFormSnapshot(),
+        selectGradeFilters: state.selectGradeFilters,
+        selectAttackabilityFilters: state.selectAttackabilityFilters,
+        gradeSelectionTouched: state.gradeSelectionTouched,
+        activeResultView: state.activeResultView,
+        resultsToolsVisible: state.resultsToolsVisible,
+        titleModeFilter: state.titleModeFilter,
+        titleSort: state.titleSort,
+        analyzedFilters: state.analyzedFilters,
+        workflowUi: typeof window.captureWorkflowUiPreferenceSnapshot === "function"
+            ? window.captureWorkflowUiPreferenceSnapshot()
+            : null,
+    };
+}
+
 function persistDashboardSessionNow() {
     if (!elements.resultsGrid) {
         return;
@@ -3303,6 +3426,17 @@ function persistDashboardSessionNow() {
     }
 }
 
+function persistDashboardPreferencesNow() {
+    try {
+        window.localStorage.setItem(
+            DASHBOARD_PREFERENCES_STORAGE_KEY,
+            JSON.stringify(buildDashboardPreferencePayload()),
+        );
+    } catch (error) {
+        // Ignore storage failures and keep the dashboard usable.
+    }
+}
+
 function scheduleDashboardSessionSave() {
     if (dashboardSessionSaveTimer) {
         window.clearTimeout(dashboardSessionSaveTimer);
@@ -3310,7 +3444,19 @@ function scheduleDashboardSessionSave() {
     dashboardSessionSaveTimer = window.setTimeout(() => {
         dashboardSessionSaveTimer = null;
         persistDashboardSessionNow();
+        persistDashboardPreferencesNow();
     }, 120);
+}
+window.scheduleDashboardPersistence = scheduleDashboardSessionSave;
+
+function handleDashboardPersistenceEvent(event) {
+    if (!(event?.target instanceof Element)) {
+        return;
+    }
+    if (!event.target.closest(".page-shell")) {
+        return;
+    }
+    scheduleDashboardSessionSave();
 }
 
 function restoreDashboardSession() {
@@ -3364,6 +3510,36 @@ function restoreDashboardSession() {
     if (globalStatus.message) {
         setGlobalStatus(globalStatus.message, globalStatus.kind || "idle");
     }
+    return true;
+}
+
+function restoreDashboardPreferences() {
+    const snapshot = readLocalStorageJson(DASHBOARD_PREFERENCES_STORAGE_KEY);
+    if (!snapshot || typeof snapshot !== "object") {
+        return false;
+    }
+
+    applyDashboardPreferenceFormSnapshot(snapshot.formState);
+    state.selectGradeFilters = normalizeProfitabilityList(
+        snapshot.selectGradeFilters?.length ? snapshot.selectGradeFilters : state.selectGradeFilters,
+    );
+    state.selectAttackabilityFilters = normalizeAttackabilityList(
+        snapshot.selectAttackabilityFilters?.length ? snapshot.selectAttackabilityFilters : state.selectAttackabilityFilters,
+    );
+    state.gradeSelectionTouched = Boolean(snapshot.gradeSelectionTouched);
+    state.activeResultView = normalizeResultViewKey(snapshot.activeResultView) || state.activeResultView;
+    state.resultsToolsVisible = Boolean(snapshot.resultsToolsVisible);
+    state.titleModeFilter = normalizeTitleResultModeFilter(snapshot.titleModeFilter || state.titleModeFilter);
+    state.titleSort = normalizeTitleResultSort(snapshot.titleSort || state.titleSort);
+    state.analyzedFilters = {
+        ...createDefaultAnalyzedFilters(),
+        ...(snapshot.analyzedFilters || {}),
+    };
+
+    if (snapshot.workflowUi && typeof window.applyWorkflowUiPreferenceSnapshot === "function") {
+        window.applyWorkflowUiPreferenceSnapshot(snapshot.workflowUi);
+    }
+
     return true;
 }
 
@@ -4929,6 +5105,7 @@ function bindElements() {
     elements.progressBar = document.getElementById("progressBar");
     elements.progressText = document.getElementById("progressText");
     elements.progressDetail = document.getElementById("progressDetail");
+    elements.recoveryGuide = document.getElementById("recoveryGuide");
     elements.errorConsole = document.getElementById("errorConsole");
     elements.debugPanels = document.getElementById("debugPanels");
     elements.stopStreamButton = document.getElementById("stopStreamButton");
@@ -4955,6 +5132,8 @@ function bindEvents() {
             setQuickStartMode(button.dataset.quickstartMode || "");
         });
     });
+    document.addEventListener("input", handleDashboardPersistenceEvent, true);
+    document.addEventListener("change", handleDashboardPersistenceEvent, true);
     elements.quickStartPrimaryButton?.addEventListener("click", runQuickStartPrimaryAction);
     elements.quickStartSecondaryButton?.addEventListener("click", focusQuickStartDetails);
     elements.workspaceSettingsClose?.addEventListener("click", closeWorkspaceSettingsModal);
@@ -5010,6 +5189,7 @@ function bindEvents() {
     elements.resultStageDock?.addEventListener("click", handleResultsGridClick);
     elements.resultsGrid.addEventListener("click", handleResultsGridClick);
     elements.resultsGrid.addEventListener("change", handleResultsGridChange);
+    elements.recoveryGuide?.addEventListener("click", handleRecoveryGuideClick);
     elements.expandManualInput.addEventListener("input", renderInputState);
     elements.expandInputSource.addEventListener("change", renderInputState);
     elements.analyzeManualInput.addEventListener("input", renderInputState);
@@ -6177,6 +6357,347 @@ function renderProgress() {
         : `${completedCount}개 단계가 완료되었습니다.`;
 }
 
+function buildDistributionSummaryText(distribution, order, formatter, limit = 3) {
+    if (!distribution || typeof distribution !== "object") {
+        return "";
+    }
+    const entries = order
+        .map((key) => [key, Number(distribution[key] || 0)])
+        .filter(([, count]) => count > 0)
+        .sort((left, right) => right[1] - left[1])
+        .slice(0, limit);
+    if (!entries.length) {
+        return "";
+    }
+    return entries
+        .map(([key, count]) => `${formatter(key)} ${count}건`)
+        .join(" · ");
+}
+
+function buildSelectionRejectionSummaryText(profile) {
+    const summary = profile?.rejection_summary;
+    if (!summary || typeof summary !== "object") {
+        return "";
+    }
+
+    const messageParts = [];
+    if (Number(summary.blocked_by_profitability_count || 0) > 0) {
+        messageParts.push(`수익성 축 바깥 ${Number(summary.blocked_by_profitability_count || 0)}건`);
+    }
+    if (Number(summary.blocked_by_attackability_count || 0) > 0) {
+        messageParts.push(`노출도 축 바깥 ${Number(summary.blocked_by_attackability_count || 0)}건`);
+    }
+    if (Number(summary.blocked_by_grade_count || 0) > 0) {
+        messageParts.push(`등급 축 바깥 ${Number(summary.blocked_by_grade_count || 0)}건`);
+    }
+
+    const profitabilitySummary = buildDistributionSummaryText(
+        summary.profitability_distribution,
+        PROFITABILITY_ORDER,
+        (grade) => `수익성 ${grade}`,
+        2,
+    );
+    const attackabilitySummary = buildDistributionSummaryText(
+        summary.attackability_distribution,
+        ATTACKABILITY_ORDER,
+        (grade) => `노출도 ${grade}`,
+        2,
+    );
+    const distributionSummary = [profitabilitySummary, attackabilitySummary].filter(Boolean).join(" / ");
+
+    if (messageParts.length && distributionSummary) {
+        return `${messageParts.join(" · ")}였습니다. 후보 분포는 ${distributionSummary}였습니다.`;
+    }
+    if (messageParts.length) {
+        return `${messageParts.join(" · ")}였습니다.`;
+    }
+    if (distributionSummary) {
+        return `후보 분포는 ${distributionSummary}였습니다.`;
+    }
+    return "";
+}
+
+function buildLocalSelectionRejectionSummary(items, allowedProfitabilityGrades = [], allowedAttackabilityGrades = []) {
+    const profitabilityOrder = Array.isArray(PROFITABILITY_ORDER) ? PROFITABILITY_ORDER : [];
+    const attackabilityOrder = Array.isArray(ATTACKABILITY_ORDER) ? ATTACKABILITY_ORDER : [];
+    const profitabilityDistribution = {};
+    const attackabilityDistribution = {};
+    let blockedByProfitabilityCount = 0;
+    let blockedByAttackabilityCount = 0;
+
+    items.forEach((item) => {
+        const profitabilityGrade = typeof resolveProfitabilityGrade === "function"
+            ? resolveProfitabilityGrade(item)
+            : "";
+        const attackabilityGrade = typeof resolveAttackabilityGrade === "function"
+            ? resolveAttackabilityGrade(item)
+            : "";
+        if (profitabilityOrder.includes(profitabilityGrade)) {
+            profitabilityDistribution[profitabilityGrade] = Number(profitabilityDistribution[profitabilityGrade] || 0) + 1;
+        }
+        if (attackabilityOrder.includes(attackabilityGrade)) {
+            attackabilityDistribution[attackabilityGrade] = Number(attackabilityDistribution[attackabilityGrade] || 0) + 1;
+        }
+        if (allowedProfitabilityGrades.length && !allowedProfitabilityGrades.includes(profitabilityGrade)) {
+            blockedByProfitabilityCount += 1;
+        }
+        if (allowedAttackabilityGrades.length && !allowedAttackabilityGrades.includes(attackabilityGrade)) {
+            blockedByAttackabilityCount += 1;
+        }
+    });
+
+    return {
+        candidate_count: items.length,
+        selected_count: 0,
+        rejected_count: items.length,
+        blocked_by_profitability_count: blockedByProfitabilityCount,
+        blocked_by_attackability_count: blockedByAttackabilityCount,
+        profitability_distribution: profitabilityDistribution,
+        attackability_distribution: attackabilityDistribution,
+    };
+}
+
+function resolveSelectionRecoveryPreset(profile) {
+    if (!profile || profile.mode !== "combo_filter") {
+        return "";
+    }
+
+    const presetKey = String(profile.preset_key || "").trim();
+    const summary = profile.rejection_summary || {};
+    const blockedByProfitabilityCount = Number(summary.blocked_by_profitability_count || 0);
+    const blockedByAttackabilityCount = Number(summary.blocked_by_attackability_count || 0);
+
+    if (presetKey !== "all") {
+        return "all";
+    }
+    if (blockedByAttackabilityCount > blockedByProfitabilityCount && presetKey !== "exposure_focus") {
+        return "exposure_focus";
+    }
+    if (blockedByProfitabilityCount > blockedByAttackabilityCount && presetKey !== "profit_focus") {
+        return "profit_focus";
+    }
+    return "";
+}
+
+function buildRecoveryActionButton(action) {
+    if (!action || typeof action !== "object") {
+        return "";
+    }
+    const tone = String(action.tone || "default").trim() || "default";
+    return `
+        <button
+            type="button"
+            class="inline-action-btn recovery-action-btn ${escapeHtml(tone)}"
+            data-recovery-action="${escapeHtml(String(action.key || "").trim())}"
+            data-recovery-value="${escapeHtml(String(action.value || "").trim())}"
+        >${escapeHtml(String(action.label || "").trim())}</button>
+    `;
+}
+
+function buildSelectionZeroRecoveryState() {
+    const analyzedCount = countItems(state.results.analyzed?.analyzed_keywords || []);
+    if (analyzedCount <= 0 || state.stageStatus.selected?.state !== "success") {
+        return null;
+    }
+    if (countItems(state.results.selected?.selected_keywords || []) > 0) {
+        return null;
+    }
+
+    const profile = state.results.selected?.selection_profile || null;
+    const diagnosticNote = String(state.diagnostics.selected?.note || "").trim();
+    const rejectionSummaryText = buildSelectionRejectionSummaryText(profile);
+    const recoveryPreset = resolveSelectionRecoveryPreset(profile);
+    const recoveryActions = [
+        { key: "show_result_view", value: "analyzed", label: "분석 보기", tone: "default" },
+        { key: "rerun_select", label: "현재 조건으로 다시 선별", tone: "primary" },
+        { key: "open_related_settings", label: "관련 설정 보기", tone: "default" },
+    ];
+
+    if (recoveryPreset) {
+        recoveryActions.splice(1, 0, {
+            key: "apply_selection_preset_and_rerun",
+            value: recoveryPreset,
+            label: recoveryPreset === "all"
+                ? "전체 조합으로 다시 선별"
+                : recoveryPreset === "exposure_focus"
+                    ? "노출형으로 다시 선별"
+                    : "수익형으로 다시 선별",
+            tone: "accent",
+        });
+    }
+
+    return {
+        tone: "warning",
+        title: "선별 0건",
+        message: [diagnosticNote, rejectionSummaryText]
+            .filter(Boolean)
+            .join(" "),
+        actions: recoveryActions,
+    };
+}
+
+function buildErrorRecoveryState() {
+    if (!state.lastError) {
+        return null;
+    }
+
+    const stageLabel = getStage(state.lastError.stageKey || "")?.label || "현재 단계";
+    const code = String(state.lastError.code || "").trim();
+    const actionItems = [
+        { key: "open_diagnostics", label: "오류 보기", tone: "default" },
+        { key: "open_related_settings", label: "관련 설정 보기", tone: "default" },
+    ];
+
+    if (code === "network_error" || code === "settings_network_error") {
+        if (state.lastError.stageKey === "selected" && countItems(state.results.analyzed?.analyzed_keywords || []) > 0) {
+            actionItems.unshift({ key: "rerun_select", label: "선별 다시 실행", tone: "primary" });
+        } else if (state.lastError.stageKey === "analyzed" && countItems(state.results.expanded?.expanded_keywords || []) > 0) {
+            actionItems.unshift({ key: "continue_analyze", label: "분석 다시 실행", tone: "primary" });
+        } else if (state.lastError.stageKey === "expanded" && countItems(state.results.collected?.collected_keywords || []) > 0) {
+            actionItems.unshift({ key: "continue_expand", label: "확장 다시 실행", tone: "primary" });
+        }
+        return {
+            tone: "error",
+            title: `${stageLabel} 연결 오류`,
+            message: "로컬 서버나 네트워크 응답이 끊겼습니다. 우선 진단 정보를 확인하고 같은 단계만 다시 실행하면 됩니다.",
+            actions: actionItems,
+        };
+    }
+
+    return {
+        tone: "error",
+        title: `${stageLabel} 오류`,
+        message: buildErrorHeadline(state.lastError),
+        actions: actionItems,
+    };
+}
+
+function buildTrendSessionRecoveryState() {
+    const categoryMode = getCollectorMode() === "category";
+    const usesTrendSource = categoryMode && elements.categorySourceInput?.value === "naver_trend";
+    if (!usesTrendSource || state.isBusy) {
+        return null;
+    }
+
+    const hasInlineCookie = Boolean(elements.trendCookieInput?.value?.trim());
+    const hasCachedSession = Boolean(state.trendSessionCache?.available);
+    if (hasInlineCookie || hasCachedSession) {
+        return null;
+    }
+
+    return {
+        tone: "info",
+        title: "Creator Advisor 세션 필요",
+        message: "트렌드 기반 수집은 로그인된 Creator Advisor 세션이 있어야 안정적으로 동작합니다. 로컬 쿠키를 읽어오거나 로그인 상태를 먼저 확인하세요.",
+        actions: [
+            { key: "load_local_cookie", label: "현재 브라우저 쿠키 읽기", tone: "primary" },
+            { key: "validate_trend_session", label: "로그인 상태 확인", tone: "default" },
+            { key: "open_related_settings", label: "관련 설정 보기", tone: "default" },
+        ],
+    };
+}
+
+function buildContinuationRecoveryState() {
+    const collectedCount = countItems(state.results.collected?.collected_keywords || []);
+    const expandedCount = countItems(state.results.expanded?.expanded_keywords || []);
+    const analyzedCount = countItems(state.results.analyzed?.analyzed_keywords || []);
+    const selectedCount = countItems(state.results.selected?.selected_keywords || []);
+    const titledCount = countItems(state.results.titled?.generated_titles || []);
+
+    if (selectedCount > 0 && titledCount === 0) {
+        return {
+            tone: "success",
+            title: "선별 결과 준비됨",
+            message: `선별 ${selectedCount}건이 준비됐습니다. 바로 검토하거나 제목 단계로 이어갈 수 있습니다.`,
+            actions: [
+                { key: "show_result_view", value: "selected", label: "선별 보기", tone: "default" },
+                { key: "continue_title", label: "제목 생성", tone: "primary" },
+            ],
+        };
+    }
+    if (analyzedCount > 0 && selectedCount === 0) {
+        return {
+            tone: "info",
+            title: "선별 대기",
+            message: `분석 ${analyzedCount}건이 준비됐습니다. 현재 2축 조건으로 선별을 이어가면 됩니다.`,
+            actions: [
+                { key: "show_result_view", value: "analyzed", label: "분석 보기", tone: "default" },
+                { key: "rerun_select", label: "선별 실행", tone: "primary" },
+            ],
+        };
+    }
+    if (expandedCount > 0 && analyzedCount === 0) {
+        return {
+            tone: "info",
+            title: "분석 대기",
+            message: `확장 ${expandedCount}건이 준비됐습니다. 분석을 이어가면 수익성/노출도 축이 계산됩니다.`,
+            actions: [
+                { key: "show_result_view", value: "expanded", label: "확장 보기", tone: "default" },
+                { key: "continue_analyze", label: "분석 실행", tone: "primary" },
+            ],
+        };
+    }
+    if (collectedCount > 0 && expandedCount === 0) {
+        return {
+            tone: "info",
+            title: "확장 대기",
+            message: `수집 ${collectedCount}건이 준비됐습니다. 확장으로 이어가면 후보 풀을 넓힐 수 있습니다.`,
+            actions: [
+                { key: "show_result_view", value: "collected", label: "수집 보기", tone: "default" },
+                { key: "continue_expand", label: "확장 실행", tone: "primary" },
+            ],
+        };
+    }
+    return {
+        tone: "default",
+        title: state.dashboardSessionRestored
+            ? "이전 작업 화면 복원됨"
+            : "실행 준비",
+        message: state.dashboardSessionRestored
+            ? "직전 작업 화면을 복원했습니다. 현재 상태에서 바로 이어서 실행하거나 결과를 검토할 수 있습니다."
+            : "상단에서 시작모드, 실행 버튼, 2축 선별만 정하고 바로 실행한 뒤 결과 작업대에서 이어서 판단하면 됩니다.",
+        actions: [
+            { key: "open_related_settings", label: "관련 설정 보기", tone: "default" },
+        ],
+    };
+}
+
+function buildRecoveryGuideState() {
+    return buildSelectionZeroRecoveryState()
+        || buildErrorRecoveryState()
+        || buildTrendSessionRecoveryState()
+        || buildContinuationRecoveryState();
+}
+
+function renderRecoveryGuide() {
+    if (!elements.recoveryGuide) {
+        return;
+    }
+
+    const guide = buildRecoveryGuideState();
+    if (!guide) {
+        elements.recoveryGuide.className = "recovery-guide-card empty";
+        elements.recoveryGuide.innerHTML = `
+            <strong>다음 액션 안내</strong>
+            <p>실행 상태에 맞는 복구 힌트가 여기에 표시됩니다.</p>
+        `;
+        return;
+    }
+
+    const tone = String(guide.tone || "default").trim() || "default";
+    elements.recoveryGuide.className = `recovery-guide-card ${tone}`;
+    elements.recoveryGuide.innerHTML = `
+        <div class="recovery-guide-head">
+            <span class="badge">다음 액션</span>
+            <strong>${escapeHtml(String(guide.title || "복구 안내").trim())}</strong>
+        </div>
+        <p>${escapeHtml(String(guide.message || "").trim())}</p>
+        <div class="recovery-guide-actions">
+            ${(Array.isArray(guide.actions) ? guide.actions : []).map((action) => buildRecoveryActionButton(action)).join("")}
+        </div>
+    `;
+}
+
 function resolveControlFocusStage() {
     if (state.stageStatus.titled.state === "running") {
         return "title";
@@ -7246,6 +7767,92 @@ function updateTitleResultControl(name, value) {
 }
 
 
+
+function rerunSelectionWithCurrentAxes() {
+    const profitabilityGrades = typeof getSelectedGradeFilters === "function"
+        ? getSelectedGradeFilters()
+        : [];
+    const attackabilityGrades = typeof getSelectedAttackabilityFilters === "function"
+        ? getSelectedAttackabilityFilters()
+        : [];
+
+    if (
+        typeof runThroughGradeSelect === "function"
+        && Array.isArray(attackabilityGrades)
+        && attackabilityGrades.length
+    ) {
+        runWithGuard(
+            () => runThroughGradeSelect(profitabilityGrades, attackabilityGrades),
+            `${buildGradeRunLabel(profitabilityGrades, attackabilityGrades)} 선별 다시 실행 중`,
+        );
+        return;
+    }
+    runWithGuard(runThroughSelect, "현재 조건으로 선별 다시 실행 중");
+}
+
+function applySelectionPresetAndRerun(presetKey) {
+    if (typeof applyGradePreset === "function") {
+        applyGradePreset(presetKey);
+    }
+    rerunSelectionWithCurrentAxes();
+}
+
+function handleRecoveryGuideClick(event) {
+    if (!(event.target instanceof Element)) {
+        return;
+    }
+
+    const trigger = event.target.closest("[data-recovery-action]");
+    if (!trigger) {
+        return;
+    }
+
+    const action = String(trigger.getAttribute("data-recovery-action") || "").trim();
+    const value = String(trigger.getAttribute("data-recovery-value") || "").trim();
+
+    if (action === "show_result_view") {
+        setActiveResultView(value);
+        renderAll();
+        return;
+    }
+    if (action === "open_related_settings") {
+        focusQuickStartDetails();
+        return;
+    }
+    if (action === "load_local_cookie") {
+        runWithGuard(importLocalNaverCookie, "로컬 네이버 세션 불러오는 중");
+        return;
+    }
+    if (action === "validate_trend_session") {
+        runWithGuard(validateTrendSession, "Creator Advisor 로그인 상태를 확인하는 중");
+        return;
+    }
+    if (action === "open_diagnostics") {
+        if (typeof openUtilityDrawer === "function") {
+            openUtilityDrawer("diagnostics");
+        }
+        return;
+    }
+    if (action === "rerun_select") {
+        rerunSelectionWithCurrentAxes();
+        return;
+    }
+    if (action === "apply_selection_preset_and_rerun") {
+        applySelectionPresetAndRerun(value);
+        return;
+    }
+    if (action === "continue_analyze") {
+        runWithGuard(runThroughAnalyze, "분석 다시 실행 중");
+        return;
+    }
+    if (action === "continue_expand") {
+        runWithGuard(runThroughExpand, "확장 다시 실행 중");
+        return;
+    }
+    if (action === "continue_title") {
+        runWithGuard(runThroughTitle, "제목 생성 이어가는 중");
+    }
+}
 
 function handleResultsGridClick(event) {
     if (!(event.target instanceof Element)) {

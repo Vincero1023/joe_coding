@@ -78,6 +78,7 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "titleRewriteModel" in response.text
     assert "title-ai-layout" in response.text
     assert "resultStageDock" in response.text
+    assert "recoveryGuide" in response.text
     assert "apiRegistryOpenaiKey" in response.text
     assert "saveTitleApiRegistryButton" in response.text
     assert "submitQueueSeedBatchButton" in response.text
