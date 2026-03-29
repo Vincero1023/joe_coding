@@ -2069,32 +2069,55 @@ function beginFreshPipelineRun(stageLabel) {
 
 async function runFreshCollectFlow() {
     beginFreshPipelineRun("수집");
-    await runCollectStage();
+    return await runCollectStage();
 }
 
 async function runFreshExpandFlow() {
     beginFreshPipelineRun("확장");
-    await runExpandStage();
+    return await runExpandStage();
 }
 
 async function runFreshAnalyzeFlow() {
     beginFreshPipelineRun("분석");
-    await runAnalyzeStage();
+    return await runAnalyzeStage();
 }
 
 async function runFreshSelectFlow() {
     beginFreshPipelineRun("선별");
-    await runSelectStage(getForwardSelectOptions());
+    return await runSelectStage(getForwardSelectOptions());
 }
 
 async function runFreshTitleFlow() {
     beginFreshPipelineRun("제목 생성");
-    await runTitleStage();
+    return await runTitleStage();
 }
 
 async function runFreshFullFlow() {
     beginFreshPipelineRun("전체 파이프라인");
-    await runFullFlow();
+    return await runFullFlow();
+}
+
+async function runQuickStartCollectOnlyAction() {
+    closeWorkspaceSettingsModal();
+    const result = await runFreshCollectFlow();
+    const collectedCount = countItems(result?.collected_keywords || state.results.collected?.collected_keywords || []);
+    const message = collectedCount > 0
+        ? `수집만 실행이 완료되었습니다. 수집 ${collectedCount}건을 확인하세요.`
+        : "수집만 실행이 완료되었습니다. 결과 카드를 확인하세요.";
+
+    setActiveResultView("collected");
+    addLog(message, "success");
+    showUserNotice({
+        message,
+        type: "success",
+        noticeDurationMs: 2400,
+    });
+    showBlockingResultPopup(message, {
+        title: "수집 완료",
+    });
+    renderAll();
+    focusResultsWorkbench();
+    return result;
 }
 
 function normalizeQuickStartMode(mode) {
@@ -2104,7 +2127,11 @@ function normalizeQuickStartMode(mode) {
 }
 
 function setQuickStartMode(mode) {
-    state.quickStartMode = normalizeQuickStartMode(mode);
+    const nextMode = normalizeQuickStartMode(mode);
+    if (state.workspaceSettingsOpen && state.quickStartMode !== nextMode) {
+        closeWorkspaceSettingsModal();
+    }
+    state.quickStartMode = nextMode;
     renderInputState();
 }
 
@@ -2129,6 +2156,17 @@ function resolveWorkspaceSettingsTitle(blockKey) {
         title: "제목 생성 시작점",
     };
     return titleMap[String(blockKey || "")] || "관련 설정";
+}
+
+function resolveQuickStartSettingsBlockKey(modeOverride = null) {
+    const mode = normalizeQuickStartMode(modeOverride || state.quickStartMode);
+    if (mode === "analyze") {
+        return "analyze";
+    }
+    if (mode === "title") {
+        return "title";
+    }
+    return "collect";
 }
 
 function restoreWorkspaceSettingsPortal() {
@@ -2192,17 +2230,6 @@ function openWorkspaceSettingsModal(blockKey) {
     renderWorkspaceSettingsModalState();
 }
 
-function resolveQuickStartSettingsBlockKey() {
-    const mode = normalizeQuickStartMode(state.quickStartMode);
-    if (mode === "analyze") {
-        return "analyze";
-    }
-    if (mode === "title") {
-        return "title";
-    }
-    return "collect";
-}
-
 function focusResultsWorkbench() {
     const target = elements.resultsSection || document.getElementById("section-results");
     if (!target) {
@@ -2211,8 +2238,35 @@ function focusResultsWorkbench() {
     target.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function getQuickStartConfig() {
-    const mode = normalizeQuickStartMode(state.quickStartMode);
+function focusPipelineActionButton(buttonId) {
+    const target = buttonId ? document.getElementById(buttonId) : null;
+    if (!target) {
+        focusControlBlock("pipeline");
+        return;
+    }
+
+    const panel = target.closest("[data-control-block='pipeline']");
+    if (panel) {
+        panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    window.setTimeout(() => {
+        try {
+            target.focus({ preventScroll: true });
+        } catch (error) {
+            target.focus();
+        }
+        target.classList.add("attention");
+        window.setTimeout(() => {
+            target.classList.remove("attention");
+        }, 1400);
+    }, 160);
+}
+
+function getQuickStartConfig(modeOverride = null) {
+    const mode = normalizeQuickStartMode(modeOverride || state.quickStartMode);
     const analyzeUsesManual = (elements.analyzeInputSource?.value || "expanded_results") === "manual_text";
     const analyzeManualCount = parseKeywordText(elements.analyzeManualInput?.value || "").length;
     const expandedCount = countItems(state.results.expanded?.expanded_keywords || []);
@@ -2227,17 +2281,19 @@ function getQuickStartConfig() {
             mode,
             badge: "보유 키워드 분석",
             title: canRun
-                ? "직접 넣은 키워드나 확장 결과를 바로 분석할 수 있습니다."
+                ? "보유 키워드 분석은 분석 뒤 현재 2축 조건으로 선별까지 함께 갱신합니다."
                 : "분석할 키워드를 먼저 붙여넣거나 확장 결과를 준비하세요.",
-            description: "확장 없이도 수동 입력 분석이 가능하고, 벤치마크 HTML/CSV를 붙여 넣으면 실측 데이터를 우선 사용합니다.",
+            description: "시작 모드는 설명과 설정만 담당합니다. 실제 실행은 아래 `보유 키워드 분석 실행` 버튼에서 진행하세요.",
             meta: [
                 analyzeUsesManual ? `직접 입력 ${analyzeManualCount}건` : `확장 결과 ${expandedCount}건`,
                 elements.analyzeKeywordStatsInput?.value.trim() ? "벤치마크 데이터 포함" : "벤치마크 데이터 없음",
-                "출력: 검증 테이블",
+                "권장 실행: 보유 키워드 분석 실행",
+                "출력: 분석 + 선별",
             ],
-            primaryLabel: canRun ? "분석 시작" : "분석 입력 준비",
-            primaryRun: canRun ? runFreshAnalyzeFlow : null,
-            focusBlockKey: "analyze",
+            primaryLabel: "실행 버튼으로 이동",
+            primaryRun: null,
+            focusBlockKey: "pipeline",
+            pipelineButtonId: "runAnalyzeButton",
         };
     }
 
@@ -2247,22 +2303,23 @@ function getQuickStartConfig() {
             mode,
             badge: "제목 생성",
             title: canRun
-                ? "선별 키워드에서 제목 생성 단계만 바로 시작합니다."
+                ? "제목 생성은 현재 선별 키워드를 바탕으로 제목 단계만 진행합니다."
                 : (selectedCount === 0
-                    ? "선별 결과를 먼저 만들면 제목 생성만 따로 실행할 수 있습니다."
+                    ? "선별 결과가 아직 없어도 아래 제목 생성 실행 버튼이 앞단계를 자동으로 이어갑니다."
                     : "AI 모드라면 운영 설정에서 API를 먼저 등록하세요."),
-            description: "템플릿 또는 등록된 AI 연결을 사용해 제목 묶음을 만들고, 자동 재작성과 프롬프트 저장본도 그대로 반영합니다.",
+            description: "시작 모드는 설명과 설정만 담당합니다. 실제 실행은 아래 `제목 생성 실행` 버튼에서 진행하세요.",
             meta: [
                 `선별 ${selectedCount}건`,
                 titleMode === "ai"
                     ? (selectedProvider ? `AI ${formatTitleProviderLabel(selectedProvider)}` : "AI 미등록")
                     : "템플릿",
                 formatTitleKeywordModeSummary(getTitleSettingsFormState().keyword_modes),
+                "권장 실행: 제목 생성 실행",
             ],
-            primaryLabel: canRun ? "제목 생성 시작" : (selectedCount === 0 ? "선별 결과 준비" : "API 등록 필요"),
-            primaryRun: canRun ? runFreshTitleFlow : null,
-            focusBlockKey: selectedCount === 0 ? "pipeline" : "title",
-            openSettingsWhenBlocked: selectedCount > 0 && titleMode === "ai" && !selectedProvider,
+            primaryLabel: "실행 버튼으로 이동",
+            primaryRun: null,
+            focusBlockKey: "pipeline",
+            pipelineButtonId: "runTitleButton",
         };
     }
 
@@ -2275,55 +2332,50 @@ function getQuickStartConfig() {
         mode: "discover",
         badge: "키워드 발굴",
         title: discoverReady
-            ? "수집부터 선별, 제목 생성까지 전체 파이프라인을 새로 시작합니다."
-            : "시드 키워드를 입력하면 전체 파이프라인을 바로 시작할 수 있습니다.",
-        description: "카테고리 수집 또는 시드 기반 수집으로 시작해 확장, 분석, 선별, 제목 생성을 한 번에 이어서 실행합니다.",
+            ? "키워드 발굴은 수집과 확장을 준비하는 시작 단계입니다."
+            : "시드 키워드를 입력하면 아래 실행 버튼에서 키워드 발굴을 시작할 수 있습니다.",
+        description: "시작 모드는 설명과 수집 설정만 담당합니다. 실제 실행은 아래 `키워드 발굴 실행` 버튼에서 진행하세요.",
         meta: [
             categoryMode ? "수집 모드 카테고리" : "수집 모드 시드",
             categoryMode ? `카테고리 ${categoryValue || "-"}` : `시드 ${seedValue || "입력 필요"}`,
-            "출력: 전체 파이프라인",
+            "권장 실행: 키워드 발굴 실행",
+            "출력: 수집 + 확장",
         ],
-        primaryLabel: discoverReady ? "전체 실행 시작" : "시드 입력 준비",
-        primaryRun: discoverReady ? runFreshFullFlow : null,
-        focusBlockKey: "collect",
+        primaryLabel: "실행 버튼으로 이동",
+        primaryRun: null,
+        focusBlockKey: "pipeline",
+        pipelineButtonId: "runExpandButton",
     };
+}
+
+function showQuickStartHelp(mode) {
+    const config = getQuickStartConfig(mode);
+    const lines = [config.title, config.description, ...config.meta.filter(Boolean)];
+    showBlockingResultPopup(lines.join("\n\n"), {
+        title: config.badge,
+    });
+}
+
+function openQuickStartSettings(mode) {
+    setQuickStartMode(mode);
+    openWorkspaceSettingsModal(resolveQuickStartSettingsBlockKey(mode));
 }
 
 function runQuickStartPrimaryAction() {
     const config = getQuickStartConfig();
-    if (config.primaryRun) {
-        const label = config.mode === "discover"
-            ? "전체 파이프라인 새로 실행 중"
-            : config.mode === "analyze"
-                ? "분석 단계 새로 실행 중"
-                : "제목 생성 단계 새로 실행 중";
-        runWithGuard(config.primaryRun, label);
-        return;
-    }
-
-    if (config.openSettingsWhenBlocked) {
-        openUtilityDrawer("settings");
-        return;
-    }
-    focusControlBlock(config.focusBlockKey);
+    closeWorkspaceSettingsModal();
+    focusPipelineActionButton(config.pipelineButtonId || "");
 }
 
 function focusQuickStartDetails() {
-    const config = getQuickStartConfig();
-    if (config.openSettingsWhenBlocked) {
-        openUtilityDrawer("settings");
-        return;
-    }
     openWorkspaceSettingsModal(resolveQuickStartSettingsBlockKey());
 }
 
 function renderQuickStartState() {
     const config = getQuickStartConfig();
 
-    elements.quickStartModeButtons?.forEach((button) => {
-        const isActive = (button.dataset.quickstartMode || "") === config.mode;
-        button.classList.toggle("active", isActive);
-        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    elements.quickStartModeRows?.forEach((row) => {
+        row.classList.toggle("active", false);
     });
     if (elements.quickStartModeBadge) {
         elements.quickStartModeBadge.textContent = config.badge;
@@ -2345,9 +2397,7 @@ function renderQuickStartState() {
         elements.quickStartPrimaryButton.disabled = Boolean(state.isBusy);
     }
     if (elements.quickStartSecondaryButton) {
-        elements.quickStartSecondaryButton.textContent = config.openSettingsWhenBlocked
-            ? "운영 설정 열기"
-            : (state.workspaceSettingsOpen ? "관련 설정 닫기" : "관련 설정 보기");
+        elements.quickStartSecondaryButton.textContent = state.workspaceSettingsOpen ? "관련 설정 닫기" : "관련 설정 보기";
         elements.quickStartSecondaryButton.disabled = Boolean(state.isBusy);
     }
     renderWorkspaceSettingsModalState();
@@ -4979,7 +5029,9 @@ function bindElements() {
     if (elements.exportSelectedCsvButtonUtility && !elements.exportSelectedCsvButtonUtility.closest(".results-panel-tools")) {
         elements.exportSelectedCsvButtonUtility.hidden = true;
     }
-    elements.quickStartModeButtons = Array.from(document.querySelectorAll("[data-quickstart-mode]"));
+    elements.quickStartModeRows = Array.from(document.querySelectorAll("[data-quickstart-mode-row]"));
+    elements.quickStartHelpButtons = Array.from(document.querySelectorAll("[data-quickstart-help]"));
+    elements.quickStartSettingsButtons = Array.from(document.querySelectorAll("[data-quickstart-settings]"));
     elements.quickStartModeBadge = document.getElementById("quickStartModeBadge");
     elements.quickStartSummaryTitle = document.getElementById("quickStartSummaryTitle");
     elements.quickStartSummaryText = document.getElementById("quickStartSummaryText");
@@ -5084,15 +5136,14 @@ function bindElements() {
     elements.statusList = document.getElementById("statusList");
     elements.controlStack = document.getElementById("controlStack");
     elements.controlLauncherColumn = document.querySelector(".control-launcher-column");
-    elements.controlPrimaryBlocks = ["pipeline", "select"]
-        .map((key) => document.querySelector(`[data-control-block="${key}"]`))
-        .filter(Boolean);
+    elements.controlPrimaryBlocks = [];
+    elements.controlSelectBlock = document.querySelector('[data-control-block="select"]');
     elements.controlLauncherBlocks = ["expand", "analyze", "title"]
         .map((key) => document.querySelector(`[data-control-block="${key}"]`))
         .filter(Boolean);
     elements.controlBlocks = [
         document.querySelector('[data-control-block="collect"]'),
-        ...elements.controlPrimaryBlocks,
+        elements.controlSelectBlock,
         ...elements.controlLauncherBlocks,
     ].filter(Boolean);
     elements.controlCards = elements.controlLauncherBlocks.filter((block) => block.dataset.controlCard);
@@ -5127,9 +5178,14 @@ function bindEvents() {
     document.querySelectorAll("input[name='collectorMode']").forEach((element) => {
         element.addEventListener("change", renderInputState);
     });
-    elements.quickStartModeButtons.forEach((button) => {
+    elements.quickStartHelpButtons.forEach((button) => {
         button.addEventListener("click", () => {
-            setQuickStartMode(button.dataset.quickstartMode || "");
+            showQuickStartHelp(button.dataset.quickstartHelp || "");
+        });
+    });
+    elements.quickStartSettingsButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            openQuickStartSettings(button.dataset.quickstartSettings || "");
         });
     });
     document.addEventListener("input", handleDashboardPersistenceEvent, true);
@@ -5140,17 +5196,14 @@ function bindEvents() {
     elements.workspaceSettingsBackdrop?.addEventListener("click", closeWorkspaceSettingsModal);
     document.querySelectorAll("[data-run-action='collect']").forEach((button) => {
         button.addEventListener("click", () => {
-            runWithGuard(runFreshCollectFlow, "\uc218\uc9d1 \ub2e8\uacc4 \uc0c8\ub85c \uc2e4\ud589 \uc911");
+            runWithGuard(runQuickStartCollectOnlyAction, "\uc218\uc9d1\ub9cc \uc0c8\ub85c \uc2e4\ud589 \uc911");
         });
     });
     document.getElementById("runExpandButton").addEventListener("click", () => {
-        runWithGuard(runFreshExpandFlow, "\ud655\uc7a5 \ub2e8\uacc4 \uc0c8\ub85c \uc2e4\ud589 \uc911");
+        runWithGuard(runFreshExpandFlow, "\ud0a4\uc6cc\ub4dc \ubc1c\uad74 \uc2e4\ud589 \uc911 (\ud544\uc694 \uc2dc \uc218\uc9d1 \ud3ec\ud568)");
     });
     document.getElementById("runAnalyzeButton").addEventListener("click", () => {
-        runWithGuard(runFreshAnalyzeFlow, "\ubd84\uc11d \ub2e8\uacc4 \uc0c8\ub85c \uc2e4\ud589 \uc911");
-    });
-    document.getElementById("runSelectButton").addEventListener("click", () => {
-        runWithGuard(runFreshSelectFlow, "\uc120\ubcc4 \ub2e8\uacc4 \uc0c8\ub85c \uc2e4\ud589 \uc911");
+        runWithGuard(runFreshAnalyzeFlow, "\ubcf4\uc720 \ud0a4\uc6cc\ub4dc \ubd84\uc11d \uc2e4\ud589 \uc911 (\ud544\uc694 \uc2dc \uc218\uc9d1/\ud655\uc7a5 \ud3ec\ud568)");
     });
     elements.gradePresetButtons.forEach((button) => {
         button.addEventListener("click", () => {
@@ -5178,7 +5231,7 @@ function bindEvents() {
         );
     });
     document.getElementById("runTitleButton").addEventListener("click", () => {
-        runWithGuard(runFreshTitleFlow, "\uc81c\ubaa9 \uc0dd\uc131 \ub2e8\uacc4 \uc0c8\ub85c \uc2e4\ud589 \uc911");
+        runWithGuard(runFreshTitleFlow, "\uc81c\ubaa9 \uc0dd\uc131 \uc2e4\ud589 \uc911 (\ud544\uc694 \uc2dc \uc55e\ub2e8\uacc4 \ud3ec\ud568)");
     });
     document.getElementById("runFullButton").addEventListener("click", () => {
         runWithGuard(runFreshFullFlow, "\uc804\uccb4 \ud30c\uc774\ud504\ub77c\uc778 \uc0c8\ub85c \uc2e4\ud589 \uc911");
@@ -6174,6 +6227,10 @@ function renderInputState() {
     setBlocksVisibility(elements.modeVisibilityBlocks, mode, "modeVisibility");
     setBlocksVisibility(elements.expandSourceVisibilityBlocks, expandSource, "expandSourceVisibility");
     setBlocksVisibility(elements.analyzeSourceVisibilityBlocks, analyzeSource, "analyzeSourceVisibility");
+    const collectorQuickGrid = document.querySelector(".collector-quick-grid");
+    if (collectorQuickGrid) {
+        collectorQuickGrid.setAttribute("data-collector-mode", mode);
+    }
 
     if (elements.selectedCollectedCount) {
         if (expandUsesManual) {
@@ -7985,6 +8042,10 @@ function renderInputStateLegacy() {
     setBlocksVisibility(elements.modeVisibilityBlocks, mode, "modeVisibility");
     setBlocksVisibility(elements.expandSourceVisibilityBlocks, expandSource, "expandSourceVisibility");
     setBlocksVisibility(elements.analyzeSourceVisibilityBlocks, analyzeSource, "analyzeSourceVisibility");
+    const collectorQuickGrid = document.querySelector(".collector-quick-grid");
+    if (collectorQuickGrid) {
+        collectorQuickGrid.setAttribute("data-collector-mode", mode);
+    }
 
     if (elements.selectedCollectedCount) {
         if (expandUsesManual) {

@@ -29,7 +29,7 @@ from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_paylo
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260327-title-surfaces-v80"
+_ASSET_VERSION = "20260329-layout-v84"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -616,7 +616,7 @@ def _render_static_shell(*, title: str, description: str, body: str) -> str:
             </a>
             <nav class="app-topbar-links" aria-label="주요 탐색">
                 <a class="app-topbar-link" href="#section-controls">실행 조건</a>
-                <a class="app-topbar-link" href="#section-launcher">빠른 시작</a>
+                <a class="app-topbar-link" href="#section-select">2축 선별</a>
                 <a class="app-topbar-link" href="#section-results">결과 작업대</a>
                 <a class="app-topbar-link" href="/guides">가이드</a>
             </nav>
@@ -2201,9 +2201,9 @@ def _render_home() -> str:
                 <span class="workspace-nav-index">01</span>
                 <span>실행 조건</span>
             </a>
-            <a class="workspace-nav-link" href="#section-launcher">
+            <a class="workspace-nav-link" href="#section-select">
                 <span class="workspace-nav-index">02</span>
-                <span>빠른 시작</span>
+                <span>2축 선별</span>
             </a>
             <div id="resultStageDock" class="result-stage-dock workspace-nav-stage-dock"></div>
             <div class="results-panel-tools workspace-nav-output-panel" id="resultsPanelTools" hidden>
@@ -2239,37 +2239,6 @@ def _render_home() -> str:
 
         <main class="layout-grid workspace-cockpit">
             <div class="workspace-main-column">
-            <div class="workspace-sidebar">
-                <section class="panel summary-panel" id="section-progress">
-                    <div class="panel-head">
-                        <div>
-                            <p class="panel-kicker">진행 현황</p>
-                            <h2>진행 현황</h2>
-                            <p class="panel-copy">실행 상태를 먼저 확인하고, 바로 아래 작업대에서 실시간 선별 결과를 확인합니다.</p>
-                        </div>
-                        <span class="status-pill" id="pipelineStatus">대기 중</span>
-                    </div>
-
-                    <div class="progress-card">
-                        <div class="progress-track">
-                            <div id="progressBar" class="progress-bar"></div>
-                        </div>
-                        <div class="progress-meta">
-                            <strong id="progressText">0 / 5 단계 완료</strong>
-                            <span id="progressDetail">아직 실행하지 않았습니다.</span>
-                        </div>
-                    </div>
-
-                    <div id="recoveryGuide" class="recovery-guide-card empty">
-                        <strong>다음 액션 안내</strong>
-                        <p>실행 상태에 맞는 복구 힌트가 여기에 표시됩니다.</p>
-                    </div>
-
-                    <div class="status-list" id="statusList"></div>
-
-                </section>
-            </div>
-
             <section class="panel results-panel" id="section-results">
                 <div class="panel-head results-panel-head">
                     <div class="results-panel-lead">
@@ -2291,34 +2260,102 @@ def _render_home() -> str:
             <section class="panel control-panel" id="section-controls">
                 <div class="panel-head">
                     <div>
-                        <p class="panel-kicker">실행 조건</p>
-                        <h2>실행 조건</h2>
+                        <p class="panel-kicker">실행</p>
+                        <h2>실행 센터</h2>
                     </div>
                 </div>
 
                 <div class="control-stack" id="controlStack">
                 <div class="control-primary-column">
+                <section class="control-stage-block collector-quick-panel">
+                    <div class="control-stage-head">
+                        <div>
+                            <p class="panel-kicker">빠른 입력</p>
+                            <h3>빠른 수집 입력</h3>
+                        </div>
+                        <span class="badge">홈 고정</span>
+                    </div>
+                    <div class="collector-quick-grid">
+                        <div class="field-block collector-mode-inline">
+                            <span class="field-label">수집 모드</span>
+                            <div class="option-row">
+                                <label class="check-chip"><input type="radio" name="collectorMode" value="category" checked />카테고리</label>
+                                <label class="check-chip"><input type="radio" name="collectorMode" value="seed" />시드</label>
+                            </div>
+                        </div>
+
+                        <label class="field-block collector-quick-field" data-mode-visibility="category">
+                            <span class="field-label">카테고리</span>
+                            <select id="categoryInput">
+                                {category_options}
+                            </select>
+                        </label>
+
+                        <label class="field-block collector-quick-field" data-mode-visibility="seed" hidden>
+                            <span class="field-label">시드 키워드</span>
+                            <input id="seedInput" type="text" placeholder="예: 보험, 대출, 모니터암" />
+                        </label>
+
+                    </div>
+                </section>
                 <section class="quickstart-panel control-stage-quickstart">
                     <div class="quickstart-head">
                         <div>
-                            <p class="panel-kicker">모드</p>
-                            <h3>시작 모드</h3>
+                            <p class="panel-kicker">실행 흐름</p>
+                            <h3>모드별 실행</h3>
                         </div>
-                        <span class="badge" id="quickStartModeBadge">키워드 발굴</span>
+                        <span class="badge">왼쪽 고정</span>
                     </div>
-                    <div class="quickstart-mode-grid">
-                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="discover">키워드 발굴</button>
-                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="analyze">보유 키워드 분석</button>
-                        <button type="button" class="quickstart-mode-btn" data-quickstart-mode="title">제목 생성</button>
+                    <div class="quickstart-mode-list">
+                        <div class="quickstart-mode-row" data-quickstart-mode-row="discover">
+                            <div class="quickstart-mode-label-group">
+                                <div class="quickstart-mode-label">키워드 발굴</div>
+                                <span class="quickstart-mode-caption">수집 → 확장</span>
+                            </div>
+                            <div class="quickstart-mode-actions">
+                                <button type="button" class="ghost-chip quickstart-inline-btn" data-quickstart-help="discover">설명</button>
+                                <button type="button" class="ghost-chip quickstart-inline-btn" data-quickstart-settings="discover">설정</button>
+                                <button type="button" class="subtle-btn quickstart-run-btn" id="runExpandButton">실행</button>
+                            </div>
+                        </div>
+                        <div class="quickstart-mode-row" data-quickstart-mode-row="analyze">
+                            <div class="quickstart-mode-label-group">
+                                <div class="quickstart-mode-label">보유 키워드 분석</div>
+                                <span class="quickstart-mode-caption">필요 시 수집 → 확장 포함</span>
+                            </div>
+                            <div class="quickstart-mode-actions">
+                                <button type="button" class="ghost-chip quickstart-inline-btn" data-quickstart-help="analyze">설명</button>
+                                <button type="button" class="ghost-chip quickstart-inline-btn" data-quickstart-settings="analyze">설정</button>
+                                <button type="button" class="subtle-btn quickstart-run-btn" id="runAnalyzeButton">실행</button>
+                            </div>
+                        </div>
+                        <div class="quickstart-mode-row" data-quickstart-mode-row="title">
+                            <div class="quickstart-mode-label-group">
+                                <div class="quickstart-mode-label">제목 생성</div>
+                                <span class="quickstart-mode-caption">필요 시 앞단계 전체 포함</span>
+                            </div>
+                            <div class="quickstart-mode-actions">
+                                <button type="button" class="ghost-chip quickstart-inline-btn" data-quickstart-help="title">설명</button>
+                                <button type="button" class="ghost-chip quickstart-inline-btn" data-quickstart-settings="title">설정</button>
+                                <button type="button" class="subtle-btn quickstart-run-btn" id="runTitleButton">실행</button>
+                            </div>
+                        </div>
                     </div>
-                    <div class="quickstart-summary">
-                        <strong id="quickStartSummaryTitle">카테고리/시드에서 전체 파이프라인을 새로 시작합니다.</strong>
-                        <p id="quickStartSummaryText">수집, 확장, 분석, 선별, 제목 생성까지 한 번에 이어서 실행합니다.</p>
-                        <div id="quickStartSummaryMeta" class="quickstart-meta"></div>
-                    </div>
-                    <div class="quickstart-actions">
-                        <button type="button" class="primary-btn" id="quickStartPrimaryButton">전체 실행 시작</button>
-                        <button type="button" class="ghost-chip" id="quickStartSecondaryButton">관련 설정 보기</button>
+                    <div class="quickstart-utility-row">
+                        <div class="field-block collector-limit-card quickstart-expand-card">
+                            <span class="field-label">확장 개수</span>
+                            <div class="option-row collector-limit-presets">
+                                <button type="button" class="ghost-chip" data-expand-limit="100">100개</button>
+                                <button type="button" class="ghost-chip" data-expand-limit="1000">1,000개</button>
+                                <button type="button" class="ghost-chip" data-expand-limit="10000">10,000개</button>
+                                <button type="button" class="ghost-chip" data-expand-limit="infinite">무제한</button>
+                            </div>
+                            <input id="expandMaxResultsInput" type="number" min="1" step="1" value="1000" placeholder="예: 1000" />
+                        </div>
+                        <div class="quickstart-utility-actions">
+                            <button type="button" class="ghost-btn" id="stopStreamButton" disabled>중지</button>
+                            <button type="button" class="ghost-btn" id="resetButton">결과 초기화</button>
+                        </div>
                     </div>
                 </section>
                 <section class="control-stage-block control-stage-collect" data-control-block="collect" hidden>
@@ -2330,33 +2367,8 @@ def _render_home() -> str:
                         <span class="badge">1단계</span>
                     </div>
 
-                <div class="form-grid">
-                    <div class="field-block mode-block">
-                        <span class="field-label">수집 모드</span>
-                        <label class="mode-card">
-                            <input type="radio" name="collectorMode" value="category" checked />
-                            <span>
-                                <strong>카테고리 모드</strong>
-                                <em>카테고리 기반으로 대표 키워드를 가져온 뒤 확장과 분석으로 이어집니다.</em>
-                            </span>
-                        </label>
-                        <label class="mode-card">
-                            <input type="radio" name="collectorMode" value="seed" />
-                            <span>
-                                <strong>시드 모드</strong>
-                                <em>입력한 시드 키워드를 기준으로 연관확장과 자동완성을 수행합니다.</em>
-                            </span>
-                        </label>
-                    </div>
-
+                    <div class="form-grid">
                     <div class="category-settings-grid" data-mode-visibility="category">
-                        <label class="field-block category-setting-card">
-                            <span class="field-label">카테고리</span>
-                            <select id="categoryInput">
-                                {category_options}
-                            </select>
-                        </label>
-
                         <label class="field-block category-setting-card">
                             <span class="field-label">카테고리 수집 소스</span>
                             <select id="categorySourceInput">
@@ -2406,11 +2418,6 @@ def _render_home() -> str:
                             현재 브라우저 세션이나 저장된 전용 세션으로 로그인 상태를 확인할 수 있습니다.
                         </p>
                     </div>
-
-                    <label class="field-block" data-mode-visibility="seed" hidden>
-                        <span class="field-label">시드 키워드</span>
-                        <input id="seedInput" type="text" placeholder="예: 보험" />
-                    </label>
 
                     <div class="field-block field-block-wide topic-seed-generator-card">
                         <div class="field-label-row">
@@ -2471,29 +2478,41 @@ def _render_home() -> str:
                 </section>
                 </div>
 
-                <section class="control-stage-block control-stage-pipeline" data-control-block="pipeline">
-                    <div class="control-stage-head">
-                        <div>
-                            <p class="panel-kicker">파이프라인</p>
-                            <h3>실행 버튼</h3>
-                        </div>
-                        <span class="badge">2-4단계</span>
-                    </div>
-
-                <div class="action-row pipeline-action-row">
-                    <button type="button" class="subtle-btn" id="runExpandButton">확장까지 실행</button>
-                    <button type="button" class="subtle-btn" id="runAnalyzeButton">분석까지 실행</button>
-                    <button type="button" class="subtle-btn" id="runSelectButton">자동 선별</button>
-                    <button type="button" class="subtle-btn" id="runTitleButton">제목 생성까지 실행</button>
-                    <button type="button" class="ghost-btn" id="stopStreamButton" disabled>중지</button>
-                    <button type="button" class="ghost-btn" id="resetButton">결과 초기화</button>
                 </div>
-                <p class="input-help compact-help">
-                    상단 실행 버튼은 현재 입력값 기준으로 새로 시작합니다. 결과 카드의 `이 결과로 ...` 버튼은 지금 화면의 결과를 이어서 사용합니다.
-                </p>
+            </section>
+            </div>
+            <section class="panel summary-panel" id="section-progress">
+                <div class="panel-head">
+                    <div>
+                        <p class="panel-kicker">진행 현황</p>
+                        <h2>진행 현황</h2>
+                        <p class="panel-copy">실행 상태를 먼저 확인하고, 아래 작업대로 바로 이어집니다.</p>
+                    </div>
+                    <span class="status-pill" id="pipelineStatus">대기 중</span>
+                </div>
 
-                </section>
+                <div class="progress-card">
+                    <div class="progress-track">
+                        <div id="progressBar" class="progress-bar"></div>
+                    </div>
+                    <div class="progress-meta">
+                        <strong id="progressText">0 / 5 단계 완료</strong>
+                        <span id="progressDetail">아직 실행하지 않았습니다.</span>
+                    </div>
+                </div>
 
+                <div id="recoveryGuide" class="recovery-guide-card empty">
+                    <strong>다음 액션 안내</strong>
+                    <p>실행 상태에 맞는 복구 힌트가 여기에 표시됩니다.</p>
+                </div>
+
+                <div class="status-list" id="statusList"></div>
+
+            </section>
+            </div>
+
+            <div class="workspace-right-column">
+            <section class="panel select-panel-shell" id="section-select">
                 <section class="control-stage-block grade-select-panel control-stage-select" data-control-block="select">
                     <div class="control-stage-head">
                         <div>
@@ -2507,7 +2526,7 @@ def _render_home() -> str:
                             <span class="field-label">2축 선별</span>
                             <p class="grade-select-summary" id="gradeSelectSummary">전체 · 전체 조합</p>
                         </div>
-                        <p class="input-help compact-help">수익성 A~F와 노출도 1~6을 조합해 선별합니다. 6단계로 더 잘게 나눠서, 황금형과 롱테일 탐색형 사이를 더 세밀하게 고를 수 있습니다.</p>
+                        <p class="input-help compact-help">수익성 A~F와 노출도 1~6 조합으로 선별합니다. 오른쪽에서 조합을 바꾸고 바로 다시 선별하면 됩니다.</p>
                     </div>
                     <div class="grade-select-presets">
                         <button type="button" class="ghost-chip" data-selection-preset="all">전체</button>
@@ -2537,11 +2556,9 @@ def _render_home() -> str:
                         <button type="button" class="ghost-chip grade-toggle-chip" data-attackability-toggle="6">6</button>
                     </div>
                     <div class="grade-select-actions">
-                        <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">선택 조합 적용</button>
+                        <button type="button" class="subtle-btn grade-select-run" id="runGradeSelectButton">조합 적용 + 선별 실행</button>
                     </div>
                 </section>
-
-                </div>
             </section>
             </div>
 
@@ -2606,16 +2623,6 @@ def _render_home() -> str:
                                         <span>원문포함</span>
                                     </label>
                                 </div>
-                            </div>
-                            <div class="field-block">
-                                <span class="field-label">개수 설정</span>
-                                <div class="option-row">
-                                    <button type="button" class="ghost-chip" data-expand-limit="100">100개</button>
-                                    <button type="button" class="ghost-chip" data-expand-limit="1000">1,000개</button>
-                                    <button type="button" class="ghost-chip" data-expand-limit="10000">10,000개</button>
-                                    <button type="button" class="ghost-chip" data-expand-limit="infinite">무제한</button>
-                                </div>
-                                <input id="expandMaxResultsInput" type="number" min="1" step="1" value="1000" placeholder="예: 1000" />
                             </div>
                         </div>
                     </section>
@@ -3765,7 +3772,7 @@ def _render_recommended_usage() -> str:
                     <ul class="guide-article-points">
                         <li><strong>1. 시작모드에서 키워드 발굴을 고릅니다.</strong><span>특별한 이유가 없으면 키워드 발굴부터 시작하는 편이 가장 무난합니다.</span></li>
                         <li><strong>2. 2축 선별은 전체나 균형형으로 먼저 넓게 봅니다.</strong><span>시드가 강한지 먼저 확인한 뒤 황금형이나 수익형으로 다시 조이는 편이 안정적입니다.</span></li>
-                        <li><strong>3. 관련 설정 보기에서 수집 설정만 확인하고 실행합니다.</strong><span>카테고리, 트렌드 날짜, 로그인 상태만 점검해도 첫 실행 품질은 충분히 나옵니다.</span></li>
+                        <li><strong>3. 관련 설정 보기에서 수집 설정만 확인합니다.</strong><span>카테고리, 트렌드 날짜, 로그인 상태만 점검한 뒤 아래 실행 버튼에서 `키워드 발굴 실행`을 누르면 됩니다.</span></li>
                         <li><strong>4. 선별 결과가 뜨면 먼저 검토합니다.</strong><span>좋은 후보는 보관하거나 시드화하고, 필요할 때만 출력 및 복사로 외부 시트에 넘기면 됩니다.</span></li>
                         <li><strong>5. 선별된 키워드가 모이면 제목 생성으로 넘어갑니다.</strong><span>홈판, 블로그형, 둘다를 필요한 만큼만 켜고 상위 점수 결과만 고릅니다.</span></li>
                     </ul>

@@ -67,8 +67,16 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "operationMode" in response.text
     assert "operationCustomModeGuide" in response.text
     assert "operationCustomPresetPanel" in response.text
-    assert "quickStartPrimaryButton" in response.text
-    assert 'data-quickstart-mode="discover"' in response.text
+    assert 'data-quickstart-mode-row="discover"' in response.text
+    assert 'data-quickstart-help="discover"' in response.text
+    assert 'data-quickstart-settings="discover"' in response.text
+    assert "빠른 수집 입력" in response.text
+    assert "expandMaxResultsInput" in response.text
+    assert "runExpandButton" in response.text
+    assert "runAnalyzeButton" in response.text
+    assert "runTitleButton" in response.text
+    assert "runGradeSelectButton" in response.text
+    assert 'href="#section-select"' in response.text
     assert "openApiRegistrySettingsButton" in response.text
     assert "titleProviderRegistryHint" in response.text
     assert "titleCustomPresetPicker" in response.text
@@ -95,7 +103,8 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "titleSurfaceBlogCount" in response.text
     assert "titleSurfaceHybridCount" in response.text
     assert "titleSurfaceSummary" in response.text
-    assert "자동 선별" in response.text
+    assert "보유 키워드 분석" in response.text
+    assert "조합 적용 + 선별 실행" in response.text
     assert "황금형" in response.text
     assert "노출형" in response.text
     assert "gradeSelectDescription" in response.text
@@ -125,6 +134,9 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "resultsExportExpandedCsvButton" in response.text
     assert "resultsExportExpandedTxtButton" in response.text
     assert "resultsPanelTools" in response.text
+    assert "키워드 발굴" in response.text
+    assert "보유 키워드 분석" in response.text
+    assert "2축 선별" in response.text
     assert "resultsCopyCollectedLinesButton" in response.text
     assert "resultsCopyCollectedCommaButton" in response.text
     assert "resultsCopyExpandedLinesButton" in response.text

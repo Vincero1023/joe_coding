@@ -422,10 +422,10 @@ button:disabled {
 .control-stage-quickstart {
     min-width: 0;
 }
-.control-stage-collect {
-    grid-column: 1 / -1;
+.collector-quick-panel {
+    min-width: 0;
 }
-.control-stage-pipeline {
+.control-stage-collect {
     grid-column: 1 / -1;
 }
 .control-launcher-column {
@@ -476,9 +476,9 @@ button:disabled {
 }
 .quickstart-panel {
     display: grid;
-    gap: 14px;
+    gap: 12px;
     margin-bottom: 16px;
-    padding: 18px;
+    padding: 16px;
     border-radius: 22px;
     background: linear-gradient(145deg, rgba(222, 247, 241, 0.9), rgba(255, 255, 255, 0.88));
     border: 1px solid rgba(15, 118, 110, 0.14);
@@ -497,7 +497,7 @@ button:disabled {
 .quickstart-head {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
 }
 .quickstart-head h3 {
@@ -505,14 +505,60 @@ button:disabled {
     font-size: 1.05rem;
     letter-spacing: -0.03em;
 }
+.quickstart-head .badge {
+    display: none;
+}
+.quickstart-mode-list {
+    display: grid;
+    gap: 8px;
+}
+.quickstart-mode-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    align-items: start;
+    padding: 12px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.68);
+    border: 1px solid rgba(20, 32, 51, 0.07);
+}
+.quickstart-mode-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-start;
+    align-items: center;
+    padding-top: 2px;
+}
+.quickstart-mode-label-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 3px;
+    min-width: 0;
+}
+.quickstart-mode-label {
+    min-width: 0;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    font-size: 0.96rem;
+}
+.quickstart-mode-caption {
+    color: var(--muted);
+    font-size: 0.74rem;
+    line-height: 1.35;
+    white-space: nowrap;
+}
 .quickstart-mode-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
 }
 .quickstart-mode-btn {
-    min-height: 68px;
-    padding: 14px 16px;
+    min-height: 48px;
+    padding: 12px 14px;
     border-radius: 18px;
     border: 1px solid rgba(20, 32, 51, 0.08);
     background: rgba(255, 255, 255, 0.76);
@@ -520,6 +566,19 @@ button:disabled {
     font-weight: 800;
     text-align: left;
     transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+.quickstart-inline-btn {
+    min-height: 40px;
+    min-width: 52px;
+    padding: 8px 10px;
+    justify-content: center;
+}
+.quickstart-run-btn {
+    min-height: 40px;
+    min-width: 68px;
+    padding: 8px 16px;
+    justify-content: center;
+    margin-left: auto;
 }
 .quickstart-mode-btn:hover {
     transform: translateY(-1px);
@@ -553,6 +612,71 @@ button:disabled {
     flex-wrap: wrap;
     gap: 10px;
     align-items: center;
+}
+.collector-quick-grid {
+    display: grid;
+    grid-template-columns: minmax(190px, 0.62fr) minmax(0, 1fr);
+    gap: 12px;
+    align-items: end;
+}
+.collector-quick-grid[data-collector-mode="category"] {
+    grid-template-columns: 1fr;
+    align-items: start;
+}
+.collector-quick-grid[data-collector-mode="category"] .collector-quick-field[data-mode-visibility="category"] {
+    grid-column: 1 / -1;
+}
+.collector-quick-grid[data-collector-mode="seed"] {
+    grid-template-columns: 1fr;
+    align-items: start;
+}
+.collector-quick-grid[data-collector-mode="seed"] .collector-quick-field[data-mode-visibility="seed"] {
+    grid-column: 1 / -1;
+}
+.collector-mode-inline .option-row {
+    gap: 10px;
+}
+.collector-mode-inline .check-chip {
+    padding: 10px 12px;
+    border: 1px solid rgba(20, 32, 51, 0.08);
+    background: rgba(255, 255, 255, 0.78);
+}
+.collector-quick-field {
+    min-width: 0;
+}
+.collector-limit-card .collector-limit-presets {
+    margin-bottom: 8px;
+}
+.collector-limit-card .ghost-chip {
+    min-width: 66px;
+    justify-content: center;
+}
+.quickstart-utility-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    margin-top: 8px;
+    align-items: start;
+}
+.quickstart-utility-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.quickstart-utility-row .collector-limit-card {
+    min-width: 0;
+}
+.select-panel-shell {
+    display: grid;
+    gap: 12px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    backdrop-filter: none;
+}
+.select-panel-shell .grade-select-panel {
+    margin: 0;
 }
 .launcher-panel-note {
     margin-bottom: 14px;
@@ -858,6 +982,10 @@ button:disabled {
 }
 .pipeline-action-row .subtle-btn:hover {
     box-shadow: 0 18px 30px rgba(15, 23, 42, 0.2);
+}
+.pipeline-action-row .pipeline-action-btn.attention {
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.18), 0 20px 34px rgba(15, 23, 42, 0.22);
 }
 #runExpandButton {
     background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%);
@@ -5030,6 +5158,14 @@ body.workspace-settings-modal-open {
         grid-template-columns: 1fr;
     }
 
+    .collector-quick-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .quickstart-utility-row {
+        grid-template-columns: 1fr;
+    }
+
     .analysis-filter-row.metrics .analysis-filter-input {
         flex-basis: calc(50% - 6px);
     }
@@ -5047,6 +5183,23 @@ body.workspace-settings-modal-open {
 @media (max-width: 640px) {
     .grade-select-panel {
         grid-template-columns: 1fr;
+    }
+
+    .quickstart-mode-row {
+        grid-template-columns: 1fr;
+        align-items: start;
+    }
+
+    .quickstart-mode-actions {
+        justify-content: flex-start;
+    }
+
+    .quickstart-run-btn {
+        margin-left: 0;
+    }
+
+    .quickstart-mode-caption {
+        display: none;
     }
 
     .quickstart-actions,
@@ -5729,18 +5882,35 @@ body {
     max-width: 62ch;
 }
 
+.layout-grid.workspace-cockpit {
+    grid-template-columns: 1fr;
+    gap: 18px;
+}
+
 .workspace-main-column,
-.workspace-side-column {
+.workspace-side-column,
+.workspace-right-column {
     display: grid;
     gap: 18px;
     align-content: start;
     min-width: 0;
 }
+.workspace-side-column {
+    order: 1;
+}
+.workspace-main-column {
+    order: 2;
+}
+.workspace-right-column {
+    order: 3;
+}
 
 .workspace-main-column .workspace-sidebar,
 .workspace-main-column .results-panel,
 .workspace-side-column .control-column,
-.workspace-side-column .launcher-panel {
+.workspace-side-column .launcher-panel,
+.workspace-side-column .summary-panel,
+.workspace-right-column .select-panel-shell {
     grid-column: auto;
     grid-row: auto;
     width: 100%;
@@ -5826,49 +5996,35 @@ body {
     text-transform: uppercase;
 }
 
-@media (min-width: 1181px) {
+@media (min-width: 900px) {
     .layout-grid.workspace-cockpit {
-        grid-template-columns: minmax(0, 1fr);
-        gap: 18px;
-    }
-
-    .layout-grid.workspace-cockpit > .workspace-main-column {
-        grid-column: 1;
-        grid-row: 2;
-        grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr);
-        gap: 18px;
+        grid-template-columns: minmax(320px, 350px) minmax(0, 1fr) minmax(260px, 290px);
+        gap: 16px;
+        align-items: start;
     }
 
     .layout-grid.workspace-cockpit > .workspace-side-column {
         grid-column: 1;
-        grid-row: 1;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        gap: 18px;
         align-self: start;
     }
 
-    .layout-grid.workspace-cockpit > .workspace-side-column.related-settings-open {
-        grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr);
+    .layout-grid.workspace-cockpit > .workspace-main-column {
+        grid-column: 2;
+        grid-template-columns: 1fr;
+        gap: 18px;
+    }
+
+    .layout-grid.workspace-cockpit > .workspace-right-column {
+        grid-column: 3;
+        align-self: start;
+    }
+
+    .workspace-side-column {
+        grid-template-columns: 1fr;
     }
 
     .workspace-side-column .control-stack {
-        grid-template-columns: minmax(240px, 0.82fr) minmax(320px, 1.02fr) minmax(320px, 1.02fr);
-    }
-
-    .workspace-side-column .control-primary-column {
-        grid-column: 1;
-        grid-row: 1;
-    }
-
-    .workspace-side-column .control-stage-pipeline {
-        grid-column: 2;
-        grid-row: 1;
-    }
-
-    .workspace-side-column .control-stage-select {
-        grid-column: 3;
-        grid-row: 1;
+        grid-template-columns: 1fr;
     }
 
     .workspace-side-column .control-stage-collect .form-grid {
@@ -5925,53 +6081,18 @@ body {
         flex: 0 1 auto;
     }
 
-    .workspace-side-column .control-launcher-column {
+    .workspace-side-column .control-launcher-column,
+    .workspace-right-column .control-launcher-column {
         grid-template-columns: 1fr;
         gap: 14px;
     }
 
     .workspace-side-column .control-launcher-column .launcher-card,
-    .workspace-side-column .control-launcher-column .title-settings-card {
+    .workspace-side-column .control-launcher-column .title-settings-card,
+    .workspace-right-column .control-launcher-column .launcher-card,
+    .workspace-right-column .control-launcher-column .title-settings-card {
         max-width: none;
         height: auto;
-    }
-
-    .workspace-side-column .control-stage-title {
-        grid-column: auto;
-    }
-
-    .workspace-side-column .launcher-panel {
-        grid-column: 2;
-        grid-row: 1;
-        width: 100%;
-    }
-
-    .workspace-side-column .launcher-panel .title-settings-card .title-mode-block {
-        grid-template-columns: 1fr;
-    }
-
-    .workspace-side-column .launcher-panel .title-settings-card .title-surface-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .workspace-side-column .launcher-panel .title-settings-card #titleKeywordModes {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px;
-    }
-
-    .workspace-side-column .launcher-panel .title-settings-card .title-surface-card {
-        gap: 8px;
-        padding: 10px 12px;
-    }
-
-    .workspace-side-column .launcher-panel .title-settings-card .mode-card strong {
-        white-space: normal;
-    }
-
-    .workspace-sidebar,
-    .results-stage-aside {
-        top: calc(var(--nav-height) + 88px);
     }
 }
 
