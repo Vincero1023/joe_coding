@@ -235,6 +235,11 @@ class RuntimeSettingsStore:
             self._settings = _preset_settings(_DEFAULT_MODE_KEY)
             self._state = RuntimeGuardState(day_key=_today_key())
 
+    def ensure_naver_auth_unlocked(self) -> None:
+        with self._lock:
+            self._rollover_day_locked()
+            self._raise_auth_lock_if_needed_locked()
+
     def record_operation_start(self, operation_name: str) -> None:
         safe_name = str(operation_name or "").strip() or "manual_run"
         with self._lock:
@@ -261,17 +266,7 @@ class RuntimeSettingsStore:
         now = _now_monotonic()
         with self._lock:
             self._rollover_day_locked()
-
-            if self._settings.stop_on_auth_error and self._state.auth_lock_active:
-                raise RuntimeGuardError(
-                    "이전 인증 오류로 보호 잠금이 활성화되어 요청을 중지했습니다. 운영 설정에서 잠금을 해제한 뒤 다시 실행하세요.",
-                    code="auth_guard_locked",
-                    detail={
-                        "auth_lock_active": True,
-                        "auth_lock_message": self._state.auth_lock_message,
-                    },
-                    status_code=423,
-                )
+            self._raise_auth_lock_if_needed_locked()
 
             if (
                 self._settings.daily_naver_request_limit > 0
@@ -329,6 +324,20 @@ class RuntimeSettingsStore:
         self._state.auth_lock_message = ""
         self._state.auth_lock_started_at = 0.0
 
+    def _raise_auth_lock_if_needed_locked(self) -> None:
+        if not self._settings.stop_on_auth_error or not self._state.auth_lock_active:
+            return
+
+        raise RuntimeGuardError(
+            "이전 인증 오류로 보호 잠금이 활성화되어 요청을 중지했습니다. 운영 설정에서 잠금을 해제한 뒤 다시 실행하세요.",
+            code="auth_guard_locked",
+            detail={
+                "auth_lock_active": True,
+                "auth_lock_message": self._state.auth_lock_message,
+            },
+            status_code=423,
+        )
+
 
 _STORE = RuntimeSettingsStore()
 
@@ -355,6 +364,10 @@ def record_operation_start(operation_name: str) -> None:
 
 def before_naver_request() -> None:
     _STORE.before_naver_request()
+
+
+def ensure_naver_auth_unlocked() -> None:
+    _STORE.ensure_naver_auth_unlocked()
 
 
 def report_naver_auth_error(message: str) -> None:

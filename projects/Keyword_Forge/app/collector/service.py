@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 from bs4 import BeautifulSoup
 
 from app.core.api_usage import capture_api_usage
+from app.core.runtime_settings import ensure_naver_auth_unlocked
 from app.collector.categories import (
     DEFAULT_CATEGORY_SOURCE,
     get_category_queries,
@@ -222,6 +223,8 @@ class CollectorService:
                 detail={"category": category},
             )
             return []
+
+        ensure_naver_auth_unlocked()
 
         started_at = time.perf_counter()
         try:

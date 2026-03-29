@@ -1687,9 +1687,6 @@ function clearStageAndDownstream(stageKey) {
     }
 
     if (stageKey === "collected" || stageKey === "expanded" || stageKey === "analyzed") {
-        state.selectGradeFilters = [...PROFITABILITY_ORDER];
-        state.selectAttackabilityFilters = [...ATTACKABILITY_ORDER];
-        state.gradeSelectionTouched = false;
         state.analyzedFilters = createDefaultAnalyzedFilters();
     }
 
@@ -5207,7 +5204,7 @@ function bindEvents() {
     });
     elements.gradePresetButtons.forEach((button) => {
         button.addEventListener("click", () => {
-            applyGradePreset(button.dataset.gradePreset || "");
+            applyGradePreset(button.dataset.selectionPreset || button.dataset.gradePreset || "");
         });
     });
     elements.gradeToggleButtons.forEach((button) => {

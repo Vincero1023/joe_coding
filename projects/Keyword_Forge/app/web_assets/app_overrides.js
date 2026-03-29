@@ -321,6 +321,14 @@ function getSelectedAttackabilityFilters() {
     return normalizeAttackabilityList(state.selectAttackabilityFilters);
 }
 
+function hasAppliedAxisFilterSelection() {
+    return Boolean(state.gradeSelectionTouched)
+        && hasExplicitAxisFilterSelection(
+            getSelectedGradeFilters(),
+            getSelectedAttackabilityFilters(),
+        );
+}
+
 function hasExplicitAxisFilterSelection(profitabilityGrades, attackabilityGrades) {
     const normalizedProfitability = normalizeProfitabilityList(profitabilityGrades);
     const normalizedAttackability = normalizeAttackabilityList(attackabilityGrades);
@@ -500,6 +508,7 @@ function updateGradeFilterUI() {
     const selectedProfitabilitySet = new Set(selectedProfitability);
     const selectedAttackability = getSelectedAttackabilityFilters();
     const selectedAttackabilitySet = new Set(selectedAttackability);
+    const hasExplicitAxisSelection = hasAppliedAxisFilterSelection();
 
     elements.gradeToggleButtons?.forEach((button) => {
         const grade = normalizeProfitabilityValue(button.dataset.profitabilityToggle || "");
@@ -518,7 +527,8 @@ function updateGradeFilterUI() {
         const preset = GRADE_PRESET_MAP[button.dataset.selectionPreset || ""] || null;
         const presetProfitability = normalizeProfitabilityList(preset?.profitability || []);
         const presetAttackability = normalizeAttackabilityList(preset?.attackability || []);
-        const isActive = presetProfitability.length === selectedProfitability.length
+        const isActive = hasExplicitAxisSelection
+            && presetProfitability.length === selectedProfitability.length
             && presetAttackability.length === selectedAttackability.length
             && presetProfitability.every((grade) => selectedProfitabilitySet.has(grade))
             && presetAttackability.every((grade) => selectedAttackabilitySet.has(grade));
@@ -527,17 +537,23 @@ function updateGradeFilterUI() {
     });
 
     if (elements.gradeSelectSummary) {
-        elements.gradeSelectSummary.textContent = selectedProfitability.length && selectedAttackability.length
+        elements.gradeSelectSummary.textContent = hasExplicitAxisSelection
+            && selectedProfitability.length
+            && selectedAttackability.length
             ? buildSelectionPresetSummary(selectedProfitability, selectedAttackability)
-            : "수익성과 노출도를 1개 이상 선택하세요.";
+            : "자동 선별";
     }
     if (elements.gradeSelectDescription) {
-        const presetKey = selectedProfitability.length && selectedAttackability.length
+        const presetKey = hasExplicitAxisSelection
+            && selectedProfitability.length
+            && selectedAttackability.length
             ? resolveSelectionPresetKey(selectedProfitability, selectedAttackability)
             : "custom";
-        elements.gradeSelectDescription.textContent = selectedProfitability.length && selectedAttackability.length
+        elements.gradeSelectDescription.textContent = hasExplicitAxisSelection
+            && selectedProfitability.length
+            && selectedAttackability.length
             ? buildSelectionPresetDescription(presetKey, selectedProfitability, selectedAttackability)
-            : "수익성과 노출도를 1개 이상 선택하세요.";
+            : "아직 2축 조합을 명시 적용하지 않았습니다. 지금 상태의 전체 실행은 자동 선별로 진행되며, preset이나 축 버튼을 한 번 누른 뒤 다시 실행하면 해당 조합을 그대로 선별합니다.";
     }
 
     if (elements.runGradeSelectButton) {
@@ -761,13 +777,9 @@ function runThroughGradeSelect(allowedGrades, allowedAttackabilityGrades) {
 }
 
 function getForwardSelectOptions() {
-    if (!state.gradeSelectionTouched) {
-        return {};
-    }
-
     const allowedProfitabilityGrades = getSelectedGradeFilters();
     const allowedAttackabilityGrades = getSelectedAttackabilityFilters();
-    if (!allowedProfitabilityGrades.length || !allowedAttackabilityGrades.length) {
+    if (!hasAppliedAxisFilterSelection()) {
         return {};
     }
     return hasExplicitAxisFilterSelection(allowedProfitabilityGrades, allowedAttackabilityGrades)
@@ -2411,7 +2423,7 @@ function renderAnalyzedGradeBoard(items, visibleItems = null) {
     const selectedCount = Array.isArray(visibleItems)
         ? countItems(visibleItems)
         : countItemsByAxisSelections(items, selectedProfitability, selectedAttackability);
-    const hasExplicitFilters = hasExplicitAxisFilterSelection(selectedProfitability, selectedAttackability);
+    const hasExplicitFilters = hasAppliedAxisFilterSelection();
     const presetButtonsHtml = (Array.isArray(SELECTION_PRESET_ORDER) ? SELECTION_PRESET_ORDER : Object.keys(GRADE_PRESET_MAP || {}))
         .map((presetKey) => {
             const preset = getSelectionPresetConfig(presetKey);
@@ -2420,7 +2432,8 @@ function renderAnalyzedGradeBoard(items, visibleItems = null) {
             }
             const presetProfitability = normalizeProfitabilityList(preset.profitability || []);
             const presetAttackability = normalizeAttackabilityList(preset.attackability || []);
-            const isActive = presetProfitability.length === selectedProfitability.length
+            const isActive = hasExplicitFilters
+                && presetProfitability.length === selectedProfitability.length
                 && presetAttackability.length === selectedAttackability.length
                 && presetProfitability.every((grade) => selectedProfitabilitySet.has(grade))
                 && presetAttackability.every((grade) => selectedAttackabilitySet.has(grade));
