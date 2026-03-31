@@ -2172,12 +2172,39 @@ def _render_home() -> str:
             <div class="hero-copy">
                 <p class="eyebrow">키워드 포지</p>
                 <h1>수익형 키워드 발굴&amp;제목 생성기</h1>
-                <aside class="hero-panel">
+                <aside class="hero-panel hero-panel-legacy" hidden>
                     <div class="hero-stat"><span>수집</span><strong id="countCollected">0</strong></div>
                     <div class="hero-stat"><span>확장</span><strong id="countExpanded">0</strong></div>
                     <div class="hero-stat"><span>분석</span><strong id="countAnalyzed">0</strong></div>
                     <div class="hero-stat"><span>선별</span><strong id="countSelected">0</strong></div>
                     <div class="hero-stat"><span>제목</span><strong id="countTitled">0</strong></div>
+                </aside>
+                <aside class="hero-panel" aria-label="현재 적용 설정 요약">
+                    <article class="hero-status-card hero-status-card-input">
+                        <span class="hero-status-label">입력 상태</span>
+                        <strong id="heroInputStatusValue">시드 · 입력 필요</strong>
+                        <p id="heroInputStatusMeta" class="hero-status-meta">카테고리 또는 시드 기준을 먼저 정해 주세요.</p>
+                    </article>
+                    <article class="hero-status-card hero-status-card-selection">
+                        <span class="hero-status-label">선별 기준</span>
+                        <strong id="heroSelectionStatusValue">자동 선별</strong>
+                        <p id="heroSelectionStatusMeta" class="hero-status-meta">필요하면 2축 조합을 바로 적용해 다시 선별할 수 있습니다.</p>
+                    </article>
+                    <article class="hero-status-card hero-status-card-title">
+                        <span class="hero-status-label">제목 설정</span>
+                        <strong id="heroTitleStatusValue">템플릿 생성</strong>
+                        <p id="heroTitleStatusMeta" class="hero-status-meta">표면과 개수는 제목 설정에서 바로 바꿀 수 있습니다.</p>
+                    </article>
+                    <article class="hero-status-card hero-status-card-operation">
+                        <span class="hero-status-label">운영 상태</span>
+                        <strong id="heroOperationStatusValue">상시 슬로우</strong>
+                        <p id="heroOperationStatusMeta" class="hero-status-meta">요청 간격과 일일 한도는 운영 설정에서 관리합니다.</p>
+                    </article>
+                    <article class="hero-status-card hero-status-card-login">
+                        <span class="hero-status-label">네이버 로그인</span>
+                        <strong id="heroNaverLoginStatusValue">미확인</strong>
+                        <p id="heroNaverLoginStatusMeta" class="hero-status-meta">로그인 상태 확인 버튼으로 Creator Advisor 세션을 검증할 수 있습니다.</p>
+                    </article>
                 </aside>
                 <p class="hero-text">
                     시드 검색과 카테고리 수집을 바탕으로 키워드를 확장하고, 분석 후 제목용 후보까지 바로 추립니다.

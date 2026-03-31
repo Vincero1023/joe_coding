@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Layout 07 - Queue Ops Board</title>
+    <link rel="stylesheet" href="./layouts.css" />
+</head>
+<body class="sample-body variant-queue">
+    <div class="sample-shell">
+        <header class="sample-header">
+            <div class="sample-header-links">
+                <a class="back-link" href="./index.html">목록으로</a>
+                <span class="tag">07</span>
+                <span class="tag gray">Queue Ops Board</span>
+            </div>
+            <div class="sample-header-meta">
+                <span class="pill">루틴 운영</span>
+                <span class="pill">예약 우선</span>
+            </div>
+        </header>
+
+        <section class="sample-hero">
+            <div class="hero-head">
+                <div class="hero-copy">
+                    <p class="eyebrow">Layout 07</p>
+                    <h1>예약, 루틴, 보관함을 전면에 둔 운영 보드</h1>
+                    <p>
+                        직접 실행보다 반복 운영이 더 중요한 사용자를 위한 구조입니다.
+                        좋은 시드와 좋은 루틴을 쌓아두고 순차 실행하는 흐름이 화면 전체의 중심이 됩니다.
+                    </p>
+                </div>
+                <div class="nav-pills">
+                    <span class="nav-pill active">예약 운영</span>
+                    <span class="nav-pill">루틴 편집</span>
+                    <span class="nav-pill">결과 수거</span>
+                </div>
+            </div>
+        </section>
+
+        <main class="sample-grid">
+            <aside class="stack">
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Planner</p>
+                            <h2>이번 주 캘린더</h2>
+                        </div>
+                    </div>
+                    <div class="calendar">
+                        <div class="calendar-row">
+                            <div class="calendar-time"><strong>06:00</strong></div>
+                            <div class="calendar-cell"><strong>월</strong><span>보험 루틴</span></div>
+                            <div class="calendar-cell"><strong>화</strong><span>IRP 루틴</span></div>
+                            <div class="calendar-cell"><strong>수</strong><span>육아 루틴</span></div>
+                            <div class="calendar-cell"><strong>목</strong><span>보험 루틴</span></div>
+                            <div class="calendar-cell"><strong>금</strong><span>정산</span></div>
+                        </div>
+                        <div class="calendar-row">
+                            <div class="calendar-time"><strong>21:00</strong></div>
+                            <div class="calendar-cell"><strong>월</strong><span>제목 재작성</span></div>
+                            <div class="calendar-cell"><strong>화</strong><span>보관함 정리</span></div>
+                            <div class="calendar-cell"><strong>수</strong><span>제목 재작성</span></div>
+                            <div class="calendar-cell"><strong>목</strong><span>큐 점검</span></div>
+                            <div class="calendar-cell"><strong>금</strong><span>리포트</span></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card subtle">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Templates</p>
+                            <h2>자주 쓰는 루틴</h2>
+                        </div>
+                    </div>
+                    <ul class="mini-list">
+                        <li>아침 카테고리 발굴</li>
+                        <li>저녁 제목 재평가</li>
+                        <li>주말 보관함 시드화</li>
+                    </ul>
+                </section>
+            </aside>
+
+            <section class="stack">
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Queue</p>
+                            <h2>현재 대기열</h2>
+                        </div>
+                        <span class="tag">러너 동작 중</span>
+                    </div>
+                    <div class="queue-lane">
+                        <div class="queue-ticket"><strong>보험 시드 배치</strong><span>시드 9개 / 예정 06:20</span></div>
+                        <div class="queue-ticket"><strong>IRP 탐색 루틴</strong><span>카테고리 + 시드 혼합 / 예정 07:10</span></div>
+                        <div class="queue-ticket"><strong>제목 저점수 재작성</strong><span>선별 결과 12건 대상</span></div>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Vault</p>
+                            <h2>보관함에서 다시 꺼낼 후보</h2>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>묶음</th>
+                                    <th>상태</th>
+                                    <th>추천 활용</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>보험 비교 키워드</td><td>발행 전</td><td>내일 아침 시드화</td></tr>
+                                <tr><td>청구 / 서류 키워드</td><td>다시보기</td><td>가이드형 제목 재생성</td></tr>
+                                <tr><td>IRP 수수료 키워드</td><td>발행 후</td><td>롱테일 확장 재실험</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </section>
+
+            <aside class="stack">
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Run Guard</p>
+                            <h2>운영 조건</h2>
+                        </div>
+                    </div>
+                    <ul class="mini-list">
+                        <li>요청 간격 3.5초</li>
+                        <li>일일 요청 상한 550</li>
+                        <li>연속 실행 90분</li>
+                        <li>인증 오류 시 정지</li>
+                    </ul>
+                </section>
+
+                <section class="card subtle">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Output</p>
+                            <h2>산출물 수거</h2>
+                        </div>
+                    </div>
+                    <ul class="mini-list">
+                        <li>오늘 XLSX export 3개</li>
+                        <li>선별 CSV 2개</li>
+                        <li>제목 결과 CSV 1개</li>
+                    </ul>
+                </section>
+
+                <section class="card subtle">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Selection</p>
+                            <h2>기본 선별 프리셋</h2>
+                        </div>
+                    </div>
+                    <div class="segmented">
+                        <span>전체</span>
+                        <span class="active">균형형</span>
+                        <span>수익형</span>
+                    </div>
+                </section>
+            </aside>
+        </main>
+    </div>
+</body>
+</html>

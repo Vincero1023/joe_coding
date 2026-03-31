@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Layout 06 - Timeline Flow</title>
+    <link rel="stylesheet" href="./layouts.css" />
+</head>
+<body class="sample-body variant-timeline">
+    <div class="sample-shell">
+        <header class="sample-header">
+            <div class="sample-header-links">
+                <a class="back-link" href="./index.html">목록으로</a>
+                <span class="tag">06</span>
+                <span class="tag gray">Timeline Flow</span>
+            </div>
+            <div class="sample-header-meta">
+                <span class="pill">초보 친화</span>
+                <span class="pill">순서 중심</span>
+            </div>
+        </header>
+
+        <section class="sample-hero">
+            <div class="hero-head">
+                <div class="hero-copy">
+                    <p class="eyebrow">Layout 06</p>
+                    <h1>한 단계씩 따라가게 만드는 세로형 흐름 레이아웃</h1>
+                    <p>
+                        수집부터 제목까지의 관계를 세로로 배치해, 지금 무엇을 해야 하는지가 명확하게 드러납니다.
+                        기능 설명과 실행 버튼이 붙어 있어 온보딩 화면으로도 적합합니다.
+                    </p>
+                </div>
+                <div class="nav-pills">
+                    <span class="nav-pill active">순서대로 보기</span>
+                    <span class="nav-pill">빠른 점프</span>
+                </div>
+            </div>
+        </section>
+
+        <main class="sample-grid">
+            <section class="stack">
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Step 1</p>
+                            <h2>입력과 실행</h2>
+                        </div>
+                        <span class="action">발굴 시작</span>
+                    </div>
+                    <div class="field-grid two">
+                        <div class="field"><strong>수집 모드</strong><span>카테고리 또는 시드</span></div>
+                        <div class="field"><strong>시작 조건</strong><span>보험 카테고리 / 시드 4개</span></div>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Step 2</p>
+                            <h2>수집과 확장</h2>
+                        </div>
+                    </div>
+                    <ul class="timeline">
+                        <li><strong>수집</strong><span>Creator Advisor + 자동완성 보강으로 후보 확보</span></li>
+                        <li><strong>확장</strong><span>autocomplete, related, combinator 엔진으로 확장</span></li>
+                        <li><strong>정리</strong><span>중복 제거와 origin 제한으로 과밀도 조정</span></li>
+                    </ul>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Step 3</p>
+                            <h2>분석과 선별</h2>
+                        </div>
+                    </div>
+                    <div class="field-grid two">
+                        <div class="field"><strong>분석 축</strong><span>CPC, bid, volume, competition</span></div>
+                        <div class="field"><strong>선별 축</strong><span>수익성 A~F / 노출도 1~6</span></div>
+                    </div>
+                    <div class="matrix-grid">
+                        <span class="hot">A1</span><span class="hot">A2</span><span>A3</span><span>B1</span><span>B2</span><span>B3</span>
+                        <span>C1</span><span>C2</span><span>D1</span><span>D2</span><span>E1</span><span>F1</span>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Step 4</p>
+                            <h2>제목 생성</h2>
+                        </div>
+                        <span class="tag">선별 후 진입</span>
+                    </div>
+                    <div class="field-grid three">
+                        <div class="field"><strong>표면</strong><span>홈판</span></div>
+                        <div class="field"><strong>표면</strong><span>블로그형</span></div>
+                        <div class="field"><strong>표면</strong><span>hybrid</span></div>
+                    </div>
+                    <ul class="mini-list">
+                        <li>AI 모드와 template 모드 병행</li>
+                        <li>품질 평가 후 낮은 점수만 자동 재작성</li>
+                        <li>프롬프트 저장본 선택 가능</li>
+                    </ul>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Step 5</p>
+                            <h2>저장과 재활용</h2>
+                        </div>
+                    </div>
+                    <div class="grid-3">
+                        <div class="field"><strong>실행 기록</strong><span>복기용</span></div>
+                        <div class="field"><strong>보관함</strong><span>후보 창고</span></div>
+                        <div class="field"><strong>예약 큐</strong><span>다음 루틴</span></div>
+                    </div>
+                </section>
+            </section>
+
+            <aside class="stack">
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Summary</p>
+                            <h2>현재 요약</h2>
+                        </div>
+                    </div>
+                    <ul class="mini-list">
+                        <li>수집 248건</li>
+                        <li>확장 1,240건</li>
+                        <li>선별 38건</li>
+                        <li>제목 12건</li>
+                    </ul>
+                </section>
+
+                <section class="card subtle">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Recommended</p>
+                            <h2>초반 추천 순서</h2>
+                        </div>
+                    </div>
+                    <ul class="mini-list">
+                        <li>전체 프리셋으로 넓게 본다.</li>
+                        <li>좋은 후보가 보이면 균형형으로 좁힌다.</li>
+                        <li>제목은 선별 후에만 붙인다.</li>
+                    </ul>
+                </section>
+            </aside>
+        </main>
+    </div>
+</body>
+</html>

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Keyword Forge Layout Samples</title>
+    <meta
+        name="description"
+        content="Keyword Forge의 기능 개념을 유지하면서 완전히 다른 정보 구조를 실험한 10개의 레이아웃 샘플"
+    />
+    <link rel="stylesheet" href="./layouts.css" />
+</head>
+<body class="gallery-body">
+    <div class="gallery-shell">
+        <section class="gallery-hero">
+            <div class="hero-copy">
+                <p class="eyebrow">Layout Sample</p>
+                <h1>Keyword Forge를 다른 방식으로 읽게 만드는 10가지 화면 구조</h1>
+                <p>
+                    현재 앱은 실행 센터, 작업대, 2축 선별을 중심으로 잘 정리되어 있습니다.
+                    여기서는 기능을 유지하되 정보 구조를 완전히 다르게 재배치한 정적 예시를 모았습니다.
+                    실제 동작은 없지만, 어떤 배치가 더 빠르고 직관적인지 비교하기에는 충분하게 만들었습니다.
+                </p>
+                <div class="metric-strip">
+                    <div class="metric"><span>보존한 기능군</span><strong>8개</strong></div>
+                    <div class="metric"><span>샘플 레이아웃</span><strong>10종</strong></div>
+                    <div class="metric"><span>우선 기준</span><strong>효율 + 직관</strong></div>
+                    <div class="metric"><span>구현 형태</span><strong>정적 HTML</strong></div>
+                </div>
+            </div>
+            <div class="gallery-side">
+                <div class="gallery-mini">
+                    <h3>이번 샘플의 공통 원칙</h3>
+                    <ul>
+                        <li>빠른 입력, 실행, 결과, 선별, 제목, 운영성 기능을 모두 남긴다.</li>
+                        <li>한 화면에서 무엇을 먼저 봐야 하는지가 레이아웃만으로 드러나게 만든다.</li>
+                        <li>색만 바꾸지 않고 정보 우선순위와 읽는 순서를 바꾼다.</li>
+                    </ul>
+                </div>
+                <div class="gallery-mini">
+                    <h3>추천 보는 순서</h3>
+                    <ul>
+                        <li>실사용 중심이면 `01`, `03`, `06`부터 본다.</li>
+                        <li>운영 자동화 중심이면 `07`을 본다.</li>
+                        <li>제목 생성 경험을 키우려면 `08`을 본다.</li>
+                        <li>모바일 재설계를 생각하면 `09`를 본다.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section class="gallery-grid">
+            <article class="gallery-card">
+                <div class="gallery-card-top">
+                    <div>
+                        <p class="eyebrow">01</p>
+                        <h2>Command Center Split</h2>
+                    </div>
+                    <span class="tag">실무형</span>
+                </div>
+                <p>왼쪽에서 실행하고, 가운데서 보고, 오른쪽에서 결정하는 정석적인 지휘실 구조입니다.</p>
+                <ul>
+                    <li>빠른 입력과 실행 버튼이 가장 빨리 눈에 들어옵니다.</li>
+                    <li>실시간 작업대와 2축 선별의 역할이 분리되어 명확합니다.</li>
+                </ul>
+                <footer>
+                    <span class="pill">첫 후보</span>
+                    <a class="ghost-link" href="./01-command-center.html">열기</a>
+                </footer>
+            </article>
+
+            <article class="gallery-card">
+                <div class="gallery-card-top">
+                    <div>
+                        <p class="eyebrow">02</p>
+                        <h2>Pipeline Kanban</h2>
+                    </div>
+                    <span class="tag">흐름형</span>
+                </div>
+                <p>수집부터 제목까지 단계를 수평 칸반으로 펼쳐, 병목과 누락을 한눈에 보는 방식입니다.</p>
+                <ul>
+                    <li>단계 간 관계를 가장 직관적으로 보여줍니다.</li>
+                    <li>각 단계 결과를 나란히 비교하기 쉽습니다.</li>
+                </ul>
+                <footer>
+                    <span class="pill">흐름 강조</span>
+                    <a class="ghost-link" href="./02-pipeline-kanban.html">열기</a>
+                </footer>
+            </article>
+
+            <article class="gallery-card">
+                <div class="gallery-card-top">
+                    <div>
+                        <p class="eyebrow">03</p>
+                        <h2>Operator Cockpit</h2>
+                    </div>
+                    <span class="tag">운영형</span>
+                </div>
+                <p>일일 한도, 보호 설정, 큐 상태까지 앞세운 운영자 관점의 조종석입니다.</p>
+                <ul>
+                    <li>장시간 실행과 리스크 관리에 강합니다.</li>
+                    <li>실패 징후를 먼저 보게 설계했습니다.</li>
+                </ul>
+                <footer>
+                    <span class="pill">장시간 운용</span>
+                    <a class="ghost-link" href="./03-operator-cockpit.html">열기</a>
+                </footer>
+            </article>
+
+            <article class="gallery-card">
+                <div class="gallery-card-top">
+                    <div>
+                        <p class="eyebrow">04</p>
+                        <h2>Notebook Studio</h2>
+                    </div>
+                    <span class="tag">문서형</span>
+                </div>
+                <p>설정과 결과를 읽고 정리하는 흐름이 중요한 사용자를 위한 노트 앱 스타일입니다.</p>
+                <ul>
+                    <li>복기와 비교, 설명성에 강합니다.</li>
+                    <li>설정 변경과 결과 해석이 부드럽게 이어집니다.</li>
+                </ul>
+                <footer>
+                    <span class="pill">설명 친화</span>
+                    <a class="ghost-link" href="./04-notebook-studio.html">열기</a>
+                </footer>
+            </article>
+
+            <article class="gallery-card">
+                <div class="gallery-card-top">
+                    <div>
+                        <p class="eyebrow">05</p>
+                        <h2>Modular Grid</h2>
+                    </div>
+                    <span class="tag">대시보드형</span>
+                </div>
+                <p>중요 모듈을 위젯처럼 배치해 여러 신호를 빠르게 훑는 고밀도 보드입니다.</p>
+                <ul>
+                    <li>숙련자에게 가장 빠른 스캔 경험을 줍니다.</li>
+                    <li>확장 가능성이 높습니다.</li>
+                </ul>
+                <footer>
+                    <span class="pill">정보량 많음</span>
+                    <a class="ghost-link" href="./05-modular-grid.html">열기</a>
+                </footer>
+            </article>
+
+            <article class="gallery-card">
+                <div class="gallery-card-top">
+                    <div>
+                        <p class="eyebrow">06</p>
+                        <h2>Timeline Flow</h2>
+                    </div>
+                    <span class="tag">가이드형</span>
+                </div>
+                <p>한 단계씩 따라가게 만드는 세로 타임라인 구조라서 초반 진입 장벽이 낮습니다.</p>
+                <ul>
+                    <li>학습과 온보딩에 유리합니다.</li>
+                    <li>지금 어느 단계인지 잃어버리기 어렵습니다.</li>
+                </ul>
+                <footer>
+                    <span class="pill">초보 친화</span>
+                    <a class="ghost-link" href="./06-timeline-flow.html">열기</a>
+                </footer>
+            </article>
+
+            <article class="gallery-card">
+                <div class="gallery-card-top">
+                    <div>
+                        <p class="eyebrow">07</p>
+                        <h2>Queue Ops Board</h2>
+                    </div>
+                    <span class="tag">자동화형</span>
+                </div>
+                <p>예약, 루틴, 보관함 재활용을 전면에 둔 운영 보드로 반복 실행에 초점을 둡니다.</p>
+                <ul>
+                    <li>큐와 루틴이 앱의 주인공이 됩니다.</li>
+                    <li>팀 운영이나 정기 작업에 잘 맞습니다.</li>
+                </ul>
+                <footer>
+                    <span class="pill">반복 작업</span>
+                    <a class="ghost-link" href="./07-queue-ops-board.html">열기</a>
+                </footer>
+            </article>
+
+            <article class="gallery-card">
+                <div class="gallery-card-top">
+                    <div>
+                        <p class="eyebrow">08</p>
+                        <h2>Title Lab</h2>
+                    </div>
+                    <span class="tag">제목 중심</span>
+                </div>
+                <p>선별된 키워드를 어떻게 제목으로 바꿀지에 집중한 생성 스튜디오입니다.</p>
+                <ul>
+                    <li>프롬프트, 모델, 표면별 결과 비교가 쉽습니다.</li>
+                    <li>콘텐츠 생산 단계 직전에 강합니다.</li>
+                </ul>
+                <footer>
+                    <span class="pill">생산 단계</span>
+                    <a class="ghost-link" href="./08-title-lab.html">열기</a>
+                </footer>
+            </article>
+
+            <article class="gallery-card">
+                <div class="gallery-card-top">
+                    <div>
+                        <p class="eyebrow">09</p>
+                        <h2>Mobile First Stack</h2>
+                    </div>
+                    <span class="tag">모바일형</span>
+                </div>
+                <p>작은 화면에서도 작업 우선순위가 무너지지 않게 만든 카드 스택 구조입니다.</p>
+                <ul>
+                    <li>버튼과 읽는 순서를 강하게 통제합니다.</li>
+                    <li>향후 태블릿/모바일 전개 실험에 좋습니다.</li>
+                </ul>
+                <footer>
+                    <span class="pill">모바일 전개</span>
+                    <a class="ghost-link" href="./09-mobile-first-stack.html">열기</a>
+                </footer>
+            </article>
+
+            <article class="gallery-card">
+                <div class="gallery-card-top">
+                    <div>
+                        <p class="eyebrow">10</p>
+                        <h2>Briefing Room</h2>
+                    </div>
+                    <span class="tag">전략형</span>
+                </div>
+                <p>오늘의 우선순위, 후보, 막힌 점을 회의처럼 빠르게 정리하는 브리핑 보드입니다.</p>
+                <ul>
+                    <li>의사결정과 우선순위 공유에 강합니다.</li>
+                    <li>한 화면에 스토리가 생깁니다.</li>
+                </ul>
+                <footer>
+                    <span class="pill">우선순위 정리</span>
+                    <a class="ghost-link" href="./10-briefing-room.html">열기</a>
+                </footer>
+            </article>
+        </section>
+
+        <div class="footer-note">
+            가장 실용적인 방향은 `01`, `03`, `06`이고, 가장 과감한 방향은 `07`, `08`, `09`입니다.
+            기존 앱을 바로 재배치한다면 `01` 또는 `03`을 베이스로 삼고, `08`의 제목 생성 랩 요소만 부분 흡수하는 방식이 안정적입니다.
+        </div>
+    </div>
+</body>
+</html>

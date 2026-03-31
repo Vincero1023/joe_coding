@@ -171,6 +171,98 @@ button:disabled {
 }
 .hero-stat span { display: block; color: var(--muted); font-size: 0.86rem; }
 .hero-stat strong { display: block; margin-top: 8px; font-size: 2rem; letter-spacing: -0.04em; }
+.hero-status-card {
+    --hero-accent: var(--brand);
+    --hero-accent-soft: rgba(15, 118, 110, 0.14);
+    --hero-accent-deep: var(--brand-strong);
+    min-width: 0;
+    position: relative;
+    overflow: hidden;
+    padding: 18px 18px 16px;
+    border-radius: 20px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(247, 250, 253, 0.76) 100%);
+    border: 1px solid rgba(20, 32, 51, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+.hero-status-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 4px;
+    background: var(--hero-accent);
+}
+.hero-status-card::after {
+    content: "";
+    position: absolute;
+    top: -30px;
+    right: -18px;
+    width: 88px;
+    height: 88px;
+    border-radius: 999px;
+    background: var(--hero-accent-soft);
+    filter: blur(8px);
+    opacity: 0.92;
+    pointer-events: none;
+}
+.hero-status-label {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: var(--hero-accent-soft);
+    color: var(--hero-accent-deep);
+    font-size: 0.74rem;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+}
+.hero-status-card strong {
+    position: relative;
+    z-index: 1;
+    display: block;
+    margin-top: 12px;
+    font-family: "SUIT Variable", "Pretendard Variable", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    font-size: clamp(1.16rem, 1vw + 0.9rem, 1.44rem);
+    line-height: 1.24;
+    letter-spacing: -0.035em;
+    font-weight: 900;
+    color: var(--hero-accent-deep);
+}
+.hero-status-meta {
+    position: relative;
+    z-index: 1;
+    margin-top: 10px;
+    font-size: 0.9rem;
+    line-height: 1.58;
+    color: rgba(20, 32, 51, 0.82);
+    font-weight: 600;
+}
+.hero-status-card-input {
+    --hero-accent: #0f766e;
+    --hero-accent-soft: rgba(15, 118, 110, 0.15);
+    --hero-accent-deep: #0f5f59;
+}
+.hero-status-card-selection {
+    --hero-accent: #ea580c;
+    --hero-accent-soft: rgba(234, 88, 12, 0.16);
+    --hero-accent-deep: #c2410c;
+}
+.hero-status-card-title {
+    --hero-accent: #2563eb;
+    --hero-accent-soft: rgba(37, 99, 235, 0.14);
+    --hero-accent-deep: #1d4ed8;
+}
+.hero-status-card-operation {
+    --hero-accent: #b45309;
+    --hero-accent-soft: rgba(180, 83, 9, 0.16);
+    --hero-accent-deep: #92400e;
+}
+.hero-status-card-login {
+    --hero-accent: #177245;
+    --hero-accent-soft: rgba(23, 114, 69, 0.15);
+    --hero-accent-deep: #14532d;
+}
 .layout-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.85fr);
@@ -5862,6 +5954,10 @@ body {
     background: rgba(248, 251, 254, 0.82);
 }
 
+.hero-status-card {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(248, 251, 254, 0.88) 100%);
+}
+
 .results-panel-tools {
     gap: 8px;
     padding-bottom: 4px;
@@ -5885,6 +5981,30 @@ body {
 .layout-grid.workspace-cockpit {
     grid-template-columns: 1fr;
     gap: 18px;
+}
+
+@media (max-width: 1120px) {
+    .hero-panel {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .hero-panel {
+        grid-template-columns: 1fr;
+    }
+
+    .hero-status-label {
+        font-size: 0.72rem;
+    }
+
+    .hero-status-card strong {
+        font-size: 1.08rem;
+    }
+
+    .hero-status-meta {
+        font-size: 0.84rem;
+    }
 }
 
 .workspace-main-column,

@@ -67,6 +67,11 @@ def test_home_page_exposes_title_prompt_profile_picker() -> None:
     assert "operationMode" in response.text
     assert "operationCustomModeGuide" in response.text
     assert "operationCustomPresetPanel" in response.text
+    assert "heroInputStatusValue" in response.text
+    assert "heroSelectionStatusValue" in response.text
+    assert "heroTitleStatusValue" in response.text
+    assert "heroOperationStatusValue" in response.text
+    assert "heroNaverLoginStatusValue" in response.text
     assert 'data-quickstart-mode-row="discover"' in response.text
     assert 'data-quickstart-help="discover"' in response.text
     assert 'data-quickstart-settings="discover"' in response.text

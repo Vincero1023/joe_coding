@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Layout 08 - Title Lab</title>
+    <link rel="stylesheet" href="./layouts.css" />
+</head>
+<body class="sample-body variant-title">
+    <div class="sample-shell">
+        <header class="sample-header">
+            <div class="sample-header-links">
+                <a class="back-link" href="./index.html">목록으로</a>
+                <span class="tag">08</span>
+                <span class="tag gray">Title Lab</span>
+            </div>
+            <div class="sample-header-meta">
+                <span class="pill">제목 생성 중심</span>
+                <span class="pill">프롬프트 실험</span>
+            </div>
+        </header>
+
+        <section class="sample-hero">
+            <div class="hero-head">
+                <div class="hero-copy">
+                    <p class="eyebrow">Layout 08</p>
+                    <h1>선별 이후의 생산 단계를 주인공으로 만든 제목 랩</h1>
+                    <p>
+                        이 레이아웃은 키워드 발견보다 제목 생산 효율을 더 중시합니다.
+                        선택된 키워드, 표면별 결과, 모델 설정, 프롬프트 저장본을 한 시선 안에 두어 실험 반복을 빠르게 만듭니다.
+                    </p>
+                </div>
+                <div class="nav-pills">
+                    <span class="nav-pill active">제목 랩</span>
+                    <span class="nav-pill">프롬프트</span>
+                    <span class="nav-pill">품질 재작성</span>
+                </div>
+            </div>
+        </section>
+
+        <main class="sample-grid">
+            <aside class="stack">
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Keyword Bank</p>
+                            <h2>선별 키워드</h2>
+                        </div>
+                    </div>
+                    <ul class="mini-list">
+                        <li>태아보험 비교 사이트</li>
+                        <li>실비보험 청구 서류</li>
+                        <li>자동차보험 특약 추천</li>
+                        <li>irp 수수료 낮은 곳</li>
+                    </ul>
+                </section>
+
+                <section class="card subtle">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Context</p>
+                            <h2>선별 근거</h2>
+                        </div>
+                    </div>
+                    <ul class="mini-list">
+                        <li>기본 프리셋: 균형형</li>
+                        <li>허용 조합: A~B / 1~3</li>
+                        <li>실시간 이슈 반영: ON</li>
+                    </ul>
+                </section>
+            </aside>
+
+            <section class="stack">
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Studio</p>
+                            <h2>표면별 제목 결과</h2>
+                        </div>
+                        <span class="tag">실험 보드</span>
+                    </div>
+                    <div class="grid-3">
+                        <div class="field">
+                            <strong>홈판</strong>
+                            <span>태아보험 비교, 어디서 시작해야 손해를 줄일까</span>
+                        </div>
+                        <div class="field">
+                            <strong>블로그형</strong>
+                            <span>실비보험 청구 서류 한 번에 준비하는 체크리스트</span>
+                        </div>
+                        <div class="field">
+                            <strong>Hybrid</strong>
+                            <span>IRP 수수료 낮은 곳 찾을 때 먼저 봐야 할 기준</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Quality</p>
+                            <h2>후보 비교 테이블</h2>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>제목</th>
+                                    <th>표면</th>
+                                    <th>점수</th>
+                                    <th>처리</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>태아보험 비교, 어디서 시작해야 손해를 줄일까</td><td>홈판</td><td>91</td><td>채택</td></tr>
+                                <tr><td>실비보험 청구 서류 한 번에 정리하는 방법</td><td>블로그형</td><td>88</td><td>채택</td></tr>
+                                <tr><td>자동차보험 특약 추천 전에 꼭 따져볼 기준</td><td>홈판</td><td>79</td><td>재작성</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </section>
+
+            <aside class="stack">
+                <section class="card">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Model Stack</p>
+                            <h2>AI 설정</h2>
+                        </div>
+                    </div>
+                    <div class="field-grid">
+                        <div class="field"><strong>생성 AI</strong><span>GPT-4o mini</span></div>
+                        <div class="field"><strong>재작성 AI</strong><span>Claude Haiku 4.5</span></div>
+                        <div class="field"><strong>온도</strong><span>0.7</span></div>
+                    </div>
+                </section>
+
+                <section class="card subtle">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Prompt</p>
+                            <h2>프롬프트 저장본</h2>
+                        </div>
+                    </div>
+                    <ul class="mini-list">
+                        <li>홈판 이슈형 기본</li>
+                        <li>비교/절약형 강화</li>
+                        <li>가이드형 문장형</li>
+                    </ul>
+                </section>
+
+                <section class="card subtle">
+                    <div class="card-head">
+                        <div>
+                            <p class="eyebrow">Retry</p>
+                            <h2>품질 재생성</h2>
+                        </div>
+                    </div>
+                    <ul class="mini-list">
+                        <li>84점 미만 자동 재작성</li>
+                        <li>2회 실패 시 상위 모델 승격</li>
+                        <li>template fallback 유지</li>
+                    </ul>
+                </section>
+            </aside>
+        </main>
+    </div>
+</body>
+</html>

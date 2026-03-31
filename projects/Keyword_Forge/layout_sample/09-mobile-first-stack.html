@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Layout 09 - Mobile First Stack</title>
+    <link rel="stylesheet" href="./layouts.css" />
+</head>
+<body class="sample-body variant-mobile">
+    <div class="sample-shell">
+        <header class="sample-header">
+            <div class="sample-header-links">
+                <a class="back-link" href="./index.html">목록으로</a>
+                <span class="tag">09</span>
+                <span class="tag gray">Mobile First Stack</span>
+            </div>
+            <div class="sample-header-meta">
+                <span class="pill">모바일 우선</span>
+                <span class="pill">카드 스택</span>
+            </div>
+        </header>
+
+        <section class="sample-hero">
+            <div class="hero-head">
+                <div class="hero-copy">
+                    <p class="eyebrow">Layout 09</p>
+                    <h1>작은 화면에서도 흐름을 잃지 않게 만드는 카드 스택</h1>
+                    <p>
+                        핵심 행동을 위아래 순서로 강하게 통제하는 레이아웃입니다.
+                        모바일, 태블릿, 세로 화면에 특히 유리하고, 과한 옵션은 하단 시트나 탭으로 숨기는 방향에 잘 맞습니다.
+                    </p>
+                </div>
+                <div class="nav-pills">
+                    <span class="nav-pill active">모바일 흐름</span>
+                    <span class="nav-pill">보조 시트</span>
+                </div>
+            </div>
+        </section>
+
+        <main class="sample-grid">
+            <section class="mobile-showcase">
+                <div class="phone-frame">
+                    <div class="phone-screen">
+                        <section class="phone-card">
+                            <p class="eyebrow">Home</p>
+                            <h2>오늘의 실행</h2>
+                            <div class="action-row">
+                                <span class="action">전체 실행</span>
+                                <span class="action secondary">발굴만</span>
+                            </div>
+                        </section>
+                        <section class="phone-card">
+                            <p class="eyebrow">Input</p>
+                            <h3>빠른 입력</h3>
+                            <ul class="mini-list">
+                                <li>시드: 태아보험 비교</li>
+                                <li>카테고리: 보험</li>
+                                <li>확장 한도: 1,000</li>
+                            </ul>
+                        </section>
+                        <section class="phone-card">
+                            <p class="eyebrow">Selected</p>
+                            <h3>지금 살아난 후보</h3>
+                            <ul class="mini-list">
+                                <li>실비보험 청구 서류</li>
+                                <li>자동차보험 특약 추천</li>
+                                <li>IRP 수수료 비교</li>
+                            </ul>
+                        </section>
+                        <section class="phone-card">
+                            <p class="eyebrow">Title</p>
+                            <h3>제목 생성</h3>
+                            <ul class="mini-list">
+                                <li>홈판 2 / 블로그 2</li>
+                                <li>AI + fallback</li>
+                            </ul>
+                        </section>
+                        <nav class="bottom-nav">
+                            <a class="active" href="#">홈</a>
+                            <a href="#">결과</a>
+                            <a href="#">선별</a>
+                            <a href="#">보관함</a>
+                            <a href="#">더보기</a>
+                        </nav>
+                    </div>
+                </div>
+
+                <div class="stack">
+                    <section class="card">
+                        <div class="card-head">
+                            <div>
+                                <p class="eyebrow">How It Works</p>
+                                <h2>모바일 구조 설명</h2>
+                            </div>
+                        </div>
+                        <ul class="timeline">
+                            <li><strong>첫 화면</strong><span>오늘의 실행과 빠른 입력만 먼저 보여줍니다.</span></li>
+                            <li><strong>두 번째 층</strong><span>실시간 선별 결과가 카드로 올라옵니다.</span></li>
+                            <li><strong>하단 내비게이션</strong><span>결과, 선별, 보관함, 설정을 이동합니다.</span></li>
+                        </ul>
+                    </section>
+
+                    <section class="card subtle">
+                        <div class="card-head">
+                            <div>
+                                <p class="eyebrow">Preserved Features</p>
+                                <h2>기능 보존 방식</h2>
+                            </div>
+                        </div>
+                        <ul class="mini-list">
+                            <li>빠른 입력은 홈 상단 카드</li>
+                            <li>2축 선별은 별도 탭 화면</li>
+                            <li>제목 설정은 하단 시트</li>
+                            <li>기록/보관함/예약은 더보기 허브</li>
+                        </ul>
+                    </section>
+                </div>
+            </section>
+        </main>
+    </div>
+</body>
+</html>

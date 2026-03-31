@@ -561,6 +561,10 @@ function updateGradeFilterUI() {
             || selectedProfitability.length === 0
             || selectedAttackability.length === 0;
     }
+
+    if (typeof renderHeroStatusSummary === "function") {
+        renderHeroStatusSummary();
+    }
 }
 
 function applyGradePreset(presetKey) {

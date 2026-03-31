@@ -339,6 +339,8 @@ const state = {
     stageStatus: createInitialStageStatus(),
     diagnostics: createEmptyDiagnostics(),
     trendSessionCache: null,
+    trendSessionStatus: "unknown",
+    trendSessionStatusMessage: "",
     selectedCollectedKeys: [],
     selectGradeFilters: [...PROFITABILITY_ORDER],
     selectAttackabilityFilters: [...ATTACKABILITY_ORDER],
@@ -1092,6 +1094,11 @@ function persistTrendSettings() {
     }
 }
 
+function setTrendSessionStatus(status, message = "") {
+    state.trendSessionStatus = String(status || "unknown").trim() || "unknown";
+    state.trendSessionStatusMessage = String(message || "").trim();
+}
+
 function normalizeTrendSessionCacheInfo(raw) {
     const cookieCount = Number.parseInt(String(raw?.cookie_count ?? 0), 10);
     const cookieNames = Array.isArray(raw?.cookie_names)
@@ -1132,6 +1139,9 @@ async function loadTrendSessionCacheStatus(options = {}) {
     }
 
     state.trendSessionCache = normalizeTrendSessionCacheInfo(payload?.result || {});
+    if (!["valid", "invalid", "error"].includes(state.trendSessionStatus)) {
+        setTrendSessionStatus(state.trendSessionCache?.available ? "ready" : "missing");
+    }
     renderTrendSettingsState();
     return state.trendSessionCache;
 }
@@ -1164,6 +1174,7 @@ async function restoreCachedDedicatedTrendSession(options = {}) {
 
     elements.trendCookieInput.value = cookieHeader;
     state.trendSessionCache = normalizeTrendSessionCacheInfo(result);
+    setTrendSessionStatus("ready", "저장된 전용 로그인 세션을 불러왔습니다.");
     if (elements.localCookieStatus) {
         elements.localCookieStatus.dataset.locked = "true";
         elements.localCookieStatus.textContent = reason
@@ -1213,6 +1224,7 @@ async function importLocalNaverCookie() {
 
         elements.trendCookieInput.value = cookieHeader;
         state.trendSessionCache = normalizeTrendSessionCacheInfo(result);
+        setTrendSessionStatus("ready", "브라우저 쿠키를 불러와 로그인 세션을 준비했습니다.");
         if (elements.localCookieStatus) {
             elements.localCookieStatus.dataset.locked = "true";
             elements.localCookieStatus.textContent = `${formatTrendBrowserLabel(result.browser || browser)} 브라우저에서 쿠키 ${result.cookie_count || 0}개를 불러왔습니다.`;
@@ -1266,6 +1278,7 @@ async function importLocalNaverCookie() {
                 },
             );
         }
+        setTrendSessionStatus("error", normalized.message);
         throw normalized;
     }
 }
@@ -1351,6 +1364,7 @@ async function validateTrendSession() {
     };
 
     state.trendSessionValidationPending = true;
+    setTrendSessionStatus("checking", "Creator Advisor 로그인 상태를 확인하는 중입니다.");
     if (elements.localCookieStatus) {
         elements.localCookieStatus.dataset.locked = "true";
         elements.localCookieStatus.textContent = "Creator Advisor 로그인 상태를 확인하는 중입니다...";
@@ -1386,6 +1400,7 @@ async function validateTrendSession() {
                 elements.localCookieStatus.dataset.locked = "true";
                 elements.localCookieStatus.textContent = successMessage;
             }
+            setTrendSessionStatus("valid", successMessage);
             addLog(successMessage, "success");
             showUserNotice({
                 message: successMessage,
@@ -1398,6 +1413,7 @@ async function validateTrendSession() {
                 elements.localCookieStatus.dataset.locked = "true";
                 elements.localCookieStatus.textContent = warningMessage;
             }
+            setTrendSessionStatus("invalid", warningMessage);
             addLog(warningMessage, "error");
             showUserNotice({
                 message: warningMessage,
@@ -1417,6 +1433,7 @@ async function validateTrendSession() {
             elements.localCookieStatus.dataset.locked = "true";
             elements.localCookieStatus.textContent = normalized.message;
         }
+        setTrendSessionStatus("error", normalized.message);
         renderTrendSettingsState();
         throw normalized;
     }
@@ -1426,6 +1443,7 @@ async function openDedicatedLoginBrowser() {
     const requestedBrowser = resolveTrendBrowserRequest();
     const browser = requestedBrowser === "chrome" ? "chrome" : "edge";
     const browserLabel = formatTrendBrowserLabel(browser);
+    setTrendSessionStatus("checking", `${browserLabel} 전용 로그인 브라우저를 열었습니다.`);
 
     if (elements.localCookieStatus) {
         elements.localCookieStatus.dataset.locked = "true";
@@ -1447,6 +1465,7 @@ async function openDedicatedLoginBrowser() {
 
         elements.trendCookieInput.value = cookieHeader;
         state.trendSessionCache = normalizeTrendSessionCacheInfo(result);
+        setTrendSessionStatus("ready", "전용 로그인 브라우저 세션을 저장했습니다.");
         if (elements.localCookieStatus) {
             elements.localCookieStatus.dataset.locked = "true";
             elements.localCookieStatus.textContent = `${formatTrendBrowserLabel(result.browser || browser)} 전용 프로필에서 쿠키 ${result.cookie_count || 0}개를 저장했습니다.`;
@@ -1470,6 +1489,7 @@ async function openDedicatedLoginBrowser() {
                 ? `${normalized.message} / ${hint}`
                 : normalized.message;
         }
+        setTrendSessionStatus("error", normalized.message);
         throw normalized;
     }
 }
@@ -2401,12 +2421,289 @@ function renderQuickStartState() {
 }
 
 
+function getSelectedOptionText(element, fallback = "") {
+    if (!(element instanceof HTMLSelectElement)) {
+        return String(fallback || "").trim();
+    }
+    const selectedOption = element.options[element.selectedIndex];
+    return String(selectedOption?.text || element.value || fallback || "").trim();
+}
+
+function formatCompactRange(values, orderedValues) {
+    const normalizedValues = Array.isArray(values)
+        ? values.map((value) => String(value || "").trim()).filter(Boolean)
+        : [];
+    const safeOrder = Array.isArray(orderedValues)
+        ? orderedValues.map((value) => String(value || "").trim()).filter(Boolean)
+        : [];
+
+    if (!normalizedValues.length) {
+        return "-";
+    }
+    if (!safeOrder.length) {
+        return normalizedValues.join(", ");
+    }
+
+    const indexes = normalizedValues
+        .map((value) => safeOrder.indexOf(value))
+        .filter((index) => index >= 0);
+
+    if (
+        indexes.length === normalizedValues.length
+        && indexes.every((index, position) => position === 0 || index === indexes[position - 1] + 1)
+    ) {
+        return indexes.length === 1
+            ? normalizedValues[0]
+            : `${normalizedValues[0]}-${normalizedValues[normalizedValues.length - 1]}`;
+    }
+
+    return normalizedValues.join(", ");
+}
+
+function formatTitleKeywordModesCompact(rawModes) {
+    const modes = typeof normalizeTitleKeywordModes === "function"
+        ? normalizeTitleKeywordModes(rawModes)
+        : [];
+    const labelMap = {
+        single: "단일",
+        longtail_selected: "V1",
+        longtail_exploratory: "V2",
+        longtail_experimental: "V3",
+    };
+    return modes.map((mode) => labelMap[mode] || mode).filter(Boolean).join(" + ");
+}
+
+function formatTitleSurfaceSummaryCompact(rawModes, rawCounts) {
+    const modes = typeof normalizeTitleSurfaceModes === "function"
+        ? normalizeTitleSurfaceModes(rawModes)
+        : [];
+    const nextModes = modes.length ? modes : ["naver_home"];
+    const counts = typeof buildNormalizedTitleSurfaceCounts === "function"
+        ? buildNormalizedTitleSurfaceCounts(rawCounts, nextModes)
+        : (rawCounts || {});
+
+    return nextModes
+        .map((channel) => `${TITLE_SURFACE_SHORT_LABELS[channel] || channel} ${counts[channel] || 1}개`)
+        .join(" · ");
+}
+
+function buildHeroInputStatusSummary() {
+    const mode = getCollectorMode();
+    if (mode === "category") {
+        const categoryLabel = getSelectedOptionText(elements.categoryInput, "카테고리 미선택");
+        const sourceValue = String(elements.categorySourceInput?.value || "").trim();
+        const sourceLabel = getSelectedOptionText(elements.categorySourceInput, "수집 소스 미설정");
+        const trendLabel = sourceValue === "naver_trend"
+            ? getSelectedOptionText(elements.trendServiceInput, "네이버 블로그")
+            : "";
+
+        return {
+            value: `카테고리 · ${categoryLabel}`,
+            meta: [sourceLabel, trendLabel].filter(Boolean).join(" · ") || "카테고리 기준으로 수집합니다.",
+        };
+    }
+
+    const seeds = parseKeywordText(elements.seedInput?.value || "");
+    const rawSeed = String(elements.seedInput?.value || "").trim();
+    if (seeds.length > 1) {
+        return {
+            value: `시드 · ${seeds.length}개`,
+            meta: `${seeds[0]} 외 ${seeds.length - 1}개 기준으로 발굴합니다.`,
+        };
+    }
+    if (seeds.length === 1 || rawSeed) {
+        const firstSeed = seeds[0] || rawSeed;
+        return {
+            value: `시드 · ${firstSeed}`,
+            meta: "직접 입력한 시드 기준으로 수집과 확장을 시작합니다.",
+        };
+    }
+    return {
+        value: "시드 · 입력 필요",
+        meta: "시드 키워드를 입력하거나 카테고리 모드로 바꿔 주세요.",
+    };
+}
+
+function buildHeroSelectionStatusSummary() {
+    const profitability = typeof getSelectedGradeFilters === "function"
+        ? getSelectedGradeFilters()
+        : [...PROFITABILITY_ORDER];
+    const attackability = typeof getSelectedAttackabilityFilters === "function"
+        ? getSelectedAttackabilityFilters()
+        : [...ATTACKABILITY_ORDER];
+    const hasExplicitSelection = typeof hasAppliedAxisFilterSelection === "function"
+        ? hasAppliedAxisFilterSelection()
+        : Boolean(state.gradeSelectionTouched);
+
+    if (!hasExplicitSelection || !profitability.length || !attackability.length) {
+        return {
+            value: "자동 선별",
+            meta: "전체 실행 시 현재 결과 기준으로 기본 선별이 적용됩니다.",
+        };
+    }
+
+    const presetKey = typeof resolveSelectionPresetKey === "function"
+        ? resolveSelectionPresetKey(profitability, attackability)
+        : "custom";
+    const presetLabel = typeof resolveSelectionPresetLabel === "function"
+        ? resolveSelectionPresetLabel(presetKey)
+        : (GRADE_PRESET_MAP[presetKey]?.label || "사용자 정의");
+
+    return {
+        value: presetLabel,
+        meta: `수익성 ${formatCompactRange(profitability, PROFITABILITY_ORDER)} · 노출도 ${formatCompactRange(attackability, ATTACKABILITY_ORDER)}`,
+    };
+}
+
+function buildHeroTitleStatusSummary() {
+    const settings = typeof getTitleSettingsFormState === "function"
+        ? getTitleSettingsFormState()
+        : {
+            mode: "template",
+            keyword_modes: ["single"],
+            surface_modes: ["naver_home", "blog"],
+            surface_counts: DEFAULT_TITLE_SURFACE_COUNTS,
+        };
+    const surfaceSummary = formatTitleSurfaceSummaryCompact(settings.surface_modes, settings.surface_counts);
+    const keywordModeSummary = formatTitleKeywordModesCompact(settings.keyword_modes);
+
+    if (settings.mode === "ai") {
+        const providerLabel = settings.provider
+            ? formatTitleProviderLabel(settings.provider)
+            : "미등록";
+        const modelLabel = settings.model || "모델 미선택";
+        return {
+            value: `AI 생성 · ${providerLabel}`,
+            meta: [modelLabel, surfaceSummary, keywordModeSummary].filter(Boolean).join(" · "),
+        };
+    }
+
+    return {
+        value: "템플릿 생성",
+        meta: [surfaceSummary, keywordModeSummary].filter(Boolean).join(" · "),
+    };
+}
+
+function buildHeroOperationStatusSummary() {
+    const draftSettings = typeof getOperationSettingsFormState === "function"
+        ? getOperationSettingsFormState()
+        : normalizeOperationSettings({ mode: OPERATION_MODE_DEFAULT });
+    const snapshot = state.operationSettingsSnapshot?.state ? state.operationSettingsSnapshot : null;
+    const runtimeSettings = snapshot?.settings
+        ? normalizeOperationSettings(snapshot.settings)
+        : draftSettings;
+    const runtimeState = snapshot?.state || null;
+    const preset = runtimeSettings.mode === "custom"
+        ? null
+        : findOperationModePreset(runtimeSettings.mode);
+    const modeLabel = runtimeSettings.mode === "custom"
+        ? "직접 설정"
+        : (preset?.label || "상시 슬로우");
+    const guardLabel = runtimeState
+        ? buildOperationGuardLabel(runtimeState)
+        : (runtimeSettings.stop_on_auth_error ? "보호 활성" : "보호 완화");
+    const dailyLimitLabel = runtimeSettings.daily_operation_limit > 0
+        ? `일일 ${runtimeSettings.daily_operation_limit}회`
+        : "일일 제한 없음";
+
+    return {
+        value: `${modeLabel} · ${guardLabel}`,
+        meta: `${runtimeSettings.naver_request_gap_seconds}초 간격 · ${dailyLimitLabel}`,
+    };
+}
+
+function buildHeroNaverLoginStatusSummary() {
+    const authLocked = Boolean(state.operationSettingsSnapshot?.state?.auth_lock_active);
+    const authLockMessage = String(state.operationSettingsSnapshot?.state?.auth_lock_message || "").trim();
+    const hasInlineCookie = Boolean(elements.trendCookieInput?.value?.trim());
+    const cacheInfo = state.trendSessionCache?.available ? state.trendSessionCache : null;
+
+    if (state.trendSessionValidationPending || state.trendSessionStatus === "checking") {
+        return {
+            value: "확인 중",
+            meta: "Creator Advisor 로그인 상태를 확인하고 있습니다.",
+        };
+    }
+    if (authLocked || state.trendSessionStatus === "invalid") {
+        return {
+            value: "로그인 필요",
+            meta: authLockMessage || state.trendSessionStatusMessage || "네이버 로그인 세션을 다시 확인해 주세요.",
+        };
+    }
+    if (state.trendSessionStatus === "valid") {
+        return {
+            value: "로그인 정상",
+            meta: state.trendSessionStatusMessage || "Creator Advisor 세션이 유효합니다.",
+        };
+    }
+    if (hasInlineCookie) {
+        return {
+            value: "세션 준비됨",
+            meta: "현재 브라우저 쿠키를 직접 입력했습니다.",
+        };
+    }
+    if (cacheInfo) {
+        return {
+            value: "세션 준비됨",
+            meta: `${formatTrendBrowserLabel(cacheInfo.browser || "")} 저장 세션 · 쿠키 ${cacheInfo.cookie_count || 0}개`,
+        };
+    }
+    if (state.trendSessionStatus === "error") {
+        return {
+            value: "확인 실패",
+            meta: state.trendSessionStatusMessage || "로그인 상태를 다시 확인해 주세요.",
+        };
+    }
+    return {
+        value: "미확인",
+        meta: "로그인 상태 확인 버튼으로 Creator Advisor 세션을 검증할 수 있습니다.",
+    };
+}
+
+function updateHeroStatusCard(valueElement, metaElement, valueText, metaText) {
+    if (valueElement) {
+        valueElement.textContent = valueText;
+    }
+    if (metaElement) {
+        metaElement.textContent = metaText;
+    }
+}
+
+function renderHeroStatusSummary() {
+    updateHeroStatusCard(
+        elements.heroInputStatusValue,
+        elements.heroInputStatusMeta,
+        buildHeroInputStatusSummary().value,
+        buildHeroInputStatusSummary().meta,
+    );
+    updateHeroStatusCard(
+        elements.heroSelectionStatusValue,
+        elements.heroSelectionStatusMeta,
+        buildHeroSelectionStatusSummary().value,
+        buildHeroSelectionStatusSummary().meta,
+    );
+    updateHeroStatusCard(
+        elements.heroTitleStatusValue,
+        elements.heroTitleStatusMeta,
+        buildHeroTitleStatusSummary().value,
+        buildHeroTitleStatusSummary().meta,
+    );
+    updateHeroStatusCard(
+        elements.heroOperationStatusValue,
+        elements.heroOperationStatusMeta,
+        buildHeroOperationStatusSummary().value,
+        buildHeroOperationStatusSummary().meta,
+    );
+    updateHeroStatusCard(
+        elements.heroNaverLoginStatusValue,
+        elements.heroNaverLoginStatusMeta,
+        buildHeroNaverLoginStatusSummary().value,
+        buildHeroNaverLoginStatusSummary().meta,
+    );
+}
+
 function renderCounts() {
-    document.getElementById("countCollected").textContent = countItems(state.results.collected?.collected_keywords);
-    document.getElementById("countExpanded").textContent = countItems(state.results.expanded?.expanded_keywords);
-    document.getElementById("countAnalyzed").textContent = countItems(state.results.analyzed?.analyzed_keywords);
-    document.getElementById("countSelected").textContent = countItems(state.results.selected?.selected_keywords);
-    document.getElementById("countTitled").textContent = countItems(state.results.titled?.generated_titles);
+    renderHeroStatusSummary();
 }
 
 
@@ -4959,6 +5256,16 @@ function bindElements() {
     elements.categoryInput = document.getElementById("categoryInput");
     elements.categorySourceInput = document.getElementById("categorySourceInput");
     elements.seedInput = document.getElementById("seedInput");
+    elements.heroInputStatusValue = document.getElementById("heroInputStatusValue");
+    elements.heroInputStatusMeta = document.getElementById("heroInputStatusMeta");
+    elements.heroSelectionStatusValue = document.getElementById("heroSelectionStatusValue");
+    elements.heroSelectionStatusMeta = document.getElementById("heroSelectionStatusMeta");
+    elements.heroTitleStatusValue = document.getElementById("heroTitleStatusValue");
+    elements.heroTitleStatusMeta = document.getElementById("heroTitleStatusMeta");
+    elements.heroOperationStatusValue = document.getElementById("heroOperationStatusValue");
+    elements.heroOperationStatusMeta = document.getElementById("heroOperationStatusMeta");
+    elements.heroNaverLoginStatusValue = document.getElementById("heroNaverLoginStatusValue");
+    elements.heroNaverLoginStatusMeta = document.getElementById("heroNaverLoginStatusMeta");
     elements.trendServiceInput = document.getElementById("trendServiceInput");
     elements.trendDateInput = document.getElementById("trendDateInput");
     elements.trendBrowserInput = document.getElementById("trendBrowserInput");
@@ -5175,6 +5482,10 @@ function bindEvents() {
     document.querySelectorAll("input[name='collectorMode']").forEach((element) => {
         element.addEventListener("change", renderInputState);
     });
+    elements.categoryInput?.addEventListener("input", renderInputState);
+    elements.categoryInput?.addEventListener("change", renderInputState);
+    elements.seedInput?.addEventListener("input", renderInputState);
+    elements.seedInput?.addEventListener("change", renderInputState);
     elements.quickStartHelpButtons.forEach((button) => {
         button.addEventListener("click", () => {
             showQuickStartHelp(button.dataset.quickstartHelp || "");
@@ -5511,6 +5822,8 @@ function renderTrendSettingsState() {
                 ? `저장된 ${cachedBrowserLabel} 세션이 있어 입력 칸이 비어도 수집 시 자동으로 사용합니다.`
                 : "먼저 이 페이지를 연 브라우저에서 네이버 로그인 후 세션을 불러오세요.";
     }
+
+    renderHeroStatusSummary();
 }
 
 
@@ -10191,6 +10504,8 @@ function renderTitleSettingsState() {
     elements.titleModeBadge.textContent = isAiMode
         ? (selectedProvider ? `AI:${selectedProvider}` : "AI:미등록")
         : "템플릿";
+
+    renderHeroStatusSummary();
 }
 
 function getTitleSettingsFormState() {
@@ -10658,6 +10973,7 @@ function renderOperationSettingsState() {
                 : "서버 반영값을 아직 받지 못했습니다. 로컬 저장본을 먼저 표시 중입니다.";
         }
     }
+    renderHeroStatusSummary();
 }
 
 async function requestOperationSettings(endpoint, options = {}) {
