@@ -202,6 +202,13 @@ function buildDebugMarkdown(debugInfo) {
     `- Build: ${debugInfo.buildId || "-"}`
   ];
 
+  if (debugInfo.failed) {
+    lines.push("- Result: FAIL");
+  }
+  if (Array.isArray(debugInfo.strategyOrder) && debugInfo.strategyOrder.length) {
+    lines.push(`- Order: ${debugInfo.strategyOrder.join(" -> ")}`);
+  }
+
   if (Array.isArray(debugInfo.attempts) && debugInfo.attempts.length) {
     lines.push("- Attempts:");
     for (const item of debugInfo.attempts) {
@@ -217,6 +224,13 @@ function formatDebugInfo(debugInfo) {
     `Success Path: ${debugInfo.successPath || "-"}`,
     `Build: ${debugInfo.buildId || "-"}`
   ];
+
+  if (debugInfo.failed) {
+    lines.push("Result: FAIL");
+  }
+  if (Array.isArray(debugInfo.strategyOrder) && debugInfo.strategyOrder.length) {
+    lines.push(`Order: ${debugInfo.strategyOrder.join(" -> ")}`);
+  }
 
   if (Array.isArray(debugInfo.attempts) && debugInfo.attempts.length) {
     lines.push("Attempts:");

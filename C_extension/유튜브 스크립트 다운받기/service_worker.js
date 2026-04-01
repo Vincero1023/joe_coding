@@ -6,7 +6,7 @@ const STORAGE_KEYS = {
   debugState: "debugState"
 };
 
-const BUILD_ID = "2026-03-14-transcript-dom-fix";
+const BUILD_ID = "2026-04-01-self-healing-fetch-pipeline";
 const MAX_ERROR_LOGS = 200;
 const TRANSCRIPT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const SHORTCUT_DEDUP_MS = 900;
@@ -16,6 +16,49 @@ const PARAGRAPH_MIN_SENTENCES = 3;
 const PARAGRAPH_MAX_SENTENCES = 5;
 const PARAGRAPH_HARD_MAX = Math.round(TRANSCRIPT_LINE_TARGET * 4.8);
 const recentShortcutActions = new Map();
+const TRANSCRIPT_FETCH_STEP_IDS = Object.freeze([
+  "current-page",
+  "source-tab",
+  "watch-html",
+  "temporary-watch-tab"
+]);
+const TRANSCRIPT_HEALTH_RECENT_SUCCESS_MS = 3 * 24 * 60 * 60 * 1000;
+const MOBILE_PLAYER_CLIENTS = Object.freeze([
+  {
+    label: "ios",
+    headerClientName: "5",
+    headerClientVersion: "20.10.4",
+    contextClient: {
+      clientName: "IOS",
+      clientVersion: "20.10.4",
+      deviceModel: "iPhone16,2",
+      hl: "ko",
+      gl: "KR",
+      utcOffsetMinutes: 540
+    }
+  },
+  {
+    label: "android",
+    headerClientName: "3",
+    headerClientVersion: "20.10.38",
+    contextClient: {
+      clientName: "ANDROID",
+      clientVersion: "20.10.38",
+      androidSdkVersion: 34,
+      hl: "ko",
+      gl: "KR",
+      utcOffsetMinutes: 540
+    }
+  }
+]);
+const DEFAULT_DEBUG_STATE = Object.freeze({
+  lastFetch: null,
+  lastError: null,
+  pathHealth: {
+    lastSuccessfulPath: "",
+    strategies: {}
+  }
+});
 
 const DEFAULT_SUMMARY_TEMPLATE = [
   "Analyze the following YouTube transcript and organize it in a 2-layer output.",
@@ -286,9 +329,10 @@ function classifyErrorCategory(message, scope) {
   const s = String(scope || "").toLowerCase();
 
   if (text.includes("not youtube watch") || text.includes("video id")) return "E101";
-  if (text.includes("android player")) return "E202";
+  if (text.includes("android player") || text.includes("mobile player")) return "E202";
   if (text.includes("innertube failed") || text.includes("precondition check failed")) return "E301";
   if (text.includes("source tab extract failed")) return "E350";
+  if (text.includes("temporary-watch-tab") || text.includes("helper tab")) return "E351";
   if (text.includes("html-response") || text.includes("timedtext failed")) return "E201";
   if (text.includes("texttracks")) return "E401";
   if (text.includes("transcript panel")) return "E501";
@@ -325,9 +369,16 @@ async function getDebugState() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.debugState);
   const state = stored[STORAGE_KEYS.debugState];
   if (state && typeof state === "object") {
-    return state;
+    return {
+      ...DEFAULT_DEBUG_STATE,
+      ...state,
+      pathHealth: normalizeTranscriptPathHealth(state.pathHealth)
+    };
   }
-  return { lastFetch: null, lastError: null };
+  return {
+    ...DEFAULT_DEBUG_STATE,
+    pathHealth: normalizeTranscriptPathHealth(DEFAULT_DEBUG_STATE.pathHealth)
+  };
 }
 
 async function saveDebugState(patch) {
@@ -338,6 +389,117 @@ async function saveDebugState(patch) {
       ...patch
     }
   });
+}
+
+function normalizeTranscriptPathHealth(value) {
+  const normalized = {
+    lastSuccessfulPath: "",
+    strategies: {}
+  };
+
+  if (!value || typeof value !== "object") {
+    return normalized;
+  }
+
+  if (typeof value.lastSuccessfulPath === "string") {
+    normalized.lastSuccessfulPath = value.lastSuccessfulPath;
+  }
+
+  const strategies =
+    value.strategies && typeof value.strategies === "object" ? value.strategies : {};
+
+  for (const step of TRANSCRIPT_FETCH_STEP_IDS) {
+    const current = strategies[step];
+    if (!current || typeof current !== "object") continue;
+
+    normalized.strategies[step] = {
+      successCount: Number.isFinite(Number(current.successCount)) ? Number(current.successCount) : 0,
+      failureCount: Number.isFinite(Number(current.failureCount)) ? Number(current.failureCount) : 0,
+      consecutiveFailures: Number.isFinite(Number(current.consecutiveFailures))
+        ? Number(current.consecutiveFailures)
+        : 0,
+      lastResult: current.lastResult === "ok" ? "ok" : current.lastResult === "fail" ? "fail" : "",
+      lastOkAt: Number.isFinite(Number(current.lastOkAt)) ? Number(current.lastOkAt) : 0,
+      lastFailAt: Number.isFinite(Number(current.lastFailAt)) ? Number(current.lastFailAt) : 0,
+      lastMessage: typeof current.lastMessage === "string" ? current.lastMessage : "",
+      lastDetail: typeof current.lastDetail === "string" ? current.lastDetail : ""
+    };
+  }
+
+  return normalized;
+}
+
+function getTranscriptPathPriority(step, baseIndex, pathHealth, now = Date.now()) {
+  const strategies = pathHealth?.strategies || {};
+  const state = strategies[step] || null;
+  let score = baseIndex * 100;
+
+  // Keep the helper-tab path as a last-resort option unless other paths have clearly degraded.
+  if (step === "temporary-watch-tab") score += 180;
+
+  if (pathHealth?.lastSuccessfulPath === step) score -= 260;
+  if (state?.lastResult === "ok") score -= 70;
+  if (state?.lastOkAt && now - state.lastOkAt < TRANSCRIPT_HEALTH_RECENT_SUCCESS_MS) score -= 35;
+
+  const failStreak = Number(state?.consecutiveFailures || 0);
+  if (failStreak >= 2) score += 80 + (failStreak - 2) * 25;
+  if (state?.lastResult === "fail") score += 10;
+  if ((state?.failureCount || 0) > 0 && !(state?.successCount || 0)) score += 20;
+
+  return score;
+}
+
+function prioritizeTranscriptFetchSteps(steps, pathHealth) {
+  const baseOrder = new Map(steps.map((item, index) => [item.step, index]));
+  const normalizedHealth = normalizeTranscriptPathHealth(pathHealth);
+  const now = Date.now();
+
+  return [...steps].sort((a, b) => {
+    const scoreA = getTranscriptPathPriority(a.step, baseOrder.get(a.step) ?? 99, normalizedHealth, now);
+    const scoreB = getTranscriptPathPriority(b.step, baseOrder.get(b.step) ?? 99, normalizedHealth, now);
+    if (scoreA !== scoreB) return scoreA - scoreB;
+    return (baseOrder.get(a.step) ?? 99) - (baseOrder.get(b.step) ?? 99);
+  });
+}
+
+async function updateTranscriptPathHealth(step, ok, message = "", detail = "") {
+  if (!TRANSCRIPT_FETCH_STEP_IDS.includes(step)) return null;
+
+  const current = await getDebugState();
+  const pathHealth = normalizeTranscriptPathHealth(current.pathHealth);
+  const existing = pathHealth.strategies[step] || {
+    successCount: 0,
+    failureCount: 0,
+    consecutiveFailures: 0,
+    lastResult: "",
+    lastOkAt: 0,
+    lastFailAt: 0,
+    lastMessage: "",
+    lastDetail: ""
+  };
+  const now = Date.now();
+
+  const next = {
+    ...existing,
+    lastResult: ok ? "ok" : "fail",
+    lastMessage: String(message || "").slice(0, 300),
+    lastDetail: String(detail || "").slice(0, 300)
+  };
+
+  if (ok) {
+    next.successCount += 1;
+    next.consecutiveFailures = 0;
+    next.lastOkAt = now;
+    pathHealth.lastSuccessfulPath = step;
+  } else {
+    next.failureCount += 1;
+    next.consecutiveFailures += 1;
+    next.lastFailAt = now;
+  }
+
+  pathHealth.strategies[step] = next;
+  await saveDebugState({ pathHealth });
+  return pathHealth;
 }
 async function getSettings() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.settings);
@@ -702,6 +864,59 @@ async function detectEmbeddedVideoId(tabId) {
     return null;
   }
 }
+
+function buildTranscriptFetchSteps({ videoId, sourceTabId, sourceTab, preferredLanguage, fallbackTitle }) {
+  return [
+    {
+      step: "current-page",
+      canRun: typeof sourceTabId === "number",
+      run: () => fetchTranscriptFromCurrentPage(sourceTabId, videoId, preferredLanguage)
+    },
+    {
+      step: "source-tab",
+      canRun:
+        typeof sourceTabId === "number" &&
+        Boolean(sourceTab?.url && sourceTab.url.includes("youtube.com/watch")),
+      run: () => fetchTranscriptViaSourceTab(sourceTabId, preferredLanguage)
+    },
+    {
+      step: "watch-html",
+      canRun: true,
+      run: () => fetchTranscriptViaWatchPage(videoId, preferredLanguage, fallbackTitle)
+    },
+    {
+      step: "temporary-watch-tab",
+      canRun: true,
+      run: () => fetchTranscriptViaTemporaryWatchTab(videoId, preferredLanguage)
+    }
+  ].filter((item) => item.canRun);
+}
+
+function buildTranscriptFetchOutput({
+  videoId,
+  fallbackTitle,
+  step,
+  data,
+  attempts,
+  strategyOrder
+}) {
+  return {
+    videoId,
+    videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+    title: data.title || fallbackTitle || `youtube-${videoId}`,
+    languageCode: data.languageCode || "unknown",
+    trackName: data.trackName || step,
+    transcript: reflowTranscriptForReading(data.transcript),
+    fetchedAt: new Date().toISOString(),
+    debugInfo: {
+      successPath: step,
+      strategyOrder,
+      attempts: [...attempts, { step, ok: true, message: data.trackName || "success" }],
+      buildId: BUILD_ID
+    }
+  };
+}
+
 async function fetchTranscriptForVideo(videoId, sourceTabId) {
   const settings = await getSettings();
   const cached = await getCachedTranscript(videoId);
@@ -729,83 +944,51 @@ async function fetchTranscriptForVideo(videoId, sourceTabId) {
   const sourceTab =
     typeof sourceTabId === "number" ? await chrome.tabs.get(sourceTabId).catch(() => null) : null;
   const fallbackTitle = normalizeYoutubeTitle(sourceTab?.title || "");
-
-  if (typeof sourceTabId === "number") {
-    try {
-      const data = await fetchTranscriptFromCurrentPage(sourceTabId, videoId, settings.preferredLanguage);
-      const output = {
-        videoId,
-        videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
-        title: data.title || fallbackTitle || `youtube-${videoId}`,
-        languageCode: data.languageCode || "unknown",
-        trackName: data.trackName || "current-page",
-        transcript: reflowTranscriptForReading(data.transcript),
-        fetchedAt: new Date().toISOString(),
-        debugInfo: {
-          successPath: "current-page",
-          attempts: [...attempts, { step: "current-page", ok: true, message: data.trackName || "success" }],
-          buildId: BUILD_ID
-        }
-      };
-      await saveCachedTranscript(videoId, output);
-      await saveDebugState({ lastFetch: output.debugInfo });
-      return output;
-    } catch (error) {
-      errors.push(`current-page: ${error.message}`);
-      attempts.push({ step: "current-page", ok: false, message: error.message });
-    }
-  }
-
-  if (sourceTab?.url && sourceTab.url.includes("youtube.com/watch") && typeof sourceTabId === "number") {
-    try {
-      const data = await fetchTranscriptViaSourceTab(sourceTabId, settings.preferredLanguage);
-      const output = {
-        videoId,
-        videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
-        title: data.title || fallbackTitle || `youtube-${videoId}`,
-        languageCode: data.languageCode || "unknown",
-        trackName: data.trackName || "source-tab",
-        transcript: reflowTranscriptForReading(data.transcript),
-        fetchedAt: new Date().toISOString(),
-        debugInfo: {
-          successPath: "source-tab",
-          attempts: [...attempts, { step: "source-tab", ok: true, message: data.trackName || "success" }],
-          buildId: BUILD_ID
-        }
-      };
-      await saveCachedTranscript(videoId, output);
-      await saveDebugState({ lastFetch: output.debugInfo });
-      return output;
-    } catch (error) {
-      errors.push(`source-tab: ${error.message}`);
-      attempts.push({ step: "source-tab", ok: false, message: error.message });
-    }
-  }
-
-  try {
-    const data = await fetchTranscriptViaWatchPage(videoId, settings.preferredLanguage, fallbackTitle);
-    const output = {
+  const debugState = await getDebugState();
+  const orderedSteps = prioritizeTranscriptFetchSteps(
+    buildTranscriptFetchSteps({
       videoId,
-      videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
-      title: data.title || `youtube-${videoId}`,
-      languageCode: data.languageCode || "unknown",
-      trackName: data.trackName || "watch-html",
-      transcript: reflowTranscriptForReading(data.transcript),
-      fetchedAt: new Date().toISOString(),
-      debugInfo: {
-        successPath: "watch-html",
-        attempts: [...attempts, { step: "watch-html", ok: true, message: data.trackName || "success" }],
-        buildId: BUILD_ID
-      }
-    };
-    await saveCachedTranscript(videoId, output);
-    await saveDebugState({ lastFetch: output.debugInfo });
-    return output;
-  } catch (error) {
-    errors.push(`watch-html: ${error.message}`);
-    attempts.push({ step: "watch-html", ok: false, message: error.message });
+      sourceTabId,
+      sourceTab,
+      preferredLanguage: settings.preferredLanguage,
+      fallbackTitle
+    }),
+    debugState.pathHealth
+  );
+  const strategyOrder = orderedSteps.map((item) => item.step);
+
+  for (const item of orderedSteps) {
+    try {
+      const data = await item.run();
+      const output = buildTranscriptFetchOutput({
+        videoId,
+        fallbackTitle,
+        step: item.step,
+        data,
+        attempts,
+        strategyOrder
+      });
+      await saveCachedTranscript(videoId, output);
+      await updateTranscriptPathHealth(item.step, true, data.trackName || "success", data.languageCode || "");
+      await saveDebugState({ lastFetch: output.debugInfo });
+      return output;
+    } catch (error) {
+      const message = error?.message || String(error);
+      errors.push(`${item.step}: ${message}`);
+      attempts.push({ step: item.step, ok: false, message });
+      await updateTranscriptPathHealth(item.step, false, message);
+    }
   }
 
+  await saveDebugState({
+    lastFetch: {
+      successPath: "",
+      failed: true,
+      strategyOrder,
+      attempts,
+      buildId: BUILD_ID
+    }
+  });
   throw new Error(`[${BUILD_ID}] Failed to fetch transcript. Attempts: ${errors.slice(0, 4).join(" | ")}`);
 }
 
@@ -1114,49 +1297,66 @@ async function fetchTranscriptFromCurrentPage(tabId, videoId, preferredLanguage)
 
 async function fetchTranscriptViaWatchPage(videoId, preferredLanguage, fallbackTitle = "") {
   const html = await fetchYoutubeWatchHtml(videoId);
-  let playerResponse = extractPlayerResponseFromHtml(html);
-  let tracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-
-  if (!tracks.length) {
-    playerResponse = await fetchPlayerResponseViaInnertube(videoId, html);
-    tracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-  }
-
-  if (!tracks.length) {
-    throw new Error("caption tracks not found");
-  }
-
-  const sortedTracks = sortCaptionTracksForPreference(tracks, preferredLanguage);
   const localErrors = [];
+  const playerResponse = extractPlayerResponseFromHtml(html);
+  const tracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
 
-  for (const track of sortedTracks.slice(0, 5)) {
-    const urls = buildCaptionCandidateUrls(track, videoId);
-    for (const url of urls) {
-      try {
-        const payload = await fetchCaptionPayload(url);
-        const transcript = parseCaptionPayloadText(payload);
-        if (!transcript) {
-          localErrors.push(`${trackDisplayName(track)} empty-parse`);
-          continue;
+  async function tryTrackSet(sourceLabel, sourceResponse, sourceTracks) {
+    const sortedTracks = sortCaptionTracksForPreference(sourceTracks, preferredLanguage);
+
+    for (const track of sortedTracks.slice(0, 5)) {
+      const urls = buildCaptionCandidateUrls(track, videoId);
+      for (const url of urls) {
+        try {
+          const payload = await fetchCaptionPayload(url);
+          const transcript = parseCaptionPayloadText(payload);
+          if (!transcript) {
+            localErrors.push(`${sourceLabel} ${trackDisplayName(track)} empty-parse`);
+            continue;
+          }
+
+          return {
+            title:
+              normalizeYoutubeTitle(sourceResponse?.videoDetails?.title) ||
+              extractTitleFromHtml(html) ||
+              fallbackTitle ||
+              `youtube-${videoId}`,
+            languageCode: normalizeCaptionLanguage(track?.languageCode) || "unknown",
+            trackName:
+              sourceLabel === "watch-html"
+                ? trackDisplayName(track)
+                : `${sourceLabel}-${trackDisplayName(track)}`,
+            transcript
+          };
+        } catch (error) {
+          localErrors.push(`${sourceLabel} ${error?.message || String(error)}`);
         }
-
-        return {
-          title:
-            normalizeYoutubeTitle(playerResponse?.videoDetails?.title) ||
-            extractTitleFromHtml(html) ||
-            fallbackTitle ||
-            `youtube-${videoId}`,
-          languageCode: normalizeCaptionLanguage(track?.languageCode) || "unknown",
-          trackName: trackDisplayName(track),
-          transcript
-        };
-      } catch (error) {
-        localErrors.push(error?.message || String(error));
       }
     }
+
+    return null;
   }
 
-  throw new Error(`caption fetch failed: ${localErrors.slice(0, 4).join(" | ")}`);
+  if (tracks.length) {
+    const fromHtmlTracks = await tryTrackSet("watch-html", playerResponse, tracks);
+    if (fromHtmlTracks) return fromHtmlTracks;
+  }
+
+  try {
+    const mobilePlayerResponse = await fetchPlayerResponseViaInnertube(videoId, html);
+    const mobileTracks = mobilePlayerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    if (mobileTracks.length) {
+      const fromMobileTracks = await tryTrackSet("mobile-player", mobilePlayerResponse, mobileTracks);
+      if (fromMobileTracks) return fromMobileTracks;
+    } else {
+      localErrors.push("mobile-player captionTracks not found");
+    }
+  } catch (error) {
+    localErrors.push(error?.message || String(error));
+  }
+
+  const detail = localErrors.slice(0, 4).join(" | ");
+  throw new Error(`caption fetch failed: ${detail || "caption tracks not found"}`);
 }
 
 async function fetchYoutubeWatchHtml(videoId) {
@@ -1186,44 +1386,50 @@ async function fetchYoutubeWatchHtml(videoId) {
 
 async function fetchPlayerResponseViaInnertube(videoId, html) {
   const apiKey = extractInnertubeConfigValue(html, "INNERTUBE_API_KEY");
-  const clientVersion =
-    extractInnertubeConfigValue(html, "INNERTUBE_CLIENT_VERSION") || "2.20260226.00.00";
 
   if (!apiKey) {
     return null;
   }
+  const localErrors = [];
 
-  const response = await fetch(
-    `https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(apiKey)}&prettyPrint=false`,
-    {
-      method: "POST",
-      credentials: "omit",
-      headers: {
-        "content-type": "application/json",
-        "x-youtube-client-name": "1",
-        "x-youtube-client-version": clientVersion
-      },
-      body: JSON.stringify({
-        videoId,
-        contentCheckOk: true,
-        racyCheckOk: true,
-        context: {
-          client: {
-            clientName: "WEB",
-            clientVersion,
-            hl: "ko",
-            gl: "KR"
+  for (const client of MOBILE_PLAYER_CLIENTS) {
+    const response = await fetch(
+      `https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(apiKey)}&prettyPrint=false`,
+      {
+        method: "POST",
+        credentials: "omit",
+        headers: {
+          "content-type": "application/json",
+          "x-youtube-client-name": client.headerClientName,
+          "x-youtube-client-version": client.headerClientVersion
+        },
+        body: JSON.stringify({
+          videoId,
+          contentCheckOk: true,
+          racyCheckOk: true,
+          context: {
+            client: client.contextClient
           }
-        }
-      })
-    }
-  );
+        })
+      }
+    );
 
-  if (!response.ok) {
-    throw new Error(`player api HTTP ${response.status}`);
+    if (!response.ok) {
+      const sample = (await response.text()).slice(0, 140).replace(/\s+/g, " ").trim();
+      localErrors.push(`${client.label} player HTTP ${response.status} ${sample}`);
+      continue;
+    }
+
+    const json = await response.json();
+    const tracks = json?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    if (tracks.length) {
+      return json;
+    }
+
+    localErrors.push(`${client.label} captionTracks not found`);
   }
 
-  return response.json();
+  throw new Error(`mobile player failed: ${localErrors.slice(0, 2).join(" | ") || "captionTracks not found"}`);
 }
 
 function extractPlayerResponseFromHtml(html) {
@@ -1945,8 +2151,8 @@ async function fetchTranscriptViaSourceTab(tabId, preferredLanguage) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
-    args: [preferredLanguage || ""],
-    func: async (preferredLang) => {
+    args: [preferredLanguage || "", MOBILE_PLAYER_CLIENTS],
+    func: async (preferredLang, mobileClients) => {
       function sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
       }
@@ -2246,102 +2452,109 @@ async function fetchTranscriptViaSourceTab(tabId, preferredLanguage) {
         return { ok: false, error: `timedtext failed: ${localErrors.slice(0, 3).join(" | ")}` };
       }
 
-      async function tryAndroidPlayerCaptions() {
+      async function tryMobilePlayerCaptions() {
         const apiKey = String(getYtcfgValue("INNERTUBE_API_KEY") || "").trim();
         const videoId = new URL(window.location.href).searchParams.get("v") || "";
         if (!apiKey || !videoId) {
-          return { ok: false, error: "android player config missing" };
+          return { ok: false, error: "mobile player config missing" };
         }
 
         const localErrors = [];
         try {
-          const response = await fetch(
-            `https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(apiKey)}&prettyPrint=false`,
-            {
-              method: "POST",
-              credentials: "omit",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                videoId,
-                contentCheckOk: true,
-                racyCheckOk: true,
-                context: {
-                  client: {
-                    clientName: "ANDROID",
-                    clientVersion: "19.20.34",
-                    androidSdkVersion: 30,
-                    hl: "ko",
-                    gl: "KR",
-                    utcOffsetMinutes: 540
+          for (const client of Array.isArray(mobileClients) ? mobileClients : []) {
+            const response = await fetch(
+              `https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(apiKey)}&prettyPrint=false`,
+              {
+                method: "POST",
+                credentials: "omit",
+                headers: {
+                  "content-type": "application/json",
+                  "x-youtube-client-name": client.headerClientName,
+                  "x-youtube-client-version": client.headerClientVersion
+                },
+                body: JSON.stringify({
+                  videoId,
+                  contentCheckOk: true,
+                  racyCheckOk: true,
+                  context: {
+                    client: client.contextClient
                   }
-                }
-              })
+                })
+              }
+            );
+
+            if (!response.ok) {
+              const sample = (await response.text()).slice(0, 140).replace(/\s+/g, " ").trim();
+              localErrors.push(`${client.label} player HTTP ${response.status} ${sample}`);
+              continue;
             }
-          );
 
-          if (!response.ok) {
-            const sample = (await response.text()).slice(0, 140).replace(/\s+/g, " ").trim();
-            return { ok: false, error: `android player HTTP ${response.status} ${sample}` };
-          }
+            const json = await response.json();
+            const tracks = json?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+            if (!tracks.length) {
+              localErrors.push(`${client.label} captionTracks not found`);
+              continue;
+            }
 
-          const json = await response.json();
-          const tracks = json?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-          if (!tracks.length) {
-            return { ok: false, error: "android player captionTracks not found" };
-          }
+            for (const track of sortTracks(tracks, preferredLang).slice(0, 4)) {
+              const base = String(track?.baseUrl || "").trim();
+              if (!base) continue;
 
-          for (const track of sortTracks(tracks, preferredLang).slice(0, 4)) {
-            const base = String(track?.baseUrl || "").trim();
-            if (!base) continue;
+              const urls = [];
+              const seen = new Set();
+              const pushUrl = (value) => {
+                if (!value || seen.has(value)) return;
+                seen.add(value);
+                urls.push(value);
+              };
 
-            const urls = [];
-            const seen = new Set();
-            const pushUrl = (value) => {
-              if (!value || seen.has(value)) return;
-              seen.add(value);
-              urls.push(value);
-            };
+              pushUrl(base);
+              for (const fmt of ["json3", "srv3", "vtt"]) {
+                try {
+                  const next = new URL(base);
+                  next.searchParams.set("fmt", fmt);
+                  pushUrl(next.toString());
+                } catch {
+                  // ignore URL parse errors
+                }
+              }
 
-            pushUrl(base);
-            for (const fmt of ["json3", "srv3", "vtt"]) {
-              try {
-                const next = new URL(base);
-                next.searchParams.set("fmt", fmt);
-                pushUrl(next.toString());
-              } catch {
-                // ignore URL parse errors
+              for (const url of urls) {
+                try {
+                  const res = await fetchTextWithTimeout(url, 4500);
+                  if (!res.ok) {
+                    localErrors.push(`${client.label} ${trackName(track)} HTTP ${res.status}`);
+                    continue;
+                  }
+                  const payload = await res.text();
+                  const transcript = parseCaptionPayload(payload);
+                  if (transcript) {
+                    return {
+                      ok: true,
+                      data: {
+                        title: readTitle() || json?.videoDetails?.title || "",
+                        languageCode: normalizeLang(track.languageCode) || "unknown",
+                        trackName: `${client.label}-player-${trackName(track)}`,
+                        transcript
+                      }
+                    };
+                  }
+                  const contentType = (res.headers.get("content-type") || "").toLowerCase();
+                  localErrors.push(
+                    `${client.label} ${trackName(track)} empty-parse [${contentType || "unknown"}]`
+                  );
+                } catch (error) {
+                  localErrors.push(
+                    error?.name === "AbortError"
+                      ? `${client.label} timedtext timeout`
+                      : `${client.label} ${error?.message || String(error)}`
+                  );
+                }
               }
             }
-
-            for (const url of urls) {
-              try {
-                const res = await fetchTextWithTimeout(url, 4500);
-                if (!res.ok) {
-                  localErrors.push(`${trackName(track)} HTTP ${res.status}`);
-                  continue;
-                }
-                const payload = await res.text();
-                const transcript = parseCaptionPayload(payload);
-                if (transcript) {
-                  return {
-                    ok: true,
-                    data: {
-                      title: readTitle(),
-                      languageCode: normalizeLang(track.languageCode) || "unknown",
-                      trackName: `android-player-${trackName(track)}`,
-                      transcript
-                    }
-                  };
-                }
-                const contentType = (res.headers.get("content-type") || "").toLowerCase();
-                localErrors.push(`${trackName(track)} empty-parse [${contentType || "unknown"}]`);
-              } catch (error) {
-                localErrors.push(error?.name === "AbortError" ? "android timedtext timeout" : (error?.message || String(error)));
-              }
-            }
           }
 
-          return { ok: false, error: `android player parse failed: ${localErrors.slice(0, 2).join(" | ")}` };
+          return { ok: false, error: `mobile player failed: ${localErrors.slice(0, 2).join(" | ")}` };
         } catch (error) {
           return { ok: false, error: error?.message || String(error) };
         }
@@ -2928,9 +3141,9 @@ async function fetchTranscriptViaSourceTab(tabId, preferredLanguage) {
         if (byTextTracks?.ok && byTextTracks?.data?.transcript) return { ok: true, data: byTextTracks.data };
         errors.push(byTextTracks?.error || "textTracks transcript failed");
 
-        const byAndroidPlayer = await tryAndroidPlayerCaptions();
-        if (byAndroidPlayer?.ok && byAndroidPlayer?.data?.transcript) return { ok: true, data: byAndroidPlayer.data };
-        errors.push(byAndroidPlayer?.error || "android player captions failed");
+        const byMobilePlayer = await tryMobilePlayerCaptions();
+        if (byMobilePlayer?.ok && byMobilePlayer?.data?.transcript) return { ok: true, data: byMobilePlayer.data };
+        errors.push(byMobilePlayer?.error || "mobile player captions failed");
 
         const byInnertube = await tryInnertubeTranscript();
         if (byInnertube?.ok && byInnertube?.data?.transcript) return { ok: true, data: byInnertube.data };

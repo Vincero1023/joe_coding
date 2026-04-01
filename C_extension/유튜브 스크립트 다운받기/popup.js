@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS = {
   manualPreset: "default"
 };
 
-const BUILD_LABEL = "1.5.1-transcript-dom-fix";
+const BUILD_LABEL = "1.5.3-self-healing-fetch-pipeline";
 
 const SUMMARY_PRESETS = {
   default:
@@ -236,12 +236,19 @@ async function renderDebugInfo() {
   const debugState = debugResponse?.settings || debugResponse?.data || {};
   const lastFetch = debugState?.lastFetch;
   const lastError = errorResponse?.log || debugState?.lastError || null;
+  const pathHealth = debugState?.pathHealth || null;
 
   const lines = [];
 
   if (lastFetch) {
     lines.push(`Last fetch path: ${lastFetch.successPath || "-"}`);
     lines.push(`Build: ${lastFetch.buildId || "-"}`);
+    if (lastFetch.failed) {
+      lines.push("Last fetch result: FAIL");
+    }
+    if (Array.isArray(lastFetch.strategyOrder) && lastFetch.strategyOrder.length) {
+      lines.push(`Order: ${lastFetch.strategyOrder.join(" -> ")}`);
+    }
     if (Array.isArray(lastFetch.attempts) && lastFetch.attempts.length) {
       lines.push("Attempts:");
       for (const item of lastFetch.attempts) {
@@ -257,6 +264,35 @@ async function renderDebugInfo() {
     lines.push(`Last error: ${lastError.message || "-"}`);
     if (lastError.code) {
       lines.push(`Error code: ${lastError.code}`);
+    }
+  }
+
+  const strategyNames = ["current-page", "source-tab", "watch-html", "temporary-watch-tab"];
+  const strategyStats =
+    pathHealth?.strategies && typeof pathHealth.strategies === "object" ? pathHealth.strategies : null;
+
+  if (strategyStats) {
+    const healthLines = [];
+    for (const step of strategyNames) {
+      const stat = strategyStats[step];
+      if (!stat) continue;
+      const summary = [
+        `${step}: ${Number(stat.successCount || 0)} ok / ${Number(stat.failureCount || 0)} fail`,
+        `last=${stat.lastResult || "-"}`,
+        `streak=${Number(stat.consecutiveFailures || 0)}`
+      ];
+      const message = String(stat.lastMessage || "").trim();
+      if (message) {
+        summary.push(message.slice(0, 90));
+      }
+      healthLines.push(`- ${summary.join(" | ")}`);
+    }
+
+    if (healthLines.length) {
+      lines.push("");
+      lines.push(`Preferred path: ${pathHealth.lastSuccessfulPath || "-"}`);
+      lines.push("Path health:");
+      lines.push(...healthLines);
     }
   }
 

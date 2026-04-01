@@ -1,6 +1,6 @@
 # Current State
 
-Last updated: 2026-03-14
+Last updated: 2026-04-01
 
 ## Goal
 
@@ -14,10 +14,24 @@ This extension currently targets five actions on the active YouTube video page:
 
 ## Active Build
 
-- `service_worker.js` build id: `2026-03-14-transcript-dom-fix`
-- `popup.js` build label: `1.5.1-transcript-dom-fix`
+- `service_worker.js` build id: `2026-04-01-self-healing-fetch-pipeline`
+- `popup.js` build label: `1.5.3-self-healing-fetch-pipeline`
 
 ## Recent Change Log
+
+### 2026-04-01 self-healing fetch pipeline
+
+- Root cause: transcript recovery paths were wired manually, so fixes could land in one fallback while another path lagged behind or a prepared recovery path stayed unused
+- User-facing symptom: the extension could repeat the same failing fetch order on every run even after one path had clearly degraded
+- Fix applied: `fetchTranscriptForVideo()` now builds a data-driven step pipeline, persists per-path health, adapts the next fetch order based on recent success/failure, and includes the existing temporary watch-tab recovery path in the real execution flow
+- Practical result: repeated failures are less likely to loop through the same dead path order, and future recovery paths are less likely to be forgotten during edits
+
+### 2026-04-01 mobile player caption fallback
+
+- Root cause: several YouTube watch pages now return empty timedtext bodies for web caption URLs, and the previous Android player fallback version could fail with HTTP 400 `Precondition check failed`
+- User-facing symptom: actions such as `summarize` could fail after exhausting current-page, source-tab, textTracks, and watch-html fallbacks
+- Fix applied: both `fetchTranscriptViaWatchPage()` and the source-tab injected recovery path now try newer mobile player clients (`iOS`, updated `Android`) and reuse their caption track URLs when web caption URLs are empty
+- Practical result: transcript fetch no longer depends as heavily on the web timedtext / transcript-panel path for videos where mobile player caption URLs still work
 
 ### 2026-03-14 transcript DOM compatibility fix
 
@@ -64,7 +78,7 @@ Primary path in `service_worker.js`:
 Important notes:
 
 - The most reliable path right now is the in-page extraction path when caption tracks are present.
-- When direct caption endpoints are unstable, the source-tab DOM path is the main recovery path.
+- When direct caption endpoints are unstable, the source-tab DOM path and mobile player caption fallback are the main recovery paths.
 - YouTube direct timedtext fetches can return empty responses depending on current YouTube behavior.
 - The source-tab DOM extraction path was strengthened to find transcript-related buttons more aggressively.
 - Modern watch pages can render transcript rows as `transcript-segment-view-model` instead of `ytd-transcript-segment-renderer`.
@@ -76,6 +90,14 @@ Important notes:
 - `download`: saves transcript as a text file through `chrome.downloads.download`
 - `summarize`: builds a prompt, stores it in `lastResult`, opens the AI page, and tries prompt insertion
 - `manualize`: builds a manual-focused prompt, stores it in `lastResult`, opens the AI page, and tries prompt insertion
+
+### Debug visibility
+
+Popup debug panel now also shows:
+
+- fetch strategy order used for the latest run
+- preferred top-level recovery path based on recent history
+- per-path success/failure counts and current failure streak
 
 ## Added Features
 
@@ -173,6 +195,7 @@ node --check offscreen.js
 - Some videos expose no usable caption data to direct fetch
 - Some direct caption URLs now return HTTP 200 with an empty body
 - Some `youtubei` transcript / player requests now fail with HTTP 400 `Precondition check failed`
+- Newer mobile player clients can still expose usable caption tracks when the web client path is empty
 - AI site auto-insertion is best-effort and depends on current site DOM
 - Manual generation quality depends on transcript completeness and model response quality
 
@@ -181,7 +204,7 @@ node --check offscreen.js
 Start from these checkpoints:
 
 1. Does the popup status show a concrete error message?
-2. Is the popup build label `1.5.1-transcript-dom-fix` or newer?
+2. Is the popup build label `1.5.3-self-healing-fetch-pipeline` or newer?
 3. Does `open` create `transcript.html` in a new tab?
 4. What does the popup debug panel show for the latest fetch path and attempts?
 5. Does `fetchTranscriptFromCurrentPage()` fail first?

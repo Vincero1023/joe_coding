@@ -45,7 +45,7 @@
 1. `chrome://extensions` 열기
 2. 기존 압축해제 확장 제거
 3. 이 폴더를 다시 `압축해제된 확장 프로그램`으로 로드
-4. 팝업 하단 빌드 표시가 `1.5.1-transcript-dom-fix`인지 확인
+4. 팝업 하단 빌드 표시가 `1.5.3-self-healing-fetch-pipeline`인지 확인
 
 ## AI 설정
 
