@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS = {
   manualPreset: "default"
 };
 
-const BUILD_LABEL = "1.5.3-self-healing-fetch-pipeline";
+const BUILD_LABEL = "1.5.4-direct-llm-stability";
 
 const SUMMARY_PRESETS = {
   default:

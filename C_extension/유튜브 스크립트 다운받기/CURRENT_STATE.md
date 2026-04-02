@@ -1,6 +1,6 @@
 # Current State
 
-Last updated: 2026-04-01
+Last updated: 2026-04-02
 
 ## Goal
 
@@ -14,10 +14,18 @@ This extension currently targets five actions on the active YouTube video page:
 
 ## Active Build
 
-- `service_worker.js` build id: `2026-04-01-self-healing-fetch-pipeline`
-- `popup.js` build label: `1.5.3-self-healing-fetch-pipeline`
+- `service_worker.js` build id: `2026-04-02-direct-llm-stability`
+- `popup.js` build label: `1.5.4-direct-llm-stability`
 
 ## Recent Change Log
+
+### 2026-04-02 direct LLM launch and stability pass
+
+- Root cause: actions `summarize` and `manualize` still opened the transcript viewer first, which made action `1` feel forced even when the user only wanted the LLM target page
+- User-facing symptom: actions `4` and `5` opened both the transcript viewer and the LLM page, and prompt recovery still depended on copying from the viewer when auto-insert failed
+- Fix applied: `summarize` / `manualize` now launch only the target LLM page, still save the prepared result for optional later inspection, and fall back to copying the prompt directly to clipboard when auto-insert fails
+- Additional stability: clipboard copy now uses in-page -> helper-tab -> offscreen fallback, and background fetches for watch HTML / caption payloads / mobile player calls retry once on transient timeout or server-side failure
+- Practical result: actions `4` and `5` no longer force-open action `1`, and recovery is less dependent on one brittle page or one clipboard path
 
 ### 2026-04-01 self-healing fetch pipeline
 
@@ -88,8 +96,8 @@ Important notes:
 - `open`: saves `lastResult` and opens `transcript.html` in a new tab
 - `copy`: copies transcript via page clipboard or offscreen document fallback
 - `download`: saves transcript as a text file through `chrome.downloads.download`
-- `summarize`: builds a prompt, stores it in `lastResult`, opens the AI page, and tries prompt insertion
-- `manualize`: builds a manual-focused prompt, stores it in `lastResult`, opens the AI page, and tries prompt insertion
+- `summarize`: builds a prompt, stores it in `lastResult`, opens only the AI page, and tries prompt insertion; if insertion fails, it falls back to clipboard copy
+- `manualize`: builds a manual-focused prompt, stores it in `lastResult`, opens only the AI page, and tries prompt insertion; if insertion fails, it falls back to clipboard copy
 
 ### Debug visibility
 
@@ -204,7 +212,7 @@ node --check offscreen.js
 Start from these checkpoints:
 
 1. Does the popup status show a concrete error message?
-2. Is the popup build label `1.5.3-self-healing-fetch-pipeline` or newer?
+2. Is the popup build label `1.5.4-direct-llm-stability` or newer?
 3. Does `open` create `transcript.html` in a new tab?
 4. What does the popup debug panel show for the latest fetch path and attempts?
 5. Does `fetchTranscriptFromCurrentPage()` fail first?

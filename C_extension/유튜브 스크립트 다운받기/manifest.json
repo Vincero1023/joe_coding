@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "\uC720\uD29C\uBE0C \uC790\uB9C9 \uCC98\uB9AC&\uC694\uC57D",
   "description": "View and download YouTube transcripts, then prepare AI summary and manual prompts.",
-  "version": "1.5.1",
+  "version": "1.5.4",
   "permissions": [
     "storage",
     "downloads",

@@ -6,10 +6,13 @@ const STORAGE_KEYS = {
   debugState: "debugState"
 };
 
-const BUILD_ID = "2026-04-01-self-healing-fetch-pipeline";
+const BUILD_ID = "2026-04-02-direct-llm-stability";
 const MAX_ERROR_LOGS = 200;
 const TRANSCRIPT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const SHORTCUT_DEDUP_MS = 900;
+const FETCH_RETRY_ATTEMPTS = 2;
+const FETCH_RETRY_DELAY_MS = 450;
+const FETCH_TIMEOUT_MS = 7000;
 const TRANSCRIPT_LINE_TARGET = 88;
 const SENTENCE_HARD_MAX = Math.round(TRANSCRIPT_LINE_TARGET * 1.65);
 const PARAGRAPH_MIN_SENTENCES = 3;
@@ -605,7 +608,7 @@ async function runAction(action, options = {}) {
     });
     const summaryPrompt = buildPromptFromTemplate(transcriptData, settings.summaryTemplate);
 
-    const viewerState = await saveResultForViewer({
+    await saveResultForViewer({
       ...transcriptData,
       promptText: summaryPrompt,
       promptKind: "summary",
@@ -613,26 +616,30 @@ async function runAction(action, options = {}) {
       gptSiteUrl: targetUrl,
       aiModel
     });
-    await openTranscriptViewer(tabInfo.tabId);
-    const gptTab = await chrome.tabs.create({ url: targetUrl });
+    let gptTab = null;
+    try {
+      gptTab = await chrome.tabs.create({ url: targetUrl });
+    } catch {
+      const copiedPrompt = await copyTextToClipboard(tabInfo.tabId, summaryPrompt);
+      return copiedPrompt
+        ? "Could not open the AI page automatically, so the prompt was copied to clipboard."
+        : "Could not open the AI page automatically, but the prompt was saved. Use action 1 only if you need to inspect or copy it.";
+    }
     const insertResult = await tryInsertPromptToTab(gptTab?.id, summaryPrompt, {
       autoSubmit: Boolean(settings.autoSubmit),
       model: aiModel,
       temporaryChat: Boolean(settings.chatgptTemporaryChat)
     });
     if (insertResult?.inserted && insertResult?.submitted) {
-      return viewerState.storageFallback
-        ? "Prompt inserted and sent automatically. Viewer was saved in compact mode."
-        : "Prompt inserted and sent automatically.";
+      return "Prompt inserted and sent automatically.";
     }
     if (insertResult?.inserted) {
-      return viewerState.storageFallback
-        ? "Prompt inserted. Press Enter if send did not trigger. Viewer was saved in compact mode."
-        : "Prompt inserted. Press Enter if send did not trigger.";
+      return "Prompt inserted. Press Enter if send did not trigger.";
     }
-    return viewerState.storageFallback
-      ? "Prompt ready. If auto-fill fails, copy it from transcript page. Viewer was saved in compact mode."
-      : "Prompt ready. If auto-fill fails, copy it from transcript page.";
+    const copiedPrompt = await copyTextToClipboard(tabInfo.tabId, summaryPrompt);
+    return copiedPrompt
+      ? "Prompt ready. Auto-fill failed, so the prompt was copied to clipboard."
+      : "Prompt ready. Auto-fill failed, but the prompt was saved. Use action 1 only if you need to inspect or copy it.";
   }
 
   if (action === "manualize") {
@@ -644,7 +651,7 @@ async function runAction(action, options = {}) {
     });
     const manualPrompt = buildPromptFromTemplate(transcriptData, settings.manualTemplate);
 
-    const viewerState = await saveResultForViewer({
+    await saveResultForViewer({
       ...transcriptData,
       promptText: manualPrompt,
       promptKind: "manual",
@@ -652,26 +659,30 @@ async function runAction(action, options = {}) {
       gptSiteUrl: targetUrl,
       aiModel
     });
-    await openTranscriptViewer(tabInfo.tabId);
-    const gptTab = await chrome.tabs.create({ url: targetUrl });
+    let gptTab = null;
+    try {
+      gptTab = await chrome.tabs.create({ url: targetUrl });
+    } catch {
+      const copiedPrompt = await copyTextToClipboard(tabInfo.tabId, manualPrompt);
+      return copiedPrompt
+        ? "Could not open the AI page automatically, so the manual prompt was copied to clipboard."
+        : "Could not open the AI page automatically, but the manual prompt was saved. Use action 1 only if you need to inspect or copy it.";
+    }
     const insertResult = await tryInsertPromptToTab(gptTab?.id, manualPrompt, {
       autoSubmit: Boolean(settings.autoSubmit),
       model: aiModel,
       temporaryChat: Boolean(settings.chatgptTemporaryChat)
     });
     if (insertResult?.inserted && insertResult?.submitted) {
-      return viewerState.storageFallback
-        ? "Manual prompt inserted and sent automatically. Viewer was saved in compact mode."
-        : "Manual prompt inserted and sent automatically.";
+      return "Manual prompt inserted and sent automatically.";
     }
     if (insertResult?.inserted) {
-      return viewerState.storageFallback
-        ? "Manual prompt inserted. Press Enter if send did not trigger. Viewer was saved in compact mode."
-        : "Manual prompt inserted. Press Enter if send did not trigger.";
+      return "Manual prompt inserted. Press Enter if send did not trigger.";
     }
-    return viewerState.storageFallback
-      ? "Manual prompt ready. If auto-fill fails, copy it from transcript page. Viewer was saved in compact mode."
-      : "Manual prompt ready. If auto-fill fails, copy it from transcript page.";
+    const copiedPrompt = await copyTextToClipboard(tabInfo.tabId, manualPrompt);
+    return copiedPrompt
+      ? "Manual prompt ready. Auto-fill failed, so the prompt was copied to clipboard."
+      : "Manual prompt ready. Auto-fill failed, but the prompt was saved. Use action 1 only if you need to inspect or copy it.";
   }
 
   if (action === "copy") {
@@ -1364,24 +1375,40 @@ async function fetchYoutubeWatchHtml(videoId) {
     `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}` +
     "&hl=ko&persist_hl=1&bpctr=9999999999&has_verified=1";
 
-  const response = await fetch(url, {
-    credentials: "include",
-    cache: "no-store",
-    redirect: "follow",
-    headers: {
-      "accept-language": "ko,en-US;q=0.9,en;q=0.8"
+  return retryOperation(
+    async () => {
+      const response = await fetchWithTimeout(
+        url,
+        {
+          credentials: "include",
+          cache: "no-store",
+          redirect: "follow",
+          headers: {
+            "accept-language": "ko,en-US;q=0.9,en;q=0.8"
+          }
+        },
+        FETCH_TIMEOUT_MS
+      );
+
+      if (!response.ok) {
+        const message = `watch page HTTP ${response.status}`;
+        if (isRetryableHttpStatus(response.status)) {
+          throw createRetryableError(message);
+        }
+        throw new Error(message);
+      }
+
+      const html = await response.text();
+      if (!html || html.length < 1000) {
+        throw createRetryableError("watch page empty");
+      }
+      return html;
+    },
+    {
+      attempts: FETCH_RETRY_ATTEMPTS,
+      delayMs: FETCH_RETRY_DELAY_MS
     }
-  });
-
-  if (!response.ok) {
-    throw new Error(`watch page HTTP ${response.status}`);
-  }
-
-  const html = await response.text();
-  if (!html || html.length < 1000) {
-    throw new Error("watch page empty");
-  }
-  return html;
+  );
 }
 
 async function fetchPlayerResponseViaInnertube(videoId, html) {
@@ -1393,30 +1420,43 @@ async function fetchPlayerResponseViaInnertube(videoId, html) {
   const localErrors = [];
 
   for (const client of MOBILE_PLAYER_CLIENTS) {
-    const response = await fetch(
-      `https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(apiKey)}&prettyPrint=false`,
+    const response = await retryOperation(
+      () =>
+        fetchWithTimeout(
+          `https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(apiKey)}&prettyPrint=false`,
+          {
+            method: "POST",
+            credentials: "omit",
+            headers: {
+              "content-type": "application/json",
+              "x-youtube-client-name": client.headerClientName,
+              "x-youtube-client-version": client.headerClientVersion
+            },
+            body: JSON.stringify({
+              videoId,
+              contentCheckOk: true,
+              racyCheckOk: true,
+              context: {
+                client: client.contextClient
+              }
+            })
+          },
+          FETCH_TIMEOUT_MS
+        ),
       {
-        method: "POST",
-        credentials: "omit",
-        headers: {
-          "content-type": "application/json",
-          "x-youtube-client-name": client.headerClientName,
-          "x-youtube-client-version": client.headerClientVersion
-        },
-        body: JSON.stringify({
-          videoId,
-          contentCheckOk: true,
-          racyCheckOk: true,
-          context: {
-            client: client.contextClient
-          }
-        })
+        attempts: FETCH_RETRY_ATTEMPTS,
+        delayMs: FETCH_RETRY_DELAY_MS,
+        shouldRetry: isRetryableOperationError
       }
     );
 
     if (!response.ok) {
       const sample = (await response.text()).slice(0, 140).replace(/\s+/g, " ").trim();
-      localErrors.push(`${client.label} player HTTP ${response.status} ${sample}`);
+      const message = `${client.label} player HTTP ${response.status} ${sample}`;
+      localErrors.push(message);
+      if (isRetryableHttpStatus(response.status)) {
+        continue;
+      }
       continue;
     }
 
@@ -1631,36 +1671,39 @@ function getCaptionTrackNameParam(track) {
 }
 
 async function fetchCaptionPayload(url) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 7000);
+  return retryOperation(
+    async () => {
+      const response = await fetchWithTimeout(
+        url,
+        {
+          credentials: "include",
+          cache: "no-store"
+        },
+        FETCH_TIMEOUT_MS
+      );
 
-  try {
-    const response = await fetch(url, {
-      credentials: "include",
-      cache: "no-store",
-      signal: controller.signal
-    });
+      if (!response.ok) {
+        const message = `caption HTTP ${response.status}`;
+        if (isRetryableHttpStatus(response.status)) {
+          throw createRetryableError(message);
+        }
+        throw new Error(message);
+      }
 
-    if (!response.ok) {
-      throw new Error(`caption HTTP ${response.status}`);
+      const text = await response.text();
+      if (!text) {
+        throw createRetryableError("caption empty");
+      }
+      if ((response.headers.get("content-type") || "").toLowerCase().includes("text/html")) {
+        throw new Error("caption html-response");
+      }
+      return text;
+    },
+    {
+      attempts: FETCH_RETRY_ATTEMPTS,
+      delayMs: FETCH_RETRY_DELAY_MS
     }
-
-    const text = await response.text();
-    if (!text) {
-      throw new Error("caption empty");
-    }
-    if ((response.headers.get("content-type") || "").toLowerCase().includes("text/html")) {
-      throw new Error("caption html-response");
-    }
-    return text;
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new Error("caption timeout");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
+  );
 }
 
 function parseCaptionPayloadText(payload) {
@@ -3698,19 +3741,36 @@ async function copyTranscriptToClipboard(tabId, transcript) {
     throw new Error("clipboard copy failed: empty transcript");
   }
 
+  const copied = await copyTextToClipboard(tabId, text);
+  if (!copied) {
+    throw new Error("clipboard copy failed");
+  }
+}
+
+async function copyTextToClipboard(tabId, text) {
+  const value = String(text || "").trim();
+  if (!value) {
+    return false;
+  }
+
   if (typeof tabId === "number") {
-    const copiedInPage = await tryCopyInPage(tabId, text);
+    const copiedInPage = await tryCopyInPage(tabId, value);
     if (copiedInPage) {
-      return;
+      return true;
     }
   }
 
-  const copiedOffscreen = await tryCopyViaOffscreen(text);
-  if (copiedOffscreen) {
-    return;
+  const copiedViaHelperTab = await tryCopyViaHelperTab(value);
+  if (copiedViaHelperTab) {
+    return true;
   }
 
-  throw new Error("clipboard copy failed");
+  const copiedOffscreen = await tryCopyViaOffscreen(value);
+  if (copiedOffscreen) {
+    return true;
+  }
+
+  return false;
 }
 
 async function tryCopyViaHelperTab(text) {
@@ -3853,6 +3913,65 @@ async function closeOffscreenClipboardDocument() {
 chrome.runtime.onSuspend?.addListener(() => {
   closeOffscreenClipboardDocument();
 });
+
+async function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createRetryableError(message) {
+  const error = new Error(message);
+  error.retryable = true;
+  return error;
+}
+
+function isRetryableHttpStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function isRetryableOperationError(error) {
+  if (!error) return false;
+  if (error.name === "AbortError") return true;
+  if (Boolean(error.retryable)) return true;
+  return error instanceof TypeError;
+}
+
+async function fetchWithTimeout(url, init = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function retryOperation(task, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts) || FETCH_RETRY_ATTEMPTS);
+  const delayMs = Math.max(0, Number(options.delayMs) || FETCH_RETRY_DELAY_MS);
+  const shouldRetry =
+    typeof options.shouldRetry === "function"
+      ? options.shouldRetry
+      : isRetryableOperationError;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await task(attempt);
+    } catch (error) {
+      lastError = error?.name === "AbortError" ? createRetryableError("request timeout") : error;
+      if (attempt >= attempts || !shouldRetry(lastError, attempt)) {
+        throw lastError;
+      }
+      await sleep(delayMs);
+    }
+  }
+
+  throw lastError || new Error("retry operation failed");
+}
 
 chrome.runtime.onStartup?.addListener(() => {
   closeOffscreenClipboardDocument();
