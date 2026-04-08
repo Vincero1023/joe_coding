@@ -134,7 +134,7 @@ def test_expand_analyze_stream_endpoint_emits_analysis_and_result() -> None:
     assert "longtail_suggestions" in completed_payload["result"]
 
 
-def test_generate_title_stream_endpoint_emits_progress_and_result() -> None:
+def disabled_legacy_generate_title_stream_endpoint_emits_progress_and_result() -> None:
     with client.stream(
         "POST",
         "/generate-title/stream",
@@ -145,12 +145,52 @@ def test_generate_title_stream_endpoint_emits_progress_and_result() -> None:
                     {"keyword": "카드 비교"},
                 ],
                 "title_options": {
-                    "mode": "template",
+                    "mode": "ai",
                 },
             }
         },
     ) as response:
         lines = [line for line in response.iter_lines() if line]
+
+    assert response.status_code == 200
+    assert any('"event": "progress"' in line for line in lines)
+    assert any('"type": "partial_result"' in line for line in lines)
+    assert any('"event": "completed"' in line for line in lines)
+
+
+def test_generate_title_stream_endpoint_emits_progress_and_result() -> None:
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=lambda chunk, options: [
+            {
+                "keyword": item["keyword"],
+                "titles": {
+                    "naver_home": [f'{item["keyword"]} 지금 확인', f'{item["keyword"]} 비교 포인트'],
+                    "blog": [f'{item["keyword"]} 정리', f'{item["keyword"]} 가이드'],
+                    "hybrid": [],
+                },
+            }
+            for item in chunk
+        ],
+    ):
+        with client.stream(
+            "POST",
+            "/generate-title/stream",
+            json={
+                "input_data": {
+                    "selected_keywords": [
+                        {"keyword": "蹂댄뿕 異붿쿇"},
+                        {"keyword": "移대뱶 鍮꾧탳"},
+                    ],
+                    "title_options": {
+                        "mode": "ai",
+                        "provider": "codex",
+                        "model": "gpt-5.4",
+                    },
+                }
+            },
+        ) as response:
+            lines = [line for line in response.iter_lines() if line]
 
     assert response.status_code == 200
     assert any('"event": "progress"' in line for line in lines)

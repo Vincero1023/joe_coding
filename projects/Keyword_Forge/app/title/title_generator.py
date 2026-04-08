@@ -5,12 +5,18 @@ from threading import Event
 from typing import Any, Callable
 
 from app.expander.utils.tokenizer import normalize_key, normalize_text
-from app.title.ai_client import TitleGenerationOptions, TitleProviderError, request_ai_slot_rewrites, request_ai_titles
+from app.title.ai_client import (
+    TitleGenerationOptions,
+    TitleProviderError,
+    _attach_live_issue_contexts,
+    provider_requires_api_key,
+    request_ai_slot_rewrites,
+    request_ai_titles,
+)
 from app.title.category_detector import detect_category
 from app.title.quality import _build_bundle_report, enrich_title_results, refresh_title_results_for_changed_slots
 from app.title.quality_ai import TitleEvaluationOptions
 from app.title.rules import NAVER_HOME_MAX_LENGTH, TITLE_QUALITY_REVIEW_SCORE
-from app.title.templates import build_blog_titles, build_hybrid_titles, build_naver_home_titles
 from app.title.types import (
     DEFAULT_TITLE_CHANNEL_COUNTS,
     MAX_TITLE_COUNT_PER_CHANNEL,
@@ -36,6 +42,10 @@ _MODEL_ESCALATION_MAP: dict[str, dict[str, str]] = {
     },
     "anthropic": {
         "claude-haiku-4-5": "claude-sonnet-4-6",
+    },
+    "codex": {
+        "gpt-5.4-mini": "gpt-5.4",
+        "gpt-5.3-codex-spark": "gpt-5.3-codex",
     },
 }
 _PRACTICAL_RESCUE_KIND_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -117,198 +127,142 @@ def generate_titles(
         progress_percent=0,
         message="제목 생성 준비 중",
     )
-    if options is None or options.mode != "ai":
-        template_results = _build_template_results(
-            normalized_items,
-            options=options,
-            progress_callback=progress_callback,
-            total_count=total_count,
-            stop_event=stop_event,
-        )
-        return _finalize_generated_results(
-            template_results,
-            _build_meta(
-                requested_mode=options.mode if options else "template",
-                used_mode="template",
-                provider=options.provider if options else None,
-                model=options.model if options else None,
-                rewrite_provider=options.rewrite_provider if options else "",
-                rewrite_model=options.rewrite_model if options else "",
-                temperature=options.temperature if options else None,
-                preset_key=options.preset_key if options else "",
-                preset_label=options.preset_label if options else "",
-                auto_retry_enabled=options.auto_retry_enabled if options else False,
-                quality_retry_threshold=options.quality_retry_threshold if options else _DEFAULT_QUALITY_RETRY_THRESHOLD,
-                issue_context_enabled=options.issue_context_enabled if options else False,
-                issue_context_limit=options.issue_context_limit if options else 0,
-                issue_source_mode=options.issue_source_mode if options else "",
-                community_sources=list(options.community_sources) if options else [],
-            ),
-            progress_callback=progress_callback,
-        )
+    if options is None:
+        raise TitleProviderError("Title generation now requires AI title_options.")
 
-    if not options.api_key:
-        if not options.fallback_to_template:
-            raise TitleProviderError("AI mode requires an API key.")
-        template_results = _build_template_results(
-            normalized_items,
-            options=options,
-            progress_callback=progress_callback,
-            total_count=total_count,
-            stop_event=stop_event,
-        )
-        return _finalize_generated_results(
-            template_results,
-            _build_meta(
-                requested_mode="ai",
-                used_mode="template_fallback",
-                provider=options.provider,
-                model=options.model,
-                rewrite_provider=options.rewrite_provider,
-                rewrite_model=options.rewrite_model,
-                temperature=options.temperature,
-                preset_key=options.preset_key,
-                preset_label=options.preset_label,
-                fallback_reason="missing_api_key",
-                auto_retry_enabled=options.auto_retry_enabled,
-                quality_retry_threshold=options.quality_retry_threshold,
-                issue_context_enabled=options.issue_context_enabled,
-                issue_context_limit=options.issue_context_limit,
-                issue_source_mode=options.issue_source_mode,
-                community_sources=list(options.community_sources),
-            ),
-            progress_callback=progress_callback,
-        )
+    if provider_requires_api_key(options.provider) and not options.api_key:
+        raise TitleProviderError("AI mode requires an API key.")
 
+    if options.issue_context_enabled:
+        normalized_items = _attach_live_issue_contexts(normalized_items, options)
+        request_options = replace(
+            options,
+            issue_context_enabled=False,
+            issue_context_limit=0,
+        )
+    else:
+        request_options = options
+
+    generation_batch_size = _resolve_generation_batch_size(options)
+    total_chunk_count = (
+        (len(normalized_items) + generation_batch_size - 1) // generation_batch_size
+        if normalized_items
+        else 0
+    )
     ai_results: dict[int, TitleOutputItem] = {}
-    fallback_keywords: list[str] = []
     processed_count = 0
 
-    try:
-        for chunk_start in range(0, len(normalized_items), options.batch_size):
-            chunk = normalized_items[chunk_start:chunk_start + options.batch_size]
-            if stop_event is not None and stop_event.is_set():
-                break
-            response_items = _request_ai_titles_with_chunk_retry(
-                chunk,
-                options=options,
-            )
-            aligned_response_items = _align_response_items_to_chunk(chunk, response_items)
-            for local_index, source_item in enumerate(chunk):
-                keyword = normalize_text(source_item.get("keyword"))
-                response_item = aligned_response_items[local_index] if local_index < len(aligned_response_items) else {}
-                titles = response_item.get("titles") if isinstance(response_item, dict) else None
-                if not keyword or not _is_valid_title_bundle(titles, options=options):
-                    processed_count += 1
-                    _publish_title_progress(
-                        progress_callback,
-                        type="keyword_completed",
-                        phase="generate",
-                        processed_count=processed_count,
-                        total_count=total_count,
-                        current_keyword=keyword,
-                        progress_percent=_compute_weighted_progress(
-                            processed_count,
-                            total_count,
-                            cap=_INITIAL_GENERATION_PROGRESS_CAP,
-                        ),
-                        message=f"{processed_count} / {total_count}세트 생성",
-                    )
-                    continue
-                source_payload = source_item
-                ai_results[chunk_start + local_index] = {
-                    **_strip_generated_fields(source_payload),
+    for chunk_index, chunk_start in enumerate(range(0, len(normalized_items), generation_batch_size), start=1):
+        chunk = normalized_items[chunk_start:chunk_start + generation_batch_size]
+        if stop_event is not None and stop_event.is_set():
+            break
+        _publish_title_progress(
+            progress_callback,
+            type="phase",
+            phase="generate",
+            processed_count=processed_count,
+            total_count=total_count,
+            progress_percent=max(
+                1 if total_count > 0 else 0,
+                _compute_weighted_progress(
+                    processed_count,
+                    total_count,
+                    cap=_INITIAL_GENERATION_PROGRESS_CAP,
+                ),
+            ),
+            message=f"{chunk_index} / {total_chunk_count} 묶음 생성 중 ({len(chunk)}세트)",
+        )
+        response_items = _request_ai_titles_with_chunk_retry(
+            chunk,
+            options=request_options,
+        )
+        aligned_response_items = _align_response_items_to_chunk(chunk, response_items)
+        chunk_generated_items: list[TitleOutputItem] = []
+        for local_index, source_item in enumerate(chunk):
+            keyword = normalize_text(source_item.get("keyword"))
+            response_item = aligned_response_items[local_index] if local_index < len(aligned_response_items) else {}
+            titles = response_item.get("titles") if isinstance(response_item, dict) else None
+            if keyword and _is_valid_title_bundle(titles, options=options):
+                generated_item: TitleOutputItem = {
+                    **_strip_generated_fields(source_item),
                     "keyword": keyword,
                     "titles": _normalize_generated_title_bundle(titles, options=options),
                 }
-                processed_count += 1
-                _publish_title_progress(
-                    progress_callback,
-                    type="keyword_completed",
-                    phase="generate",
-                    processed_count=processed_count,
-                    total_count=total_count,
-                    current_keyword=keyword,
-                    progress_percent=_compute_weighted_progress(
-                        processed_count,
-                        total_count,
-                        cap=_INITIAL_GENERATION_PROGRESS_CAP,
-                    ),
-                    message=f"{processed_count} / {total_count}세트 생성",
-                )
-    except TitleProviderError as exc:
-        if not options.fallback_to_template:
-            raise
-        template_results = _build_template_results(
-            normalized_items,
-            options=options,
-            progress_callback=progress_callback,
-            total_count=total_count,
-            stop_event=stop_event,
-        )
-        return _finalize_generated_results(
-            template_results,
-            _build_meta(
-                requested_mode="ai",
-                used_mode="template_fallback",
-                provider=options.provider,
-                model=options.model,
-                rewrite_provider=options.rewrite_provider,
-                rewrite_model=options.rewrite_model,
-                temperature=options.temperature,
-                preset_key=options.preset_key,
-                preset_label=options.preset_label,
-                fallback_reason=str(exc),
-                auto_retry_enabled=options.auto_retry_enabled,
-                quality_retry_threshold=options.quality_retry_threshold,
-                issue_context_enabled=options.issue_context_enabled,
-                issue_context_limit=options.issue_context_limit,
-                issue_source_mode=options.issue_source_mode,
-                community_sources=list(options.community_sources),
-            ),
-            progress_callback=progress_callback,
-        )
+                ai_results[chunk_start + local_index] = generated_item
+                chunk_generated_items.append(_clone_title_output_item(generated_item))
+            processed_count += 1
+            _publish_title_progress(
+                progress_callback,
+                type="keyword_completed",
+                phase="generate",
+                processed_count=processed_count,
+                total_count=total_count,
+                current_keyword=keyword,
+                progress_percent=_compute_weighted_progress(
+                    processed_count,
+                    total_count,
+                    cap=_INITIAL_GENERATION_PROGRESS_CAP,
+                ),
+                message=f"{processed_count} / {total_count}세트 생성",
+            )
+        if chunk_generated_items:
+            _publish_title_progress(
+                progress_callback,
+                type="partial_result",
+                phase="generate",
+                processed_count=processed_count,
+                total_count=total_count,
+                progress_percent=_compute_weighted_progress(
+                    processed_count,
+                    total_count,
+                    cap=_INITIAL_GENERATION_PROGRESS_CAP,
+                ),
+                generated_count=len(ai_results),
+                batch_index=chunk_index,
+                batch_count=total_chunk_count,
+                generated_titles=chunk_generated_items,
+                message=f"{processed_count} / {total_count}세트 초안 표시",
+            )
 
     results: list[TitleOutputItem] = []
+    missing_keywords: list[str] = []
     for index, item in enumerate(normalized_items):
         keyword = item["keyword"]
         ai_item = ai_results.get(index)
         if ai_item:
             results.append(ai_item)
             continue
+        missing_keywords.append(keyword)
 
-        fallback_keywords.append(keyword)
-        results.append(_build_template_title_item(keyword, options=options))
-
-    used_mode = "ai"
-    if fallback_keywords:
-        used_mode = "ai_with_template_fallback"
+    if missing_keywords:
+        raise TitleProviderError(
+            "AI title generation returned incomplete results for: "
+            + ", ".join(missing_keywords[:10])
+        )
 
     return _finalize_generated_results(
         results,
-            _build_meta(
-                requested_mode="ai",
-                used_mode=used_mode,
-                provider=options.provider,
-                model=options.model,
-                rewrite_provider=options.rewrite_provider,
-                rewrite_model=options.rewrite_model,
-                temperature=options.temperature,
-                preset_key=options.preset_key,
-                preset_label=options.preset_label,
-                fallback_reason=", ".join(fallback_keywords[:10]) if fallback_keywords else "",
-                fallback_keywords=fallback_keywords,
-                auto_retry_enabled=options.auto_retry_enabled,
-                quality_retry_threshold=options.quality_retry_threshold,
-                issue_context_enabled=options.issue_context_enabled,
-                issue_context_limit=options.issue_context_limit,
-                issue_source_mode=options.issue_source_mode,
-                community_sources=list(options.community_sources),
-            ),
-            options=options,
-            allow_auto_retry=used_mode in {"ai", "ai_with_template_fallback"} and options.auto_retry_enabled,
-            progress_callback=progress_callback,
-        )
+        _build_meta(
+            requested_mode="ai",
+            used_mode="ai",
+            provider=options.provider,
+            model=options.model,
+            rewrite_provider=options.rewrite_provider,
+            rewrite_model=options.rewrite_model,
+            temperature=options.temperature,
+            preset_key=options.preset_key,
+            preset_label=options.preset_label,
+            auto_retry_enabled=options.auto_retry_enabled,
+            quality_retry_threshold=options.quality_retry_threshold,
+            issue_context_enabled=options.issue_context_enabled,
+            issue_context_limit=options.issue_context_limit,
+            issue_source_mode=options.issue_source_mode,
+            community_sources=list(options.community_sources),
+        ),
+        options=options,
+        allow_auto_retry=options.auto_retry_enabled,
+        progress_callback=progress_callback,
+    )
 
 
 def _normalize_input_items(items: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -369,64 +323,26 @@ def _normalize_generated_title_bundle(
     return normalized_bundle
 
 
-def _build_template_results(
-    items: list[dict[str, Any]],
-    *,
-    options: TitleGenerationOptions | None = None,
-    progress_callback: TitleProgressCallback | None = None,
-    total_count: int | None = None,
-    stop_event: Event | None = None,
-) -> list[TitleOutputItem]:
-    resolved_total = total_count if isinstance(total_count, int) and total_count >= 0 else len(items)
-    results: list[TitleOutputItem] = []
-    for index, item in enumerate(items, start=1):
-        if stop_event is not None and stop_event.is_set():
-            break
-        built_item = _build_template_title_item(item, options=options)
-        results.append(built_item)
-        _publish_title_progress(
-            progress_callback,
-            type="keyword_completed",
-            phase="generate",
-            processed_count=index,
-            total_count=resolved_total,
-            current_keyword=normalize_text(built_item.get("keyword")),
-            progress_percent=_compute_weighted_progress(
-                index,
-                resolved_total,
-                cap=_INITIAL_GENERATION_PROGRESS_CAP,
-            ),
-            message=f"{index} / {resolved_total}세트 생성",
-        )
-    return results
-
-
-def _build_template_title_item(
-    item: dict[str, Any] | str,
-    *,
-    options: TitleGenerationOptions | None = None,
-) -> TitleOutputItem:
-    if isinstance(item, dict):
-        keyword = normalize_text(item.get("keyword"))
-        source_item = _strip_generated_fields(item)
-    else:
-        keyword = normalize_text(item)
-        source_item = {"keyword": keyword}
-    category = detect_category(keyword)
-    counts = _resolve_title_channel_counts(options)
-    return {
-        **source_item,
-        "keyword": keyword,
-        "titles": {
-            "naver_home": build_naver_home_titles(keyword, category, limit=counts["naver_home"]),
-            "blog": build_blog_titles(keyword, category, limit=counts["blog"]),
-            "hybrid": build_hybrid_titles(keyword, category, limit=counts["hybrid"]),
-        },
-    }
-
-
 def _chunk_keywords(items: list[dict[str, str]], size: int) -> list[list[dict[str, str]]]:
     return [items[index:index + size] for index in range(0, len(items), size)]
+
+
+def _resolve_generation_batch_size(options: TitleGenerationOptions) -> int:
+    configured_batch_size = max(1, min(int(options.batch_size or 20), 20))
+    if normalize_text(options.provider).lower() != "codex":
+        return configured_batch_size
+
+    reasoning_effort = normalize_text(options.reasoning_effort).lower()
+    max_batch_size = 4
+    if reasoning_effort == "xhigh":
+        max_batch_size = 2
+    elif reasoning_effort == "high":
+        max_batch_size = 3
+
+    if options.issue_context_enabled:
+        max_batch_size = min(max_batch_size, 3 if reasoning_effort != "xhigh" else 2)
+
+    return max(1, min(configured_batch_size, max_batch_size))
 
 
 def _request_ai_titles_with_chunk_retry(
@@ -1037,7 +953,7 @@ def _run_partial_slot_retry_pipeline(
             type="phase",
             phase="quality_ready",
             progress_percent=_QUALITY_PROGRESS_PERCENT + 2,
-            message="?덉쭏 寃???꾨즺",
+            message="품질 검사 완료",
         )
         quality_summary = _build_quality_summary_from_items(enriched_results)
         return (
@@ -2073,15 +1989,17 @@ def _build_practical_rescue_item(item: dict[str, Any]) -> TitleOutputItem | None
         "titles": {
             "naver_home": _merge_title_candidates(
                 generated_naver_titles,
-                build_naver_home_titles(keyword, category, limit=MAX_TITLE_COUNT_PER_CHANNEL),
                 limit=MAX_TITLE_COUNT_PER_CHANNEL,
             ),
             "blog": _merge_title_candidates(
                 generated_blog_titles,
-                build_blog_titles(keyword, category, limit=MAX_TITLE_COUNT_PER_CHANNEL),
                 limit=MAX_TITLE_COUNT_PER_CHANNEL,
             ),
-            "hybrid": build_hybrid_titles(keyword, category, limit=MAX_TITLE_COUNT_PER_CHANNEL),
+            "hybrid": _merge_title_candidates(
+                generated_naver_titles,
+                generated_blog_titles,
+                limit=MAX_TITLE_COUNT_PER_CHANNEL,
+            ),
         },
     }
 
@@ -2886,12 +2804,22 @@ def _build_retry_request_options(
     retry_provider = normalize_text(options.rewrite_provider) or options.provider
     retry_model = normalize_text(options.rewrite_model) or options.model
     retry_api_key = options.rewrite_api_key or options.api_key
+    retry_reasoning_effort = normalize_text(options.rewrite_reasoning_effort) or options.reasoning_effort
     return replace(
         options,
         provider=retry_provider,
         model=retry_model,
         api_key=retry_api_key,
-        batch_size=max(1, min(options.batch_size, 20)),
+        reasoning_effort=retry_reasoning_effort,
+        batch_size=_resolve_generation_batch_size(
+            replace(
+                options,
+                provider=retry_provider,
+                model=retry_model,
+                api_key=retry_api_key,
+                reasoning_effort=retry_reasoning_effort,
+            )
+        ),
         system_prompt=_build_quality_retry_prompt(options.system_prompt, retry_threshold),
     )
 
@@ -2905,14 +2833,17 @@ def _build_model_escalation_options(
     escalated_model = _resolve_escalated_model(options.provider, options.model)
     if not escalated_model:
         return None
-    return replace(
+    escalated_options = replace(
         options,
         model=escalated_model,
-        batch_size=max(1, min(options.batch_size, 20)),
         system_prompt=_build_model_escalation_prompt(
             options.system_prompt if prompt_source is None else prompt_source,
             retry_threshold,
         ),
+    )
+    return replace(
+        escalated_options,
+        batch_size=_resolve_generation_batch_size(escalated_options),
     )
 
 
@@ -2940,10 +2871,12 @@ def _build_title_evaluation_options(
     evaluation_provider = normalize_text(options.rewrite_provider) or options.provider
     evaluation_model = normalize_text(options.rewrite_model) or options.model
     evaluation_api_key = options.rewrite_api_key or options.api_key
+    evaluation_reasoning_effort = normalize_text(options.rewrite_reasoning_effort) or options.reasoning_effort
     return TitleEvaluationOptions(
         provider=evaluation_provider,
         model=evaluation_model,
         api_key=evaluation_api_key,
+        reasoning_effort=evaluation_reasoning_effort,
         system_prompt=normalize_text(options.quality_system_prompt),
         batch_size=max(1, min(options.batch_size, 20)),
         sample_ratio=_DEFAULT_HOME_AI_EVALUATION_SAMPLE_RATIO,

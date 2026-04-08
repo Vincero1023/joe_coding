@@ -43,7 +43,6 @@ class TitlePresetProfilePayload(BaseModel):
     provider: str = ""
     model: str = ""
     temperature: float | None = None
-    fallback_to_template: bool | None = None
     auto_retry_enabled: bool | None = None
     quality_retry_threshold: int | None = None
     issue_context_enabled: bool | None = None

@@ -37,9 +37,7 @@ class TitleService:
                 options = TitleGenerationOptions.from_input(input_data)
                 items = _attach_issue_context_from_input(items, input_data, options=options)
             else:
-                items = _coerce_input_items(input_data)
-                target_summary = {}
-                options = None
+                raise ValueError("Title generation now requires dict input with title_options.")
             generated, meta = generate_titles(
                 items,
                 options=options,
@@ -94,8 +92,6 @@ class TitleService:
             message=f"{len(generated)} / {len(generated)}세트 완료" if generated else "제목 생성 완료",
         )
 
-        if isinstance(input_data, list):
-            return generated
         return {
             "generated_titles": generated,
             "generation_meta": meta,
@@ -110,32 +106,40 @@ class TitleService:
 
 service = TitleService()
 
-EXAMPLE_INPUT = [
-    {
-        "keyword": "보험 추천",
-        "score": 1.0,
-        "metrics": {
-            "volume": 1.0,
-            "cpc": 1.0,
-            "competition": 0.7,
-            "bid": 1.0,
-            "profit": 1.0,
-            "opportunity": 1.4286,
+EXAMPLE_INPUT = {
+    "selected_keywords": [
+        {
+            "keyword": "보험 추천",
+            "score": 1.0,
+            "metrics": {
+                "volume": 1.0,
+                "cpc": 1.0,
+                "competition": 0.7,
+                "bid": 1.0,
+                "profit": 1.0,
+                "opportunity": 1.4286,
+            },
         },
-    },
-    {
-        "keyword": "제주 여행 코스",
-        "score": 0.82,
-        "metrics": {
-            "volume": 0.7,
-            "cpc": 0.7,
-            "competition": 0.4,
-            "bid": 0.6,
-            "profit": 0.42,
-            "opportunity": 1.75,
+        {
+            "keyword": "제주 여행 코스",
+            "score": 0.82,
+            "metrics": {
+                "volume": 0.7,
+                "cpc": 0.7,
+                "competition": 0.4,
+                "bid": 0.6,
+                "profit": 0.42,
+                "opportunity": 1.75,
+            },
         },
+    ],
+    "title_options": {
+        "provider": "codex",
+        "model": "gpt-5.4",
+        "reasoning_effort": "xhigh",
+        "keyword_modes": ["single"],
     },
-]
+}
 
 
 def run(input_data: Any) -> Any:

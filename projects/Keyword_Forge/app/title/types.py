@@ -16,7 +16,7 @@ TITLE_CHANNEL_LABELS: dict[TitleType, str] = {
 TITLE_CHANNEL_SHORT_LABELS: dict[TitleType, str] = {
     "naver_home": "홈판",
     "blog": "블로그형",
-    "hybrid": "둘다",
+    "hybrid": "공용형",
 }
 TITLE_CHANNEL_EXPORT_SEGMENTS: dict[TitleType, str] = {
     "naver_home": "home",

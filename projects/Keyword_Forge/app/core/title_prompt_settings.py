@@ -281,7 +281,6 @@ def _normalize_preset_profiles(value: Any) -> list[dict[str, Any]]:
                     minimum=0.0,
                     maximum=1.5,
                 ),
-                "fallback_to_template": _coerce_bool(item.get("fallback_to_template"), default=True),
                 "auto_retry_enabled": _coerce_bool(item.get("auto_retry_enabled"), default=False),
                 "quality_retry_threshold": _coerce_int(
                     item.get("quality_retry_threshold"),

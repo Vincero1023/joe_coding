@@ -118,12 +118,26 @@ const OPERATION_CUSTOM_TUNING_PRESETS = [
     },
 ];
 const TITLE_PROVIDER_DEFAULT_MODELS = {
+    codex: "gpt-5.4",
     openai: "gpt-4o-mini",
     gemini: "gemini-2.5-flash-lite",
     vertex: "gemini-2.5-flash-lite",
     anthropic: "claude-haiku-4-5",
 };
+const TITLE_GENERATION_PROVIDER_DEFAULT = "codex";
+const TITLE_GENERATION_MODEL_DEFAULT = "gpt-5.4";
+const TITLE_CODEX_REASONING_DEFAULT = "xhigh";
+const TITLE_REVIEW_PROVIDER_DEFAULT = "codex";
+const TITLE_REVIEW_MODEL_DEFAULT = "gpt-5.4-mini";
+const TITLE_REVIEW_REASONING_DEFAULT = "high";
+const TITLE_REASONING_EFFORT_OPTIONS = ["medium", "high", "xhigh"];
 const TITLE_PROVIDER_MODEL_OPTIONS = {
+    codex: [
+        { value: "gpt-5.4", label: "(권장) Codex GPT-5.4" },
+        { value: "gpt-5.4-mini", label: "Codex GPT-5.4 mini" },
+        { value: "gpt-5.3-codex", label: "Codex GPT-5.3 Codex" },
+        { value: "gpt-5.3-codex-spark", label: "Codex GPT-5.3 Codex Spark" },
+    ],
     openai: [
         { value: "gpt-4o-mini", label: "(추천) GPT-4o mini" },
         { value: "gpt-4o", label: "GPT-4o" },
@@ -197,7 +211,7 @@ const TITLE_PRESET_LIBRARY = Array.isArray(window.KEYWORD_FORGE_TITLE_PRESETS)
     ? window.KEYWORD_FORGE_TITLE_PRESETS
     : [];
 const MANUAL_TITLE_PRESET_KEY = "manual";
-const DEFAULT_TITLE_PRESET_KEY = TITLE_PRESET_LIBRARY.find((preset) => preset?.is_default)?.key || "openai_balanced";
+const DEFAULT_TITLE_PRESET_KEY = MANUAL_TITLE_PRESET_KEY;
 const DEFAULT_TITLE_EVALUATION_PROMPT = String(window.KEYWORD_FORGE_TITLE_DEFAULT_EVALUATION_PROMPT || "")
     .replace(/\r\n/g, "\n")
     .trim();
@@ -208,7 +222,8 @@ const TITLE_PRESET_MAP = TITLE_PRESET_LIBRARY.reduce((map, preset) => {
     }
     return map;
 }, {});
-const TITLE_PROVIDER_ORDER = ["openai", "gemini", "vertex", "anthropic"];
+const TITLE_PROVIDER_ORDER = ["codex", "openai", "gemini", "vertex", "anthropic"];
+const TITLE_LOCAL_PROVIDER_ORDER = ["codex"];
 const KEYWORD_STATUS_OPTIONS = [
     { value: "", label: "상태 없음" },
     { value: "reviewed", label: "검토함" },
@@ -234,7 +249,7 @@ const TITLE_SURFACE_ORDER = ["naver_home", "blog", "hybrid"];
 const TITLE_SURFACE_SHORT_LABELS = {
     naver_home: "홈판",
     blog: "블로그형",
-    hybrid: "둘다",
+    hybrid: "공용형",
 };
 const TITLE_SURFACE_COLUMN_LABELS = {
     naver_home: "네이버 홈형",
@@ -346,6 +361,7 @@ const state = {
     selectAttackabilityFilters: [...ATTACKABILITY_ORDER],
     gradeSelectionTouched: false,
     activeResultView: "",
+    activeTitlePreviewTargetId: "",
     resultsToolsVisible: false,
     lastError: null,
     isBusy: false,
@@ -404,9 +420,9 @@ document.addEventListener("DOMContentLoaded", () => {
     addLog("대시보드가 준비되었습니다. 단계별 실행과 디버그 정보를 바로 확인할 수 있습니다.", "success");
     if (restoredDashboard && elements.activityLog?.firstElementChild) {
         elements.activityLog.removeChild(elements.activityLog.firstElementChild);
-        addLog("?댁쟾 ?ㅽ뻾 ?붾㈃怨?寃곌낵瑜?蹂듦뎄?덉뒿?덈떎. ?대? ?곹깭?먯꽌 諛붾줈 ?댁뼱???묒뾽???섏닔 ?덉뒿?덈떎.", "info");
+        addLog("이전 실행 화면과 결과를 복구했습니다. 이 상태에서 바로 이어서 작업할 수 있습니다.", "info");
     } else if (restoredPreferences) {
-        addLog("?댁쟾 ?낅젰媛믪낵 ?붾낫湲?議곌굔???덈윭?쇱? ?덉뒿?덈떎.", "info");
+        addLog("이전 입력값과 불러오기 조건을 불러왔습니다.", "info");
     }
     renderAll();
 });
@@ -903,12 +919,13 @@ function buildTitleOptions() {
         preset_key: formState.preset_key,
         provider,
         model,
+        reasoning_effort: formState.reasoning_effort,
         api_key: apiKey,
         rewrite_provider: rewriteProvider,
         rewrite_model: rewriteModel,
+        rewrite_reasoning_effort: formState.rewrite_reasoning_effort,
         rewrite_api_key: rewriteApiKey,
         temperature: formState.temperature,
-        fallback_to_template: formState.fallback_to_template,
         system_prompt: formState.system_prompt,
         quality_system_prompt: formState.quality_system_prompt,
         quality_prompt_profile_id: formState.active_evaluation_prompt_profile_id,
@@ -1710,6 +1727,10 @@ function clearStageAndDownstream(stageKey) {
         state.analyzedFilters = createDefaultAnalyzedFilters();
     }
 
+    if (stageKey === "titled" || DOWNSTREAM_STAGE_KEYS[stageKey]?.includes("titled")) {
+        state.activeTitlePreviewTargetId = "";
+    }
+
     DOWNSTREAM_STAGE_KEYS[stageKey].forEach((nextStageKey) => {
         state.results[nextStageKey] = null;
         state.stageStatus[nextStageKey] = createPendingStatus();
@@ -2323,7 +2344,7 @@ function getQuickStartConfig(modeOverride = null) {
                 ? "제목 생성은 현재 선별 키워드를 바탕으로 제목 단계만 진행합니다."
                 : (selectedCount === 0
                     ? "선별 결과가 아직 없어도 아래 제목 생성 실행 버튼이 앞단계를 자동으로 이어갑니다."
-                    : "AI 모드라면 운영 설정에서 API를 먼저 등록하세요."),
+                    : "AI 모드라면 운영 설정에서 API를 등록하거나 PowerShell에서 `codex login`을 먼저 해주세요."),
             description: "시작 모드는 설명과 설정만 담당합니다. 실제 실행은 아래 `제목 생성 실행` 버튼에서 진행하세요.",
             meta: [
                 `선별 ${selectedCount}건`,
@@ -2559,7 +2580,7 @@ function buildHeroTitleStatusSummary() {
     const settings = typeof getTitleSettingsFormState === "function"
         ? getTitleSettingsFormState()
         : {
-            mode: "template",
+            mode: "ai",
             keyword_modes: ["single"],
             surface_modes: ["naver_home", "blog"],
             surface_counts: DEFAULT_TITLE_SURFACE_COUNTS,
@@ -3440,11 +3461,14 @@ function buildDashboardFormSnapshot() {
         analyzeManualInput: elements.analyzeManualInput?.value || "",
         analyzeKeywordStatsInput: elements.analyzeKeywordStatsInput?.value || "",
         quickStartMode: normalizeQuickStartMode(state.quickStartMode),
-        titleMode: syncTitleModeInputFromRadios(),
+        titleMode: "ai",
         titleProvider: elements.titleProvider?.value || "",
         titleModel: elements.titleModel?.value || "",
+        titleReasoningEffort: elements.titleReasoningEffort?.value || "",
         titleTemperature: elements.titleTemperature?.value || "",
-        titleFallback: Boolean(elements.titleFallback?.checked),
+        titleRewriteProvider: elements.titleRewriteProvider?.value || "",
+        titleRewriteModel: elements.titleRewriteModel?.value || "",
+        titleRewriteReasoningEffort: elements.titleRewriteReasoningEffort?.value || "",
         localCookieStatus: elements.localCookieStatus?.textContent || "",
     };
 }
@@ -3528,23 +3552,27 @@ function applyDashboardFormSnapshot(formState) {
         state.quickStartMode = normalizeQuickStartMode(formState.quickStartMode);
     }
 
-    const restoredTitleMode = String(formState.titleMode || "").trim();
-    if (restoredTitleMode) {
-        (elements.titleModeRadios || []).forEach((radio) => {
-            radio.checked = radio.value === restoredTitleMode;
-        });
-    }
+    applyTitleModeSelection("ai");
     if (elements.titleProvider && typeof formState.titleProvider === "string") {
         elements.titleProvider.value = formState.titleProvider;
     }
     if (elements.titleModel && typeof formState.titleModel === "string") {
         elements.titleModel.value = formState.titleModel;
     }
+    if (elements.titleReasoningEffort && typeof formState.titleReasoningEffort === "string") {
+        elements.titleReasoningEffort.value = formState.titleReasoningEffort;
+    }
     if (elements.titleTemperature && formState.titleTemperature !== undefined) {
         elements.titleTemperature.value = String(formState.titleTemperature || "");
     }
-    if (elements.titleFallback) {
-        elements.titleFallback.checked = Boolean(formState.titleFallback);
+    if (elements.titleRewriteProvider && typeof formState.titleRewriteProvider === "string") {
+        elements.titleRewriteProvider.value = formState.titleRewriteProvider;
+    }
+    if (elements.titleRewriteModel && typeof formState.titleRewriteModel === "string") {
+        elements.titleRewriteModel.value = formState.titleRewriteModel;
+    }
+    if (elements.titleRewriteReasoningEffort && typeof formState.titleRewriteReasoningEffort === "string") {
+        elements.titleRewriteReasoningEffort.value = formState.titleRewriteReasoningEffort;
     }
     if (elements.localCookieStatus && typeof formState.localCookieStatus === "string" && formState.localCookieStatus.trim()) {
         elements.localCookieStatus.textContent = formState.localCookieStatus;
@@ -3560,7 +3588,6 @@ function buildDashboardPreferenceFormSnapshot() {
     delete formState.titleProvider;
     delete formState.titleModel;
     delete formState.titleTemperature;
-    delete formState.titleFallback;
     delete formState.titleMode;
 
     return {
@@ -3716,6 +3743,7 @@ function buildDashboardSessionPayload() {
         selectAttackabilityFilters: state.selectAttackabilityFilters,
         gradeSelectionTouched: state.gradeSelectionTouched,
         activeResultView: state.activeResultView,
+        activeTitlePreviewTargetId: state.activeTitlePreviewTargetId,
         resultsToolsVisible: state.resultsToolsVisible,
         titleModeFilter: state.titleModeFilter,
         titleSort: state.titleSort,
@@ -3831,6 +3859,7 @@ function restoreDashboardSession() {
     );
     state.gradeSelectionTouched = Boolean(snapshot.gradeSelectionTouched);
     state.activeResultView = normalizeResultViewKey(snapshot.activeResultView) || "";
+    state.activeTitlePreviewTargetId = String(snapshot.activeTitlePreviewTargetId || "").trim();
     state.resultsToolsVisible = Boolean(snapshot.resultsToolsVisible);
     state.titleModeFilter = normalizeTitleResultModeFilter(snapshot.titleModeFilter);
     state.titleSort = normalizeTitleResultSort(snapshot.titleSort);
@@ -5392,12 +5421,15 @@ function bindElements() {
     elements.titleProviderRegistryHint = document.getElementById("titleProviderRegistryHint");
     elements.openApiRegistrySettingsButton = document.getElementById("openApiRegistrySettingsButton");
     elements.titleModel = document.getElementById("titleModel");
+    elements.titleReasoningEffortField = document.getElementById("titleReasoningEffortField");
+    elements.titleReasoningEffort = document.getElementById("titleReasoningEffort");
     elements.titleTemperature = document.getElementById("titleTemperature");
     elements.titleTemperatureDescription = document.getElementById("titleTemperatureDescription");
     elements.titleRewriteProvider = document.getElementById("titleRewriteProvider");
     elements.titleRewriteModel = document.getElementById("titleRewriteModel");
+    elements.titleRewriteReasoningEffortField = document.getElementById("titleRewriteReasoningEffortField");
+    elements.titleRewriteReasoningEffort = document.getElementById("titleRewriteReasoningEffort");
     elements.titleRewriteSummary = document.getElementById("titleRewriteSummary");
-    elements.titleFallback = document.getElementById("titleFallback");
     elements.titleSystemPrompt = document.getElementById("titleSystemPrompt");
     elements.titleQualitySystemPrompt = document.getElementById("titleQualitySystemPrompt");
     elements.titlePromptProfilePicker = document.getElementById("titlePromptProfilePicker");
@@ -5435,7 +5467,6 @@ function bindElements() {
     elements.refreshOperationSettingsButton = document.getElementById("refreshOperationSettingsButton");
     elements.resetOperationGuardsButton = document.getElementById("resetOperationGuardsButton");
     elements.saveOperationSettingsButton = document.getElementById("saveOperationSettingsButton");
-    elements.titleModeRadios = Array.from(document.querySelectorAll("input[name='titleModeOption']"));
     elements.titleModeVisibilityBlocks = Array.from(document.querySelectorAll("[data-title-mode-visibility]"));
     elements.statusList = document.getElementById("statusList");
     elements.controlStack = document.getElementById("controlStack");
@@ -5601,17 +5632,14 @@ function bindEvents() {
         elements.titleCustomPresetPicker,
         elements.titleProvider,
         elements.titleModel,
+        elements.titleReasoningEffort,
         elements.titleTemperature,
         elements.titleRewriteProvider,
         elements.titleRewriteModel,
-        elements.titleFallback,
+        elements.titleRewriteReasoningEffort,
     ].forEach((element) => {
         element?.addEventListener("input", handleTitleSettingsChange);
         element?.addEventListener("change", handleTitleSettingsChange);
-    });
-    elements.titleModeRadios.forEach((radio) => {
-        radio.addEventListener("change", handleTitleSettingsChange);
-        radio.addEventListener("input", handleTitleSettingsChange);
     });
     elements.titleCommunitySourceInputs.forEach((input) => {
         input.addEventListener("change", handleTitleSettingsChange);
@@ -6490,9 +6518,7 @@ function setBlocksVisibility(blocks, activeValue, datasetKey) {
 }
 
 function syncTitleModeInputFromRadios() {
-    const selectedMode = (elements.titleModeRadios || []).find((radio) => radio.checked)?.value
-        || elements.titleMode?.value
-        || "template";
+    const selectedMode = "ai";
     if (elements.titleMode) {
         elements.titleMode.value = selectedMode;
     }
@@ -6500,13 +6526,10 @@ function syncTitleModeInputFromRadios() {
 }
 
 function applyTitleModeSelection(mode) {
-    const normalized = mode === "ai" ? "ai" : "template";
+    const normalized = "ai";
     if (elements.titleMode) {
         elements.titleMode.value = normalized;
     }
-    (elements.titleModeRadios || []).forEach((radio) => {
-        radio.checked = radio.value === normalized;
-    });
     return normalized;
 }
 
@@ -7605,9 +7628,9 @@ function renderResults() {
     const activeViewHtml = activeView ? activeView.render() : "";
     const stageBodyHtml = railHtml
         ? `
-            <div class="results-stage-layout">
+            <div class="results-stage-layout${activeViewKey === "titled" ? " title-stage-layout" : ""}">
                 <div class="results-stage-main">${activeViewHtml}</div>
-                <aside class="results-stage-aside">${railHtml}</aside>
+                <aside class="results-stage-aside${activeViewKey === "titled" ? " title-stage-aside" : ""}">${railHtml}</aside>
             </div>
         `
         : activeViewHtml;
@@ -8330,6 +8353,7 @@ function resetAllLegacy() {
     state.stageStatus = createInitialStageStatus();
     state.diagnostics = createEmptyDiagnostics();
     state.selectedCollectedKeys = [];
+    state.activeTitlePreviewTargetId = "";
     state.lastError = null;
     state.analyzedFilters = createDefaultAnalyzedFilters();
     setGlobalStatus("대기 중", "idle");
@@ -8411,10 +8435,28 @@ function normalizeTitleProvider(provider) {
     return TITLE_PROVIDER_MODEL_OPTIONS[normalized] ? normalized : "openai";
 }
 
+function isCodexTitleProvider(provider) {
+    return normalizeTitleProvider(provider) === "codex";
+}
+
+function normalizeTitleReasoningEffort(value, defaultValue = TITLE_CODEX_REASONING_DEFAULT) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (TITLE_REASONING_EFFORT_OPTIONS.includes(normalized)) {
+        return normalized;
+    }
+    return String(defaultValue || TITLE_CODEX_REASONING_DEFAULT).trim().toLowerCase();
+}
+
+function normalizeOptionalTitleReasoningEffort(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return TITLE_REASONING_EFFORT_OPTIONS.includes(normalized) ? normalized : "";
+}
+
 function formatTitleProviderLabel(provider) {
     const rawProvider = String(provider || "").trim().toLowerCase();
     if (!rawProvider) return "미등록";
     const normalized = normalizeTitleProvider(provider);
+    if (normalized === "codex") return "Codex";
     if (normalized === "gemini") return "Gemini";
     if (normalized === "vertex") return "Vertex AI";
     if (normalized === "anthropic") return "Anthropic";
@@ -8498,18 +8540,44 @@ function getRegisteredTitleProviders(registry = readTitleApiRegistry()) {
     return TITLE_PROVIDER_ORDER.filter((provider) => String(registry.providers?.[provider]?.api_key || "").trim());
 }
 
+function getLocallyAvailableTitleProviders() {
+    return TITLE_LOCAL_PROVIDER_ORDER.filter((provider) => Boolean(TITLE_PROVIDER_MODEL_OPTIONS[provider]));
+}
+
+function getAvailableTitleProviders(registry = readTitleApiRegistry()) {
+    const providers = [];
+
+    getRegisteredTitleProviders(registry).forEach((provider) => {
+        if (!providers.includes(provider)) {
+            providers.push(provider);
+        }
+    });
+
+    getLocallyAvailableTitleProviders().forEach((provider) => {
+        if (!providers.includes(provider)) {
+            providers.push(provider);
+        }
+    });
+
+    return providers;
+}
+
 function ensureRegisteredTitleProvider(provider, registry = readTitleApiRegistry()) {
     const preferredProvider = String(provider || "").trim().toLowerCase();
-    const registeredProviders = getRegisteredTitleProviders(registry);
-    if (preferredProvider && registeredProviders.includes(preferredProvider)) {
+    const availableProviders = getAvailableTitleProviders(registry);
+    if (preferredProvider && availableProviders.includes(preferredProvider)) {
         return preferredProvider;
     }
-    return registeredProviders[0] || "";
+    return availableProviders[0] || "";
 }
 
 function getTitleApiKeyForProvider(provider, registry = readTitleApiRegistry()) {
-    const selectedProvider = ensureRegisteredTitleProvider(provider, registry);
-    if (!selectedProvider) {
+    const normalizedProvider = normalizeTitleProvider(provider);
+    if (TITLE_LOCAL_PROVIDER_ORDER.includes(normalizedProvider)) {
+        return "";
+    }
+    const selectedProvider = ensureRegisteredTitleProvider(normalizedProvider, registry);
+    if (!selectedProvider || TITLE_LOCAL_PROVIDER_ORDER.includes(selectedProvider)) {
         return "";
     }
     return String(registry.providers?.[selectedProvider]?.api_key || "").trim();
@@ -8517,15 +8585,15 @@ function getTitleApiKeyForProvider(provider, registry = readTitleApiRegistry()) 
 
 function resolveOptionalRegisteredTitleProvider(provider, registry = readTitleApiRegistry()) {
     const preferredProvider = String(provider || "").trim().toLowerCase();
-    const registeredProviders = getRegisteredTitleProviders(registry);
-    if (preferredProvider && registeredProviders.includes(preferredProvider)) {
+    const availableProviders = getAvailableTitleProviders(registry);
+    if (preferredProvider && availableProviders.includes(preferredProvider)) {
         return preferredProvider;
     }
     return "";
 }
 
 function getVisibleTitlePresets(registry = readTitleApiRegistry()) {
-    const registeredProviders = new Set(getRegisteredTitleProviders(registry));
+    const registeredProviders = new Set(getAvailableTitleProviders(registry));
     return TITLE_PRESET_LIBRARY.filter((preset) => (
         Boolean(preset?.is_manual)
         || registeredProviders.has(normalizeTitleProvider(preset?.provider))
@@ -8548,7 +8616,7 @@ function setTitleProviderOptionsForElement(
         return "";
     }
 
-    const registeredProviders = getRegisteredTitleProviders(registry);
+    const registeredProviders = getAvailableTitleProviders(registry);
     const allowEmpty = Boolean(options.allowEmpty);
     const emptyLabel = String(options.emptyLabel || "등록된 API 없음");
     selectElement.innerHTML = "";
@@ -8634,19 +8702,26 @@ function setTitlePresetOptions(preferredPresetKey = MANUAL_TITLE_PRESET_KEY, reg
 function renderTitleApiRegistryStatus(registry = readTitleApiRegistry()) {
     const registeredProviders = getRegisteredTitleProviders(registry);
     const labels = registeredProviders.map((provider) => formatTitleProviderLabel(provider));
+    const availableProviders = getAvailableTitleProviders(registry);
+    const localProviders = getLocallyAvailableTitleProviders();
+    const localLabels = localProviders.map((provider) => formatTitleProviderLabel(provider));
+    const availableLabels = availableProviders.map((provider) => formatTitleProviderLabel(provider));
 
     if (elements.titleApiRegistryCount) {
-        elements.titleApiRegistryCount.textContent = `${registeredProviders.length}개 연결`;
+        elements.titleApiRegistryCount.textContent = `${availableProviders.length}개 사용 가능`;
     }
     if (elements.titleApiRegistryStatus) {
-        elements.titleApiRegistryStatus.textContent = registeredProviders.length
-            ? `등록 완료: ${labels.join(", ")}. 제목 생성 AI 설정에는 등록된 연결만 표시됩니다.`
-            : "등록된 API가 없습니다. OpenAI, Gemini, Vertex AI, Anthropic 중 필요한 연결만 저장하세요.";
+        elements.titleApiRegistryStatus.textContent = availableProviders.length
+            ? [
+                labels.length ? `API: ${labels.join(", ")}` : "",
+                localLabels.length ? `로컬: ${localLabels.join(", ")} (PowerShell에서 \`codex login\`)` : "",
+            ].filter(Boolean).join(" / ")
+            : "사용 가능한 AI provider가 없습니다.";
     }
     if (elements.titleProviderRegistryHint) {
-        elements.titleProviderRegistryHint.textContent = registeredProviders.length
-            ? `사용 가능: ${labels.join(", ")}`
-            : "운영 설정에서 API를 먼저 등록하면 여기서 선택할 수 있습니다.";
+        elements.titleProviderRegistryHint.textContent = availableProviders.length
+            ? `사용 가능: ${availableLabels.join(", ")}`
+            : "운영 설정에서 API를 등록하거나 PowerShell에서 `codex login`을 먼저 실행하세요.";
     }
 }
 
@@ -8718,6 +8793,40 @@ function migrateLegacyTitleRetryDefaults(settings = {}) {
     if (!hasRetryThreshold) {
         nextSettings.quality_retry_threshold = TITLE_QUALITY_RETRY_THRESHOLD_DEFAULT;
     }
+    return nextSettings;
+}
+
+function applyRecommendedTitleAiDefaults(settings = {}, options = {}) {
+    const source = settings && typeof settings === "object" ? settings : {};
+    const nextSettings = { ...source };
+    const forceGenerationDefaults = Boolean(options.forceGenerationDefaults);
+    const hasGenerationProvider = Boolean(normalizeTitleProvider(source.provider || ""));
+    const hasGenerationModel = Boolean(String(source.model || "").trim());
+    const effectiveProvider = forceGenerationDefaults || !hasGenerationProvider
+        ? TITLE_GENERATION_PROVIDER_DEFAULT
+        : normalizeTitleProvider(source.provider || "");
+
+    if (forceGenerationDefaults || !hasGenerationProvider) {
+        nextSettings.provider = TITLE_GENERATION_PROVIDER_DEFAULT;
+    }
+    if (forceGenerationDefaults || !hasGenerationModel) {
+        nextSettings.model = TITLE_GENERATION_MODEL_DEFAULT;
+    }
+    if (effectiveProvider === "codex" && !String(source.reasoning_effort || "").trim()) {
+        nextSettings.reasoning_effort = TITLE_CODEX_REASONING_DEFAULT;
+    }
+
+    const hasExplicitReviewConfig = Boolean(
+        normalizeTitleProvider(source.rewrite_provider || "")
+        || String(source.rewrite_model || "").trim()
+        || normalizeOptionalTitleReasoningEffort(source.rewrite_reasoning_effort)
+    );
+    if (effectiveProvider === "codex" && !hasExplicitReviewConfig) {
+        nextSettings.rewrite_provider = TITLE_REVIEW_PROVIDER_DEFAULT;
+        nextSettings.rewrite_model = TITLE_REVIEW_MODEL_DEFAULT;
+        nextSettings.rewrite_reasoning_effort = TITLE_REVIEW_REASONING_DEFAULT;
+    }
+
     return nextSettings;
 }
 
@@ -8970,7 +9079,7 @@ function updateTitleKeywordModeSummary() {
 }
 
 function buildTitleAutoRetrySummary() {
-    const isAiMode = String(elements.titleMode?.value || "template").trim() === "ai";
+    const isAiMode = String(elements.titleMode?.value || "ai").trim() === "ai";
     const isEnabled = Boolean(elements.titleAutoRetryEnabled?.checked);
     const retryThreshold = normalizeTitleQualityRetryThreshold(elements.titleAutoRetryThreshold?.value);
     if (!isAiMode) {
@@ -9102,7 +9211,7 @@ function buildTitleCommunitySourceSummaryText() {
 }
 
 function buildTitleIssueContextSummary() {
-    const isAiMode = String(elements.titleMode?.value || "template").trim() === "ai";
+    const isAiMode = String(elements.titleMode?.value || "ai").trim() === "ai";
     const isEnabled = Boolean(elements.titleIssueContextEnabled?.checked);
     const issueLimit = normalizeTitleIssueContextLimit(elements.titleIssueContextLimit?.value);
     if (!isAiMode) {
@@ -9179,6 +9288,54 @@ function setTitleModelOptions(provider, preferredValue = "") {
 
 function setTitleRewriteModelOptions(provider, preferredValue = "") {
     setTitleModelOptionsForElement(elements.titleRewriteModel, provider, preferredValue, "생성과 동일");
+}
+
+function syncTitleReasoningControl(fieldElement, selectElement, provider, options = {}) {
+    if (!fieldElement || !selectElement) {
+        return "";
+    }
+    const normalizedProvider = String(provider || "").trim().toLowerCase();
+    const allowEmpty = Boolean(options.allowEmpty);
+    const preferredValue = String(options.preferredValue || "").trim().toLowerCase();
+    const shouldShow = normalizedProvider === "codex";
+
+    fieldElement.hidden = !shouldShow;
+    fieldElement.style.display = shouldShow ? "" : "none";
+    selectElement.disabled = !shouldShow;
+
+    if (!shouldShow) {
+        selectElement.value = allowEmpty ? "" : TITLE_CODEX_REASONING_DEFAULT;
+        return "";
+    }
+
+    const fallbackValue = allowEmpty ? "" : TITLE_CODEX_REASONING_DEFAULT;
+    selectElement.value = preferredValue
+        ? normalizeTitleReasoningEffort(preferredValue, preferredValue)
+        : fallbackValue;
+    if (selectElement.value !== (preferredValue || fallbackValue)) {
+        selectElement.value = fallbackValue;
+    }
+    return String(selectElement.value || "").trim().toLowerCase();
+}
+
+function updateTitleReasoningControls() {
+    syncTitleReasoningControl(
+        elements.titleReasoningEffortField,
+        elements.titleReasoningEffort,
+        elements.titleProvider?.value,
+        {
+            preferredValue: elements.titleReasoningEffort?.value || TITLE_CODEX_REASONING_DEFAULT,
+        },
+    );
+    syncTitleReasoningControl(
+        elements.titleRewriteReasoningEffortField,
+        elements.titleRewriteReasoningEffort,
+        elements.titleRewriteProvider?.value,
+        {
+            allowEmpty: true,
+            preferredValue: elements.titleRewriteReasoningEffort?.value || "",
+        },
+    );
 }
 
 function applyTitlePresetSelection(presetKey) {
@@ -9304,7 +9461,7 @@ function normalizeTitleQualityPromptProfiles(value) {
             return profiles;
         }
         const id = normalizeTitlePromptProfileId(item.id || `quality-profile-${index + 1}`);
-        const name = String(item.name || "").replace(/\s+/g, " ").trim() || `??? ${profiles.length + 1}`;
+        const name = String(item.name || "").replace(/\s+/g, " ").trim() || `프롬프트 ${profiles.length + 1}`;
         const prompt = normalizeTitleQualityPromptText(item.prompt);
         if (!id || seenIds.has(id)) {
             return profiles;
@@ -9373,8 +9530,10 @@ function normalizeTitlePresetProfiles(value) {
             preset_key: normalizeTitlePresetKey(item.preset_key || ""),
             provider: rawProvider ? normalizeTitleProvider(rawProvider) : "",
             model: String(item.model || "").trim(),
+            reasoning_effort: rawProvider && normalizeTitleProvider(rawProvider) === "codex"
+                ? normalizeTitleReasoningEffort(item.reasoning_effort)
+                : "",
             temperature: Number(normalizeTitleTemperatureValue(item.temperature)),
-            fallback_to_template: Boolean(item.fallback_to_template ?? true),
             auto_retry_enabled: Boolean(normalizedRetryItem.auto_retry_enabled ?? false),
             quality_retry_threshold: normalizeTitleQualityRetryThreshold(normalizedRetryItem.quality_retry_threshold),
             issue_context_enabled: Boolean(item.issue_context_enabled ?? true),
@@ -9390,6 +9549,7 @@ function normalizeTitlePresetProfiles(value) {
             ),
             rewrite_provider: rawRewriteProvider ? normalizeTitleProvider(rawRewriteProvider) : "",
             rewrite_model: String(item.rewrite_model || "").trim(),
+            rewrite_reasoning_effort: normalizeOptionalTitleReasoningEffort(item.rewrite_reasoning_effort),
             updated_at: String(item.updated_at || "").trim(),
         });
         return profiles;
@@ -9547,7 +9707,7 @@ function renderTitleQualityPromptProfilePicker(settings = {}) {
 
     const directOption = document.createElement("option");
     directOption.value = "";
-    directOption.textContent = profiles.length ? "?? ??" : "?? ?? (??? ??)";
+    directOption.textContent = profiles.length ? "직접 입력" : "직접 입력 (저장본 없음)";
     elements.titleQualityPromptProfilePicker.appendChild(directOption);
 
     profiles.forEach((profile) => {
@@ -9601,7 +9761,7 @@ function buildTitlePresetProfileSummary(settings = {}) {
             ? formatTitleProviderLabel(activePresetProfile.rewrite_provider)
             : "생성과 동일";
         const rewriteModelLabel = activePresetProfile.rewrite_model || "생성과 동일";
-        return `${activePresetProfile.name} · ${providerLabel} · ${activePresetProfile.model || "모델 없음"} · 재작성 ${rewriteProviderLabel} / ${rewriteModelLabel}`;
+        return `${activePresetProfile.name} · ${providerLabel} · ${activePresetProfile.model || "모델 없음"} · 검토 ${rewriteProviderLabel} / ${rewriteModelLabel}`;
     }
     return presetProfiles.length
         ? `사용자 프리셋 ${presetProfiles.length}개`
@@ -9623,10 +9783,14 @@ function buildTitleRewriteSummary() {
     }
     const provider = String(elements.titleRewriteProvider?.value || "").trim();
     const model = String(elements.titleRewriteModel?.value || "").trim();
+    const reasoningEffort = String(elements.titleRewriteReasoningEffort?.value || "").trim().toLowerCase();
     if (!provider) {
-        return "재작성은 제목 생성 AI와 같은 provider/model을 그대로 사용합니다.";
+        return "검토 AI를 비워두면 생성 AI와 같은 provider/model을 그대로 사용합니다.";
     }
-    return `재작성 전용 AI: ${formatTitleProviderLabel(provider)} / ${model || "기본 모델"}`;
+    const reasoningSuffix = provider === "codex" && reasoningEffort
+        ? ` / ${reasoningEffort}`
+        : "";
+    return `검토 전용 AI: ${formatTitleProviderLabel(provider)} / ${model || "기본 모델"}${reasoningSuffix}`;
 }
 
 function updateTitleRewriteSummary() {
@@ -9831,8 +9995,10 @@ function buildCurrentTitlePresetProfile(existingProfile = {}) {
         preset_key: normalizeTitlePresetKey(formState.preset_key || ""),
         provider: normalizeTitleProvider(formState.provider || ""),
         model: String(formState.model || "").trim(),
+        reasoning_effort: normalizeTitleProvider(formState.provider || "") === "codex"
+            ? normalizeTitleReasoningEffort(formState.reasoning_effort)
+            : "",
         temperature: Number(normalizeTitleTemperatureValue(formState.temperature)),
-        fallback_to_template: Boolean(formState.fallback_to_template),
         auto_retry_enabled: Boolean(formState.auto_retry_enabled),
         quality_retry_threshold: normalizeTitleQualityRetryThreshold(formState.quality_retry_threshold),
         issue_context_enabled: Boolean(formState.issue_context_enabled),
@@ -9848,6 +10014,7 @@ function buildCurrentTitlePresetProfile(existingProfile = {}) {
             : normalizeTitleQualityPromptText(formState.quality_system_prompt),
         rewrite_provider: resolveOptionalRegisteredTitleProvider(formState.rewrite_provider || ""),
         rewrite_model: String(formState.rewrite_model || "").trim(),
+        rewrite_reasoning_effort: normalizeOptionalTitleReasoningEffort(formState.rewrite_reasoning_effort),
         updated_at: new Date().toISOString(),
     };
 }
@@ -9963,6 +10130,9 @@ function applyTitlePresetProfileSelection(profileId) {
         const provider = ensureRegisteredTitleProvider(profile.provider, registry);
         setTitleProviderOptions(provider, registry);
         setTitleModelOptions(provider, profile.model);
+        if (elements.titleReasoningEffort) {
+            elements.titleReasoningEffort.value = normalizeTitleReasoningEffort(profile.reasoning_effort);
+        }
         if (elements.titleTemperature) {
             elements.titleTemperature.value = normalizeTitleTemperatureValue(profile.temperature);
         }
@@ -9990,9 +10160,6 @@ function applyTitlePresetProfileSelection(profileId) {
         updateTitlePresetDescription();
     }
 
-    if (elements.titleFallback) {
-        elements.titleFallback.checked = Boolean(profile.fallback_to_template);
-    }
     if (elements.titleAutoRetryEnabled) {
         elements.titleAutoRetryEnabled.checked = Boolean(profile.auto_retry_enabled);
     }
@@ -10049,6 +10216,11 @@ function applyTitlePresetProfileSelection(profileId) {
 
     const selectedRewriteProvider = setTitleRewriteProviderOptions(profile.rewrite_provider, registry);
     setTitleRewriteModelOptions(selectedRewriteProvider, profile.rewrite_model);
+    if (elements.titleRewriteReasoningEffort) {
+        elements.titleRewriteReasoningEffort.value = isCodexTitleProvider(selectedRewriteProvider)
+            ? normalizeTitleReasoningEffort(profile.rewrite_reasoning_effort || profile.reasoning_effort)
+            : "";
+    }
 
     if (elements.titleCustomPresetPicker) {
         elements.titleCustomPresetPicker.value = profile.id;
@@ -10114,7 +10286,7 @@ function clearTitleApiRegistry() {
 
 function loadTitleSettings() {
     const defaults = {
-        mode: "template",
+        mode: "ai",
         keyword_modes: ["single", "longtail_selected"],
         surface_modes: ["naver_home", "blog"],
         surface_counts: { ...DEFAULT_TITLE_SURFACE_COUNTS },
@@ -10125,12 +10297,12 @@ function loadTitleSettings() {
         issue_source_mode: TITLE_ISSUE_SOURCE_MODE_DEFAULT,
         community_sources: [...TITLE_COMMUNITY_SOURCE_DEFAULT_KEYS],
         community_custom_domains: "",
-        preset_key: DEFAULT_TITLE_PRESET_KEY,
-        provider: "openai",
-        model: TITLE_PROVIDER_DEFAULT_MODELS.openai,
+        preset_key: MANUAL_TITLE_PRESET_KEY,
+        provider: TITLE_GENERATION_PROVIDER_DEFAULT,
+        model: TITLE_GENERATION_MODEL_DEFAULT,
+        reasoning_effort: TITLE_CODEX_REASONING_DEFAULT,
         api_key: "",
         temperature: TITLE_TEMPERATURE_DEFAULT,
-        fallback_to_template: true,
         direct_system_prompt: "",
         system_prompt: "",
         prompt_profiles: [],
@@ -10141,14 +10313,18 @@ function loadTitleSettings() {
         active_evaluation_prompt_profile_id: "",
         preset_profiles: [],
         active_preset_profile_id: "",
-        rewrite_provider: "",
-        rewrite_model: "",
+        rewrite_provider: TITLE_REVIEW_PROVIDER_DEFAULT,
+        rewrite_model: TITLE_REVIEW_MODEL_DEFAULT,
+        rewrite_reasoning_effort: TITLE_REVIEW_REASONING_DEFAULT,
     };
 
     let apiRegistry = loadTitleApiRegistry();
     const storedSettings = readLocalStorageJson(TITLE_SETTINGS_STORAGE_KEY);
-    const migratedStoredSettings = migrateLegacyTitleRetryDefaults(storedSettings || {});
     const hasStoredSettings = Boolean(storedSettings && typeof storedSettings === "object");
+    const migratedStoredSettings = applyRecommendedTitleAiDefaults(
+        migrateLegacyTitleRetryDefaults(storedSettings || {}),
+        { forceGenerationDefaults: !hasStoredSettings },
+    );
     const hasStoredCommunitySources = Boolean(
         hasStoredSettings && Object.prototype.hasOwnProperty.call(storedSettings, "community_sources"),
     );
@@ -10163,6 +10339,9 @@ function loadTitleSettings() {
         ...localSettings,
         ...(shouldSeedServerPromptSettings ? localPromptSettings : serverPromptSettings),
     };
+    settings.mode = "ai";
+    settings.reasoning_effort = normalizeTitleReasoningEffort(settings.reasoning_effort);
+    settings.rewrite_reasoning_effort = normalizeOptionalTitleReasoningEffort(settings.rewrite_reasoning_effort);
     apiRegistry = migrateLegacyTitleApiKey(settings, apiRegistry);
     applyTitleApiRegistryToForm(apiRegistry);
     renderTitleApiRegistryStatus(apiRegistry);
@@ -10191,7 +10370,7 @@ function loadTitleSettings() {
     const preferredPresetKey = resolvePreferredTitlePresetKey(storedSettings, resolvedPresetKey);
     const preferredProvider = ensureRegisteredTitleProvider(settings.provider, apiRegistry);
 
-    applyTitleModeSelection(settings.mode);
+    applyTitleModeSelection("ai");
     setTitleProviderOptions(preferredProvider, apiRegistry);
     setTitlePresetOptions(preferredPresetKey, apiRegistry);
     if (preferredPresetKey !== MANUAL_TITLE_PRESET_KEY && isTitlePresetAvailable(preferredPresetKey, apiRegistry)) {
@@ -10202,12 +10381,19 @@ function loadTitleSettings() {
         }
         elements.titleProvider.value = preferredProvider;
         setTitleModelOptions(preferredProvider, settings.model);
+        if (elements.titleReasoningEffort) {
+            elements.titleReasoningEffort.value = normalizeTitleReasoningEffort(settings.reasoning_effort);
+        }
         elements.titleTemperature.value = normalizeTitleTemperatureValue(settings.temperature);
         updateTitlePresetDescription();
     }
     const selectedRewriteProvider = setTitleRewriteProviderOptions(settings.rewrite_provider, apiRegistry);
     setTitleRewriteModelOptions(selectedRewriteProvider, settings.rewrite_model);
-    elements.titleFallback.checked = Boolean(settings.fallback_to_template);
+    if (elements.titleRewriteReasoningEffort) {
+        elements.titleRewriteReasoningEffort.value = isCodexTitleProvider(selectedRewriteProvider)
+            ? normalizeTitleReasoningEffort(settings.rewrite_reasoning_effort || settings.reasoning_effort)
+            : "";
+    }
     if (elements.titleAutoRetryEnabled) {
         elements.titleAutoRetryEnabled.checked = Boolean(settings.auto_retry_enabled ?? false);
     }
@@ -10259,10 +10445,6 @@ function loadTitleSettings() {
 }
 
 function handleTitleSettingsChange(event) {
-    if (event?.target?.matches?.("input[name='titleModeOption']")) {
-        syncTitleModeInputFromRadios();
-    }
-
     if (event?.target === elements.titlePreset) {
         if (elements.titleCustomPresetPicker) {
             elements.titleCustomPresetPicker.value = "";
@@ -10324,6 +10506,10 @@ function handleTitleSettingsChange(event) {
             provider,
             shouldResetToDefault ? (TITLE_PROVIDER_DEFAULT_MODELS[provider] || "") : currentModel,
         );
+        if (elements.titleReasoningEffort) {
+            elements.titleReasoningEffort.value = normalizeTitleReasoningEffort(elements.titleReasoningEffort.value);
+        }
+        updateTitleReasoningControls();
     }
 
     if (event?.target === elements.titleRewriteProvider) {
@@ -10338,13 +10524,21 @@ function handleTitleSettingsChange(event) {
             provider,
             shouldResetToDefault ? (provider ? (TITLE_PROVIDER_DEFAULT_MODELS[provider] || "") : "") : currentModel,
         );
+        if (elements.titleRewriteReasoningEffort) {
+            elements.titleRewriteReasoningEffort.value = provider === "codex"
+                ? normalizeTitleReasoningEffort(
+                    elements.titleRewriteReasoningEffort.value || elements.titleReasoningEffort?.value || TITLE_CODEX_REASONING_DEFAULT,
+                )
+                : "";
+        }
+        updateTitleReasoningControls();
     }
 
     if (
         event?.target === elements.titleProvider
         || event?.target === elements.titleModel
+        || event?.target === elements.titleReasoningEffort
         || event?.target === elements.titleTemperature
-        || event?.target === elements.titleFallback
         || event?.target === elements.titleAutoRetryEnabled
         || event?.target === elements.titleAutoRetryThreshold
         || event?.target === elements.titleIssueContextEnabled
@@ -10353,6 +10547,7 @@ function handleTitleSettingsChange(event) {
         || event?.target === elements.titleCommunityCustomDomains
         || event?.target === elements.titleRewriteProvider
         || event?.target === elements.titleRewriteModel
+        || event?.target === elements.titleRewriteReasoningEffort
         || event?.target === elements.titlePromptProfilePicker
         || event?.target === elements.titleQualityPromptProfilePicker
         || elements.titleCommunitySourceInputs?.includes?.(event?.target)
@@ -10430,15 +10625,16 @@ function handleTitleSettingsChange(event) {
 
 function renderTitleSettingsState() {
     const mode = syncTitleModeInputFromRadios();
-    const isAiMode = mode === "ai";
+    const isAiMode = true;
     const apiRegistry = readTitleApiRegistry();
-    const registeredProviders = getRegisteredTitleProviders(apiRegistry);
-    const hasRegisteredProviders = registeredProviders.length > 0;
+    const availableProviders = getAvailableTitleProviders(apiRegistry);
+    const hasRegisteredProviders = availableProviders.length > 0;
     const selectedProvider = ensureRegisteredTitleProvider(elements.titleProvider?.value, apiRegistry);
+    const selectedReasoningEffort = normalizeTitleReasoningEffort(elements.titleReasoningEffort?.value);
 
     setBlocksVisibility(elements.titleModeVisibilityBlocks, mode, "titleModeVisibility");
     renderTitleApiRegistryStatus(apiRegistry);
-
+    updateTitleReasoningControls();
     if (elements.titlePreset) {
         elements.titlePreset.disabled = !isAiMode || !hasRegisteredProviders;
     }
@@ -10450,6 +10646,9 @@ function renderTitleSettingsState() {
     }
     elements.titleProvider.disabled = !isAiMode || !hasRegisteredProviders;
     elements.titleModel.disabled = !isAiMode || !hasRegisteredProviders;
+    if (elements.titleReasoningEffort) {
+        elements.titleReasoningEffort.disabled = !isAiMode || selectedProvider !== "codex";
+    }
     elements.titleTemperature.disabled = !isAiMode || !hasRegisteredProviders;
     if (elements.titleRewriteProvider) {
         elements.titleRewriteProvider.disabled = !isAiMode || !hasRegisteredProviders;
@@ -10457,7 +10656,9 @@ function renderTitleSettingsState() {
     if (elements.titleRewriteModel) {
         elements.titleRewriteModel.disabled = !isAiMode || !String(elements.titleRewriteProvider?.value || "").trim();
     }
-    elements.titleFallback.disabled = !isAiMode;
+    if (elements.titleRewriteReasoningEffort) {
+        elements.titleRewriteReasoningEffort.disabled = !isAiMode || String(elements.titleRewriteProvider?.value || "").trim() !== "codex";
+    }
     if (elements.titleAutoRetryEnabled) {
         elements.titleAutoRetryEnabled.disabled = !isAiMode;
     }
@@ -10501,24 +10702,36 @@ function renderTitleSettingsState() {
     updateTitleQualityPromptSummary();
     updateTitlePresetProfileSummary();
     updateTitleRewriteSummary();
-    elements.titleModeBadge.textContent = isAiMode
-        ? (selectedProvider ? `AI:${selectedProvider}` : "AI:미등록")
-        : "템플릿";
+    elements.titleModeBadge.textContent = selectedProvider
+        ? (
+            selectedProvider === "codex"
+                ? `Codex:${selectedReasoningEffort}`
+                : `API:${formatTitleProviderLabel(selectedProvider)}`
+        )
+        : "AI";
 
     renderHeroStatusSummary();
 }
 
 function getTitleSettingsFormState() {
-    const mode = syncTitleModeInputFromRadios();
+    const mode = "ai";
     const apiRegistry = readTitleApiRegistry();
     const presetKey = normalizeTitlePresetKey(elements.titlePreset?.value || "");
     const provider = ensureRegisteredTitleProvider(elements.titleProvider?.value, apiRegistry);
     const model = provider
         ? (String(elements.titleModel?.value || "").trim() || TITLE_PROVIDER_DEFAULT_MODELS[provider] || "gpt-4o-mini")
         : "";
+    const reasoningEffort = provider === "codex"
+        ? normalizeTitleReasoningEffort(elements.titleReasoningEffort?.value)
+        : "";
     const rewriteProvider = resolveOptionalRegisteredTitleProvider(elements.titleRewriteProvider?.value, apiRegistry);
     const rewriteModel = rewriteProvider
         ? (String(elements.titleRewriteModel?.value || "").trim() || TITLE_PROVIDER_DEFAULT_MODELS[rewriteProvider] || "")
+        : "";
+    const rewriteReasoningEffort = rewriteProvider === "codex"
+        ? normalizeTitleReasoningEffort(
+            elements.titleRewriteReasoningEffort?.value || elements.titleReasoningEffort?.value || TITLE_CODEX_REASONING_DEFAULT,
+        )
         : "";
     return {
         mode,
@@ -10539,12 +10752,13 @@ function getTitleSettingsFormState() {
         preset_key: presetKey,
         provider,
         model,
+        reasoning_effort: reasoningEffort,
         api_key: getTitleApiKeyForProvider(provider, apiRegistry),
         rewrite_provider: rewriteProvider,
         rewrite_model: rewriteModel,
+        rewrite_reasoning_effort: rewriteReasoningEffort,
         rewrite_api_key: getTitleApiKeyForProvider(rewriteProvider, apiRegistry),
         temperature: normalizeTitleTemperatureValue(elements.titleTemperature?.value || TITLE_TEMPERATURE_DEFAULT),
-        fallback_to_template: Boolean(elements.titleFallback?.checked),
         active_preset_profile_id: normalizeTitlePromptProfileId(elements.titleCustomPresetPicker?.value || ""),
         active_prompt_profile_id: normalizeTitlePromptProfileId(elements.titlePromptProfilePicker?.value || ""),
         active_evaluation_prompt_profile_id: normalizeTitlePromptProfileId(
@@ -11052,7 +11266,7 @@ async function loadOperationSettings(options = {}) {
                 message: "운영 설정의 서버 상태를 다시 불러왔습니다.",
                 type: "success",
             });
-            showBlockingResultPopup("?댁쁺 ?ㅼ젙???쒕쾭 ?곹깭瑜??ㅼ떆 遺덈윭?붿뒿?덈떎.");
+            showBlockingResultPopup("운영 설정의 서버 상태를 다시 불러왔습니다.");
         }
         return snapshot;
     } catch (error) {
@@ -11568,16 +11782,16 @@ function buildTitleGenerationSummaryText(meta, items) {
     if (!usedMode) {
         return qualitySummary;
     }
-    if (usedMode === "template") {
+    if (false) {
         return `템플릿 규칙 기반 · ${qualitySummary}`;
     }
 
     const modelSummary = buildTitleGenerationModelSummary(meta, " · ");
     const retrySummary = buildTitleGenerationRetrySummary(meta, " · ");
-    if (usedMode === "template_fallback") {
+    if (false) {
         return [modelSummary || "AI 모드", "실패 후 템플릿 대체", retrySummary, qualitySummary].filter(Boolean).join(" · ");
     }
-    if (usedMode === "ai_with_template_fallback") {
+    if (false) {
         return [modelSummary || "AI 모드", "일부 템플릿 대체", retrySummary, qualitySummary].filter(Boolean).join(" · ");
     }
     return [modelSummary || "AI 모드", retrySummary, qualitySummary].filter(Boolean).join(" · ");
@@ -11594,16 +11808,16 @@ function buildEnhancedTitleGenerationSummaryText(meta, items) {
     if (!usedMode) {
         return [modeSummary, qualitySummary].filter(Boolean).join(" / ");
     }
-    if (usedMode === "template") {
+    if (false) {
         return ["템플릿 규칙 기반", modeSummary, qualitySummary].filter(Boolean).join(" / ");
     }
 
     const modelSummary = buildTitleGenerationModelSummary(meta, " / ");
     const retrySummary = buildTitleGenerationRetrySummary(meta, " / ");
-    if (usedMode === "template_fallback") {
+    if (false) {
         return [modelSummary || "AI 모드", "템플릿 대체", modeSummary, retrySummary, qualitySummary].filter(Boolean).join(" / ");
     }
-    if (usedMode === "ai_with_template_fallback") {
+    if (false) {
         return [modelSummary || "AI 모드", "일부 템플릿 대체", modeSummary, retrySummary, qualitySummary].filter(Boolean).join(" / ");
     }
     return [modelSummary || "AI 모드", modeSummary, retrySummary, qualitySummary].filter(Boolean).join(" / ");
@@ -11763,6 +11977,33 @@ function renderTitleQualityIssues(report) {
         return "";
     }
     return `<div class="title-quality-issues">${issues.map((issue) => `<span class="title-quality-pill">${escapeHtml(issue)}</span>`).join("")}</div>`;
+}
+
+function buildTitleBoardRecommendedEntry(item, channel, titleChecks) {
+    const titles = Array.isArray(item?.titles?.[channel]) ? item.titles[channel] : [];
+    const checks = Array.isArray(titleChecks?.[channel]) ? titleChecks[channel] : [];
+    const [recommended] = buildRecommendedTitleEntries(titles, checks);
+    return recommended || null;
+}
+
+function renderTitleBoardSurfaceCell(item, channel, titleChecks) {
+    const recommended = buildTitleBoardRecommendedEntry(item, channel, titleChecks);
+    if (!recommended) {
+        return `
+            <td class="title-board-surface-cell empty">
+                <span>결과 없음</span>
+            </td>
+        `;
+    }
+
+    const status = String(recommended.report?.status || "review").trim() || "review";
+    const score = Number(recommended.report?.score || 0);
+    return `
+        <td class="title-board-surface-cell ${escapeHtml(status)}">
+            <strong>${escapeHtml(recommended.title)}</strong>
+            <small>품질 ${escapeHtml(String(score))}점</small>
+        </td>
+    `;
 }
 
 function renderTitleBulletList(titles, checks) {
@@ -12004,6 +12245,29 @@ function renderTitleSurfaceColumns(item, activeChannels, titleChecks) {
 
 function getTitleTargetIdentity(item) {
     return String(item?.target_id || item?.keyword || "").trim();
+}
+
+function setActiveTitlePreviewTarget(targetIdentity, options = {}) {
+    const normalizedTargetId = String(targetIdentity || "").trim();
+    state.activeTitlePreviewTargetId = normalizedTargetId;
+    if (options.render === false) {
+        return;
+    }
+    renderResults();
+}
+
+function resolveActiveTitlePreviewItem(items) {
+    const safeItems = Array.isArray(items) ? items : [];
+    if (!safeItems.length) {
+        return null;
+    }
+
+    const activeTargetId = String(state.activeTitlePreviewTargetId || "").trim();
+    if (!activeTargetId) {
+        return safeItems[0];
+    }
+
+    return safeItems.find((item) => getTitleTargetIdentity(item) === activeTargetId) || safeItems[0];
 }
 
 function renderTitleTargetMeta(item) {
@@ -12337,18 +12601,18 @@ function handleTitleResultInlineClickV2(event) {
     }
     const action = trigger.getAttribute("data-inline-action") || "";
     if (action === "rerun_title") {
-        runWithGuard(runThroughTitle, "?쒕ぉ ?ㅼ떆 ?앹꽦 以?);
+        runWithGuard(runThroughTitle, "제목 다시 생성 중");
         return;
     }
     if (action === "rerun_title_flagged") {
-        runWithGuard(rerunFlaggedTitleTargets, "湲곗? 誘몃떖 ?쒕ぉ ?ㅼ떆 ?앹꽦 以?);
+        runWithGuard(rerunFlaggedTitleTargets, "기준 미달 제목 다시 생성 중");
         return;
     }
     if (action === "rerun_title_single") {
         const targetIdentity = trigger.getAttribute("data-title-target-id") || "";
         const targetItem = findGeneratedTitleItem(targetIdentity);
         const keyword = String(targetItem?.keyword || "").trim();
-        runWithGuard(() => rerunTitleTarget(targetIdentity), `${keyword || "?좏깮 ?ㅼ썙??} ?쒕ぉ ?ㅼ떆 ?앹꽦 以?);
+        runWithGuard(() => rerunTitleTarget(targetIdentity), `${keyword || "선택 키워드"} 제목 다시 생성 중`);
     }
 }
 
@@ -12363,6 +12627,10 @@ function handleTitleResultInlineClickV3(event) {
         return;
     }
     const action = trigger.getAttribute("data-inline-action") || "";
+    if (action === "focus_title_preview") {
+        setActiveTitlePreviewTarget(trigger.getAttribute("data-title-target-id") || "");
+        return;
+    }
     if (action === "rerun_title") {
         runWithGuard(runThroughTitle, "제목 다시 생성 중");
         return;
@@ -12375,6 +12643,7 @@ function handleTitleResultInlineClickV3(event) {
         const targetIdentity = trigger.getAttribute("data-title-target-id") || "";
         const targetItem = findGeneratedTitleItem(targetIdentity);
         const keyword = String(targetItem?.keyword || "").trim();
+        setActiveTitlePreviewTarget(targetIdentity, { render: false });
         runWithGuard(() => rerunTitleTarget(targetIdentity), `${keyword || "제목"} 다시 생성 중`);
     }
 }
@@ -12998,56 +13267,92 @@ function renderTitleList(items) {
     if (!entries.length) {
         return '<div class="collector-empty">선택한 조건에 맞는 제목 결과가 없습니다.</div>';
     }
-    return `<div class="title-list">${entries.map(({ item, qualityReport }, entryIndex) => {
-        const activeChannels = getActiveTitleSurfaceChannelsForItem(item);
-        const totalTitleCount = activeChannels.reduce(
-            (sum, channel) => sum + (Array.isArray(item.titles?.[channel]) ? item.titles[channel].length : 0),
-            0,
-        );
+    const visibleItems = entries.map((entry) => entry.item);
+    const activePreviewItem = resolveActiveTitlePreviewItem(visibleItems);
+    const activePreviewTargetId = getTitleTargetIdentity(activePreviewItem);
+    const visibleChannels = getActiveTitleSurfaceChannels(visibleItems);
+    return `
+        <div class="title-board-wrap" data-preserve-scroll-key="title-board-wrap">
+            <table class="title-board">
+                <thead>
+                    <tr>
+                        <th class="num-cell">#</th>
+                        <th>키워드</th>
+                        <th>버전</th>
+                        <th>품질</th>
+                        ${visibleChannels.map((channel) => `<th>${escapeHtml(TITLE_SURFACE_COLUMN_LABELS[channel] || channel)}</th>`).join("")}
+                        <th>메모</th>
+                        <th>작업</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${entries.map(({ item, qualityReport }, entryIndex) => {
+        const itemActiveChannels = getActiveTitleSurfaceChannelsForItem(item);
         const qualityStatus = qualityReport.status || "review";
         const qualityLabel = qualityReport.label || "검토 대기";
         const summary = qualityReport.summary || "제목 문장을 확인하는 중입니다.";
-        const channelScores = qualityReport.channel_scores || {};
         const titleChecks = qualityReport.title_checks || {};
         const targetIdentity = getTitleTargetIdentity(item);
-        const surfaceSummary = renderTitleSurfaceSummaryStrip(item, activeChannels, channelScores, qualityReport);
-        const columnsHtml = renderTitleSurfaceColumns(item, activeChannels, titleChecks);
+        const isPreviewActive = Boolean(targetIdentity) && targetIdentity === activePreviewTargetId;
+        const modeLabel = String(item?.target_mode_label || item?.target_mode || "단일 키워드").trim();
+        const noteText = Array.isArray(qualityReport.issues) && qualityReport.issues.length
+            ? qualityReport.issues[0]
+            : summary;
         return `
-            <div class="title-item">
-                <div class="title-item-head">
-                    <div class="title-keyword">
-                        <div class="title-keyword-copy">
-                            <div class="title-keyword-heading">
-                                <span class="title-rank-chip">#${escapeHtml(String(entryIndex + 1))}</span>
-                                <strong>${escapeHtml(item.keyword || "-")}</strong>
-                                <span class="badge">제목 ${escapeHtml(String(totalTitleCount))}개</span>
-                            </div>
-                            ${renderKeywordWorkflowInline(item.keyword, { suppressRecentDuplicate: true })}
-                        </div>
-                    </div>
-                    <div class="title-item-actions">
-                        <span class="title-quality-chip ${escapeHtml(qualityStatus)}">품질 ${escapeHtml(String(qualityReport.bundle_score || 0))}점</span>
-                        <span class="title-quality-chip ${escapeHtml(qualityStatus)}">${escapeHtml(qualityLabel)}</span>
-                        <button
-                            type="button"
-                            class="inline-action-btn"
-                            data-inline-action="rerun_title_single"
-                            data-title-target-id="${escapeHtml(targetIdentity)}"
-                        >이 키워드만 다시 생성</button>
-                    </div>
-                </div>
-                <div class="title-quality-summary ${escapeHtml(qualityStatus)}">
-                    <strong>${escapeHtml(summary)}</strong>
-                    ${surfaceSummary}
-                </div>
-                ${renderTitleTargetMeta(item)}
-                ${renderTitleQualityIssues(qualityReport)}
-                <div class="title-columns" style="grid-template-columns: repeat(${escapeHtml(String(Math.max(1, activeChannels.length)))}, minmax(0, 1fr));">
-                    ${columnsHtml}
-                </div>
-            </div>
+            <tr class="title-board-row${isPreviewActive ? " preview-active" : ""}">
+                <td class="num-cell">${escapeHtml(String(entryIndex + 1))}</td>
+                <td class="title-board-keyword-cell">
+                    <button
+                        type="button"
+                        class="title-board-keyword-btn${isPreviewActive ? " active" : ""}"
+                        data-inline-action="focus_title_preview"
+                        data-title-target-id="${escapeHtml(targetIdentity)}"
+                    >
+                        <strong>${escapeHtml(item.keyword || "-")}</strong>
+                        <span>${isPreviewActive ? "오른쪽 상세 패널과 연결됨" : "클릭하면 오른쪽 상세 패널로 이동"}</span>
+                    </button>
+                </td>
+                <td class="title-board-mode-cell">
+                    <span class="title-summary-mode">${escapeHtml(modeLabel)}</span>
+                </td>
+                <td class="title-board-quality-cell">
+                    <span class="title-quality-chip ${escapeHtml(qualityStatus)}">품질 ${escapeHtml(String(qualityReport.bundle_score || 0))}점</span>
+                    <small>${escapeHtml(qualityLabel)}</small>
+                </td>
+                ${visibleChannels.map((channel) => (
+                    itemActiveChannels.includes(channel)
+                        ? renderTitleBoardSurfaceCell(item, channel, titleChecks)
+                        : `
+                            <td class="title-board-surface-cell empty">
+                                <span>-</span>
+                            </td>
+                        `
+                )).join("")}
+                <td class="title-board-note-cell">
+                    <strong>${escapeHtml(qualityLabel)}</strong>
+                    <span>${escapeHtml(noteText)}</span>
+                </td>
+                <td class="title-board-action-cell">
+                    <button
+                        type="button"
+                        class="ghost-chip title-preview-trigger${isPreviewActive ? " active" : ""}"
+                        data-inline-action="focus_title_preview"
+                        data-title-target-id="${escapeHtml(targetIdentity)}"
+                    >${isPreviewActive ? "보고 있음" : "미리보기"}</button>
+                    <button
+                        type="button"
+                        class="inline-action-btn"
+                        data-inline-action="rerun_title_single"
+                        data-title-target-id="${escapeHtml(targetIdentity)}"
+                    >재생성</button>
+                </td>
+            </tr>
         `;
-    }).join("")}</div>`;
+    }).join("")}
+                </tbody>
+            </table>
+        </div>
+    `;
 }
 
 function promoteKeywordStatuses(items, nextStatus) {

@@ -923,13 +923,13 @@ async function runSelectStage(options = {}) {
         const reusedResult = state.results.selected;
         const reusedCount = countItems(reusedResult?.selected_keywords || []);
         const finishedAt = Date.now();
-        const startedAt = state.stageStatus.selected?.startedAt || finishedAt;
+        const startedAt = finishedAt;
         state.stageStatus.selected = {
             state: "success",
-            message: `${reusedCount}건 유지`,
+            message: `${reusedCount}건 재사용`,
             startedAt,
             finishedAt,
-            durationMs: finishedAt - startedAt,
+            durationMs: 0,
         };
         addLog(
             hasExplicitFilters
@@ -1145,11 +1145,7 @@ async function runTitleStage() {
     if (state.stageStatus.selected.state === "cancelled") {
         addLog(`중단 직전까지 선별된 ${countItems(state.results.selected?.selected_keywords)}건으로 제목 생성을 이어갑니다.`);
     }
-    addLog(
-        titleOptions.mode === "ai"
-            ? `제목 생성 시작: ${buildTitleRunSummary(titleOptions)}`
-            : "제목 생성 시작: template 규칙 기반 제목을 생성합니다.",
-    );
+    addLog(`제목 생성 시작: ${buildTitleRunSummary(titleOptions)}`);
     clearStageAndDownstream("titled");
     const result = await executeTitleStageStream({
         selected_keywords: state.results.selected?.selected_keywords || [],
@@ -1176,9 +1172,19 @@ function buildTitleStreamStatusMessage(streamMeta) {
     const percent = Number(streamMeta.progressPercent || 0);
     const processedCount = Number(streamMeta.processedCount || 0);
     const totalCount = Number(streamMeta.totalCount || 0);
+    const generatedCount = Number(streamMeta.generatedCount || 0);
     const message = String(streamMeta.message || "").trim();
 
     if (phase === "generate" && totalCount > 0) {
+        const baseMessage = message
+            ? `${message} · ${percent}%`
+            : `${processedCount} / ${totalCount}세트 · ${percent}%`;
+        if (generatedCount > 0) {
+            return `${baseMessage} · ${generatedCount}세트 표시됨`;
+        }
+        if (message) {
+            return `${message} · ${percent}%`;
+        }
         return `${processedCount} / ${totalCount}세트 · ${percent}%`;
     }
     if ((phase === "auto_retry" || phase === "model_escalation") && totalCount > 0) {
@@ -1203,8 +1209,53 @@ function applyTitleStreamEvent(eventPayload, startedAt) {
         progressPercent: Number(progress.progress_percent ?? currentMeta.progressPercent ?? 0),
         processedCount: Number(progress.processed_count ?? currentMeta.processedCount ?? 0),
         totalCount: Number(progress.total_count ?? currentMeta.totalCount ?? 0),
+        generatedCount: Number(progress.generated_count ?? currentMeta.generatedCount ?? 0),
         currentKeyword: progress.current_keyword || currentMeta.currentKeyword || "",
         message: progress.message || currentMeta.message || "",
+    };
+    state.results.titled = currentResult;
+    state.stageStatus.titled = {
+        state: "running",
+        message: buildTitleStreamStatusMessage(currentResult.stream_meta),
+        startedAt,
+        finishedAt: null,
+        durationMs: null,
+    };
+    renderAll();
+}
+
+function applyPartialTitleResultEvent(eventPayload, startedAt) {
+    if (!eventPayload || eventPayload.event !== "progress" || eventPayload.data?.type !== "partial_result") {
+        return;
+    }
+
+    const partial = eventPayload.data || {};
+    const incomingItems = Array.isArray(partial.generated_titles) ? partial.generated_titles : [];
+    const currentResult = state.results.titled || createEmptyTitledResult();
+    const currentMeta = currentResult.stream_meta || {};
+    let mergedTitles = Array.isArray(currentResult.generated_titles) ? [...currentResult.generated_titles] : [];
+
+    incomingItems.forEach((item) => {
+        mergedTitles = mergeGeneratedTitleItems(mergedTitles, item);
+    });
+
+    const activePreviewTargetId = String(state.activeTitlePreviewTargetId || "").trim();
+    const hasActivePreview = activePreviewTargetId
+        && mergedTitles.some((item) => getTitleTargetIdentity(item) === activePreviewTargetId);
+    if (!hasActivePreview) {
+        const fallbackPreviewItem = incomingItems[incomingItems.length - 1] || mergedTitles[0] || null;
+        state.activeTitlePreviewTargetId = fallbackPreviewItem ? getTitleTargetIdentity(fallbackPreviewItem) : "";
+    }
+
+    currentResult.generated_titles = mergedTitles;
+    currentResult.stream_meta = {
+        phase: partial.phase || currentMeta.phase || "generate",
+        progressPercent: Number(partial.progress_percent ?? currentMeta.progressPercent ?? 0),
+        processedCount: Number(partial.processed_count ?? currentMeta.processedCount ?? mergedTitles.length),
+        totalCount: Number(partial.total_count ?? currentMeta.totalCount ?? mergedTitles.length),
+        generatedCount: Number(partial.generated_count ?? mergedTitles.length),
+        currentKeyword: partial.current_keyword || currentMeta.currentKeyword || "",
+        message: partial.message || currentMeta.message || "",
     };
     state.results.titled = currentResult;
     state.stageStatus.titled = {
@@ -1226,6 +1277,7 @@ async function executeTitleStageStream(inputData) {
     const targetCount = countItems(inputData?.selected_keywords || []);
 
     setActiveResultView(stageKey);
+    state.activeTitlePreviewTargetId = "";
     state.results.titled = {
         ...createEmptyTitledResult(),
         stream_meta: {
@@ -1233,6 +1285,7 @@ async function executeTitleStageStream(inputData) {
             progressPercent: 0,
             processedCount: 0,
             totalCount: targetCount,
+            generatedCount: 0,
             currentKeyword: "",
             message: "제목 생성 준비 중",
         },
@@ -1252,6 +1305,10 @@ async function executeTitleStageStream(inputData) {
             inputData,
             (eventPayload) => {
                 if (eventPayload?.event === "progress") {
+                    if (eventPayload?.data?.type === "partial_result") {
+                        applyPartialTitleResultEvent(eventPayload, startedAt);
+                        return;
+                    }
                     applyTitleStreamEvent(eventPayload, startedAt);
                 }
             },
@@ -3199,6 +3256,151 @@ function renderSerpCompetitionBoard() {
     `;
 }
 
+function buildTitlePreviewRailItems(generatedTitles, activeTargetId) {
+    const safeItems = Array.isArray(generatedTitles) ? generatedTitles : [];
+    const entries = safeItems
+        .map((item) => ({
+            item,
+            targetId: getTitleTargetIdentity(item),
+        }))
+        .filter((entry) => entry.targetId);
+    if (entries.length <= 6) {
+        return entries;
+    }
+
+    const activeEntry = entries.find((entry) => entry.targetId === activeTargetId) || null;
+    const leadingEntries = entries.slice(0, 5).filter((entry) => entry.targetId !== activeTargetId);
+    return activeEntry
+        ? [activeEntry, ...leadingEntries].slice(0, 6)
+        : entries.slice(0, 6);
+}
+
+function renderTitlePreviewRailCard(generatedTitles = []) {
+    const usesFilteredEntries = typeof buildTitleListEntries === "function";
+    const visibleEntries = usesFilteredEntries ? buildTitleListEntries(generatedTitles) : [];
+    const visibleItems = usesFilteredEntries
+        ? visibleEntries.map((entry) => entry.item)
+        : (Array.isArray(generatedTitles) ? generatedTitles : []);
+    const previewItem = typeof resolveActiveTitlePreviewItem === "function"
+        ? resolveActiveTitlePreviewItem(visibleItems)
+        : visibleItems[0];
+    if (!previewItem) {
+        return "";
+    }
+
+    const previewTargetId = getTitleTargetIdentity(previewItem);
+    const previewIndex = visibleItems.findIndex((item) => getTitleTargetIdentity(item) === previewTargetId);
+    const qualityReport = getTitleQualityReport(previewItem);
+    const qualityStatus = String(qualityReport.status || "review").trim() || "review";
+    const qualityLabel = String(qualityReport.label || "검토 대기").trim() || "검토 대기";
+    const qualitySummary = String(qualityReport.summary || "추천 제목과 대체안을 오른쪽에서 바로 비교할 수 있습니다.").trim();
+    const bundleScore = Number(qualityReport.bundle_score || 0);
+    const activeChannels = getActiveTitleSurfaceChannelsForItem(previewItem);
+    const channelScores = qualityReport.channel_scores || {};
+    const titleChecks = qualityReport.title_checks || {};
+    const targetModeLabel = String(previewItem.target_mode_label || previewItem.target_mode || "단일 키워드").trim();
+    const surfaceSummaryHtml = renderTitleSurfaceSummaryStrip(previewItem, activeChannels, channelScores, qualityReport);
+    const navigatorItems = buildTitlePreviewRailItems(visibleItems, previewTargetId);
+    const navigatorHtml = navigatorItems.length > 1
+        ? `
+            <div class="title-preview-nav">
+                ${navigatorItems.map(({ item, targetId }) => `
+                    <button
+                        type="button"
+                        class="title-preview-nav-btn${targetId === previewTargetId ? " active" : ""}"
+                        data-inline-action="focus_title_preview"
+                        data-title-target-id="${escapeHtml(targetId)}"
+                    >
+                        <strong>${escapeHtml(String(item?.keyword || "-"))}</strong>
+                        <span>${escapeHtml(String(item?.target_mode_label || item?.target_mode || "단일"))}</span>
+                    </button>
+                `).join("")}
+            </div>
+        `
+        : "";
+    const heroTitlesHtml = activeChannels.length
+        ? `
+            <div class="title-preview-primary-grid">
+                ${activeChannels.map((channel) => {
+                    const channelTitles = Array.isArray(previewItem?.titles?.[channel]) ? previewItem.titles[channel] : [];
+                    const checks = Array.isArray(titleChecks?.[channel]) ? titleChecks[channel] : [];
+                    const entries = typeof buildRecommendedTitleEntries === "function"
+                        ? buildRecommendedTitleEntries(channelTitles, checks)
+                        : [];
+                    const recommended = entries[0] || null;
+                    if (!recommended) {
+                        return "";
+                    }
+                    const recommendedStatus = String(recommended.report?.status || "review").trim() || "review";
+                    const recommendedScore = Number(recommended.report?.score || channelScores?.[channel] || 0);
+                    return `
+                        <article class="title-preview-primary-card ${escapeHtml(recommendedStatus)}">
+                            <div class="title-preview-primary-head">
+                                <span class="title-quality-pill ${escapeHtml(recommendedStatus)}">${escapeHtml(TITLE_SURFACE_COLUMN_LABELS[channel] || channel)}</span>
+                                <span class="title-channel-score">품질 ${escapeHtml(String(recommendedScore))}점</span>
+                            </div>
+                            <strong>${escapeHtml(recommended.title)}</strong>
+                        </article>
+                    `;
+                }).join("")}
+            </div>
+        `
+        : "";
+    const surfacesHtml = activeChannels.length
+        ? `
+            <div class="title-preview-columns">
+                ${activeChannels.map((channel) => {
+                    const channelTitles = Array.isArray(previewItem?.titles?.[channel]) ? previewItem.titles[channel] : [];
+                    const checks = Array.isArray(titleChecks?.[channel]) ? titleChecks[channel] : [];
+                    return `
+                        <section class="title-preview-surface">
+                            <div class="title-preview-surface-head">
+                                <strong>${escapeHtml(TITLE_SURFACE_COLUMN_LABELS[channel] || channel)}</strong>
+                                <span>${escapeHtml(String(channelTitles.length))}개 · ${escapeHtml(String(channelScores?.[channel] || 0))}점</span>
+                            </div>
+                            ${renderRecommendedTitleBlock(channelTitles, checks)}
+                        </section>
+                    `;
+                }).join("")}
+            </div>
+        `
+        : '<div class="collector-empty">아직 표시할 제목이 없습니다.</div>';
+
+    return renderResultsRailSection({
+        kicker: "Preview",
+        title: "오른쪽 고정 미리보기",
+        subtitle: visibleItems.length
+            ? `${previewIndex >= 0 ? previewIndex + 1 : 1} / ${visibleItems.length}세트`
+            : "생성된 제목이 여기에 표시됩니다.",
+        bodyHtml: `
+            <div class="title-preview-hero ${escapeHtml(qualityStatus)}">
+                <div class="title-preview-hero-head">
+                    <span class="title-quality-chip ${escapeHtml(qualityStatus)}">품질 ${escapeHtml(String(bundleScore))}점</span>
+                    <span class="title-preview-mode">${escapeHtml(targetModeLabel)}</span>
+                </div>
+                <strong class="title-preview-keyword">${escapeHtml(String(previewItem.keyword || "-"))}</strong>
+                ${heroTitlesHtml}
+                <p class="title-preview-summary">${escapeHtml(qualitySummary)}</p>
+                ${surfaceSummaryHtml}
+            </div>
+            ${navigatorHtml}
+            ${renderTitleTargetMeta(previewItem)}
+            ${renderTitleQualityIssues(qualityReport)}
+            ${surfacesHtml}
+        `,
+        actions: [
+            `
+                <button
+                    type="button"
+                    class="inline-action-btn"
+                    data-inline-action="rerun_title_single"
+                    data-title-target-id="${escapeHtml(previewTargetId)}"
+                >이 키워드 다시 생성</button>
+            `,
+        ],
+    });
+}
+
 function renderResultsWorkbenchRail(context = {}) {
     const activeViewKey = String(context.activeViewKey || "").trim();
     const expandedItems = Array.isArray(context.expandedItems) ? context.expandedItems : [];
@@ -3206,6 +3408,9 @@ function renderResultsWorkbenchRail(context = {}) {
     const selectedItems = Array.isArray(context.selectedItems) ? context.selectedItems : [];
     const generatedTitles = Array.isArray(context.generatedTitles) ? context.generatedTitles : [];
     const cards = [
+        activeViewKey === "titled" && generatedTitles.length
+            ? renderTitlePreviewRailCard(generatedTitles)
+            : "",
         renderResultsRailSummaryCard({
             activeViewKey,
             expandedItems,
@@ -3215,7 +3420,9 @@ function renderResultsWorkbenchRail(context = {}) {
             lowQualityTitleCount: Number(context.lowQualityTitleCount || 0),
             selectedProfile: context.selectedProfile || null,
         }),
-        renderSelectedKeywordRailCard(selectedItems, context.selectedProfile || null),
+        activeViewKey === "titled"
+            ? ""
+            : renderSelectedKeywordRailCard(selectedItems, context.selectedProfile || null),
         renderTitleWorkflowRailCard({
             activeViewKey,
             selectedItems,
@@ -3404,7 +3611,9 @@ function renderTitleWorkflowRailCard({
         ? buildTitleGenerationRetrySummary(generationMeta)
         : "";
     const previewItems = generatedTitles.length ? generatedTitles.slice(0, 4) : selectedItems.slice(0, 4);
-    const previewHtml = generatedTitles.length
+    const previewHtml = generatedTitles.length && activeViewKey === "titled"
+        ? ""
+        : generatedTitles.length
         ? `
             <div class="results-rail-target-list">
                 ${previewItems.map((item) => {

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
 from dataclasses import dataclass
+import os
+from pathlib import Path
 import re
+import shutil
+import subprocess
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -43,18 +48,23 @@ _VERTEX_EXPRESS_URL_TEMPLATE = (
     "https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent?key={api_key}"
 )
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+_CODEX_ENDPOINT = "codex exec"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 _DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
     "gemini": "gemini-2.5-flash-lite",
     "vertex": "gemini-2.5-flash-lite",
     "anthropic": "claude-haiku-4-5",
+    "codex": "gpt-5.4",
 }
+_SUPPORTED_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 _ISSUE_CONTEXT_MAX_LIMIT = 5
 _ISSUE_CONTEXT_DEFAULT_LIMIT = 3
 _ISSUE_CONTEXT_HEADLINE_LIMIT = 3
 _DEFAULT_QUALITY_RETRY_THRESHOLD = TITLE_QUALITY_REVIEW_SCORE
 _ISSUE_CONTEXT_CACHE: dict[tuple[str, ...], dict[str, Any]] = {}
+_MAX_ISSUE_CONTEXT_FETCH_WORKERS = 3
 _ISSUE_CONTEXT_STOPWORD_KEYS = {
     normalize_key(token)
     for token in (
@@ -119,6 +129,55 @@ _PROMPT_CATEGORY_OVERLAYS = {
         "without mixing domain-specific jargon."
     ),
 }
+
+
+def _iter_codex_search_dirs() -> list[Path]:
+    candidates: list[Path] = []
+    for env_key, suffix_parts in (
+        ("APPDATA", ("npm",)),
+        ("USERPROFILE", ("AppData", "Roaming", "npm")),
+        ("LOCALAPPDATA", ("Programs", "nodejs")),
+        ("ProgramFiles", ("nodejs",)),
+        ("ProgramFiles(x86)", ("nodejs",)),
+    ):
+        root = normalize_text(os.environ.get(env_key))
+        if not root:
+            continue
+        candidate = Path(root).joinpath(*suffix_parts)
+        if candidate.exists():
+            candidates.append(candidate)
+    return candidates
+
+
+def _build_codex_subprocess_env() -> dict[str, str]:
+    env = dict(os.environ)
+    path_entries = [
+        normalize_text(entry)
+        for entry in str(env.get("PATH") or "").split(os.pathsep)
+        if normalize_text(entry)
+    ]
+    seen = {
+        os.path.normcase(os.path.normpath(entry))
+        for entry in path_entries
+    }
+    for candidate in _iter_codex_search_dirs():
+        candidate_str = str(candidate)
+        normalized_candidate = os.path.normcase(os.path.normpath(candidate_str))
+        if normalized_candidate in seen:
+            continue
+        path_entries.insert(0, candidate_str)
+        seen.add(normalized_candidate)
+    env["PATH"] = os.pathsep.join(path_entries)
+    return env
+
+
+def _resolve_codex_executable(env: dict[str, str]) -> str:
+    search_path = normalize_text(env.get("PATH"))
+    for executable_name in ("codex", "codex.cmd", "codex.ps1"):
+        resolved = shutil.which(executable_name, path=search_path or None)
+        if normalize_text(resolved):
+            return normalize_text(resolved)
+    return "codex"
 
 _PROMPT_CATEGORY_HOME_ANGLE_HINTS = {
     "product_review": (
@@ -345,19 +404,54 @@ class TitleProviderError(RuntimeError):
     pass
 
 
+def provider_requires_api_key(provider: Any) -> bool:
+    normalized = str(provider or "").strip().lower()
+    return normalized != "codex"
+
+
+def normalize_reasoning_effort(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in _SUPPORTED_REASONING_EFFORTS else ""
+
+
+def _estimate_codex_timeout_seconds(
+    *,
+    item_count: int,
+    reasoning_effort: str = "",
+    issue_context_enabled: bool = False,
+    issue_context_limit: int = 0,
+) -> float:
+    resolved_item_count = max(1, int(item_count or 1))
+    normalized_effort = normalize_reasoning_effort(reasoning_effort)
+    timeout_seconds = 45.0 + (resolved_item_count * 7.0)
+    if normalized_effort == "medium":
+        timeout_seconds += 10.0
+    elif normalized_effort == "high":
+        timeout_seconds += 25.0
+    elif normalized_effort == "xhigh":
+        timeout_seconds += 45.0
+    if issue_context_enabled:
+        timeout_seconds += min(
+            _ISSUE_CONTEXT_MAX_LIMIT,
+            max(0, int(issue_context_limit or 0)),
+        ) * 4.0
+    return min(180.0, max(60.0, timeout_seconds))
+
+
 @dataclass(frozen=True)
 class TitleGenerationOptions:
-    mode: str = "template"
+    mode: str = "ai"
     provider: str = "openai"
     api_key: str | None = None
     model: str = _DEFAULT_MODELS["openai"]
+    reasoning_effort: str = ""
     rewrite_provider: str = ""
     rewrite_api_key: str | None = None
     rewrite_model: str = ""
+    rewrite_reasoning_effort: str = ""
     temperature: float = 0.7
     max_output_tokens: int = 1200
     batch_size: int = 20
-    fallback_to_template: bool = True
     system_prompt: str = ""
     quality_system_prompt: str = DEFAULT_TITLE_EVALUATION_PROMPT
     quality_prompt_profile_id: str = ""
@@ -381,11 +475,11 @@ class TitleGenerationOptions:
         if not isinstance(raw, dict):
             raw = {}
 
-        mode = "ai" if str(raw.get("mode") or "").strip().lower() == "ai" else "template"
+        mode = "ai"
         preset = get_title_preset(
             raw.get("preset_key")
             or raw.get("preset")
-            or (DEFAULT_TITLE_PRESET_KEY if mode == "ai" else "")
+            or DEFAULT_TITLE_PRESET_KEY
         )
         provider = _normalize_provider(raw.get("provider") or (preset.provider if preset else None))
         model = normalize_text(raw.get("model")) or (preset.model if preset else _DEFAULT_MODELS[provider])
@@ -454,13 +548,14 @@ class TitleGenerationOptions:
             provider=provider,
             api_key=normalize_text(raw.get("api_key")) or None,
             model=model,
+            reasoning_effort=normalize_reasoning_effort(raw.get("reasoning_effort")),
             rewrite_provider=rewrite_provider,
             rewrite_api_key=normalize_text(raw.get("rewrite_api_key")) or None,
             rewrite_model=rewrite_model,
+            rewrite_reasoning_effort=normalize_reasoning_effort(raw.get("rewrite_reasoning_effort")),
             temperature=temperature,
             max_output_tokens=max_output_tokens,
             batch_size=batch_size,
-            fallback_to_template=bool(raw.get("fallback_to_template", True)),
             system_prompt=normalize_text(raw.get("system_prompt")) or "",
             quality_system_prompt=(
                 normalize_text(raw.get("quality_system_prompt") or raw.get("evaluation_prompt"))
@@ -605,11 +700,34 @@ def request_ai_titles(
     if not input_items:
         return []
 
-    if not options.api_key:
+    if provider_requires_api_key(options.provider) and not options.api_key:
         raise TitleProviderError("AI mode requires an API key.")
 
     prompt_items = _attach_live_issue_contexts(input_items, options)
     prompt = _build_requested_user_prompt_from_items(prompt_items, options=options)
+    attached_issue_context_count = sum(
+        1
+        for item in prompt_items
+        if isinstance(item, dict) and isinstance(item.get("issue_context"), dict)
+    )
+    if options.provider == "codex":
+        payload = request_ai_json_object(
+            provider=options.provider,
+            api_key=options.api_key,
+            model=options.model,
+            reasoning_effort=options.reasoning_effort,
+            system_prompt=options.effective_system_prompt,
+            user_prompt=prompt,
+            temperature=options.temperature,
+            max_output_tokens=options.max_output_tokens,
+            request_timeout_seconds=_estimate_codex_timeout_seconds(
+                item_count=len(prompt_items),
+                reasoning_effort=options.reasoning_effort,
+                issue_context_enabled=attached_issue_context_count > 0,
+                issue_context_limit=attached_issue_context_count,
+            ),
+        )
+        return _parse_title_items(json.dumps(payload, ensure_ascii=False), options=options)
     if options.provider == "openai":
         return _request_openai_titles(prompt, options)
     if options.provider == "gemini":
@@ -629,7 +747,7 @@ def request_ai_slot_rewrites(
     if not input_items:
         return []
 
-    if not options.api_key:
+    if provider_requires_api_key(options.provider) and not options.api_key:
         raise TitleProviderError("AI mode requires an API key.")
 
     prompt_items = _normalize_slot_prompt_items(input_items)
@@ -640,10 +758,25 @@ def request_ai_slot_rewrites(
         provider=options.provider,
         api_key=options.api_key,
         model=options.model,
+        reasoning_effort=options.reasoning_effort,
         system_prompt=_build_slot_title_system_prompt(options.system_prompt),
         user_prompt=_build_slot_title_user_prompt(prompt_items),
         temperature=options.temperature,
         max_output_tokens=max(600, int(options.max_output_tokens or 0)),
+        request_timeout_seconds=(
+            _estimate_codex_timeout_seconds(
+                item_count=len(prompt_items),
+                reasoning_effort=options.reasoning_effort,
+                issue_context_enabled=any(
+                    isinstance(item.get("issue_context"), dict)
+                    for item in prompt_items
+                    if isinstance(item, dict)
+                ),
+                issue_context_limit=1,
+            )
+            if _normalize_provider(options.provider) == "codex"
+            else 30.0
+        ),
     )
     return _parse_slot_title_items(payload)
 
@@ -653,6 +786,7 @@ def request_ai_json_object(
     provider: str,
     api_key: str | None,
     model: str,
+    reasoning_effort: str = "",
     system_prompt: str,
     user_prompt: str,
     temperature: float = 0.2,
@@ -664,10 +798,43 @@ def request_ai_json_object(
     normalized_model = normalize_text(model) or _DEFAULT_MODELS[normalized_provider]
     normalized_system_prompt = normalize_text(system_prompt)
     normalized_user_prompt = normalize_text(user_prompt)
-    if not api_key:
+    if provider_requires_api_key(normalized_provider) and not api_key:
         raise TitleProviderError("AI mode requires an API key.")
     if not normalized_user_prompt:
         raise TitleProviderError("Evaluation prompt is empty.")
+
+    if normalized_provider == "codex":
+        content, usage = _run_codex_exec_json(
+            model=normalized_model,
+            reasoning_effort=normalize_reasoning_effort(reasoning_effort),
+            system_prompt=normalized_system_prompt,
+            user_prompt=normalized_user_prompt,
+            timeout_seconds=max(60.0, float(request_timeout_seconds or 0)),
+        )
+        try:
+            parsed_payload = _parse_json_object_text(content)
+        except TitleProviderError:
+            record_api_usage(
+                stage="title",
+                service="title_llm",
+                provider=normalized_provider,
+                model=normalized_model,
+                endpoint=_CODEX_ENDPOINT,
+                success=False,
+            )
+            raise
+        record_api_usage(
+            stage="title",
+            service="title_llm",
+            provider=normalized_provider,
+            model=normalized_model,
+            endpoint=_CODEX_ENDPOINT,
+            success=True,
+            prompt_tokens=usage["prompt_tokens"],
+            completion_tokens=usage["completion_tokens"],
+            total_tokens=usage["total_tokens"],
+        )
+        return parsed_payload
 
     if normalized_provider == "openai":
         payload = {
@@ -759,6 +926,188 @@ def request_ai_json_object(
         return _parse_json_object_text(content)
 
     raise TitleProviderError(f"Unsupported provider: {normalized_provider}")
+
+
+def _run_codex_exec_json(
+    *,
+    model: str,
+    reasoning_effort: str,
+    system_prompt: str,
+    user_prompt: str,
+    timeout_seconds: float,
+) -> tuple[str, dict[str, int]]:
+    prompt = _build_codex_exec_prompt(system_prompt=system_prompt, user_prompt=user_prompt)
+    codex_env = _build_codex_subprocess_env()
+    command = [
+        _resolve_codex_executable(codex_env),
+        "exec",
+        "--ephemeral",
+        "--sandbox",
+        "read-only",
+        "--json",
+        "--color",
+        "never",
+        "-m",
+        model,
+    ]
+    if reasoning_effort:
+        command.extend([
+            "-c",
+            f'model_reasoning_effort="{reasoning_effort}"',
+        ])
+    command.append("-")
+
+    try:
+        completed = subprocess.run(
+            command,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(_PROJECT_ROOT),
+            env=codex_env,
+            timeout=max(1.0, float(timeout_seconds or 60.0)),
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        record_api_usage(
+            stage="title",
+            service="title_llm",
+            provider="codex",
+            model=model,
+            endpoint=_CODEX_ENDPOINT,
+            success=False,
+        )
+        raise TitleProviderError(
+            "Codex CLI was not found. Install it and make sure `codex` is on PATH. "
+            "If it was just installed, restart the app so the server process picks up the updated PATH."
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        record_api_usage(
+            stage="title",
+            service="title_llm",
+            provider="codex",
+            model=model,
+            endpoint=_CODEX_ENDPOINT,
+            success=False,
+        )
+        raise TitleProviderError(
+            f"Codex CLI timed out after {max(1.0, float(timeout_seconds or 60.0)):.0f}s."
+        ) from exc
+
+    stdout = str(completed.stdout or "").replace("\ufeff", "")
+    stderr = normalize_text(completed.stderr)
+    content, usage = _extract_codex_exec_output(stdout)
+
+    if completed.returncode != 0:
+        record_api_usage(
+            stage="title",
+            service="title_llm",
+            provider="codex",
+            model=model,
+            endpoint=_CODEX_ENDPOINT,
+            success=False,
+        )
+        error_detail = stderr or _extract_codex_exec_error(stdout) or f"Codex CLI exited with code {completed.returncode}."
+        if "login" in error_detail.lower():
+            error_detail = f"{error_detail} Run `codex login` in PowerShell first."
+        raise TitleProviderError(error_detail)
+
+    if not content:
+        record_api_usage(
+            stage="title",
+            service="title_llm",
+            provider="codex",
+            model=model,
+            endpoint=_CODEX_ENDPOINT,
+            success=False,
+        )
+        raise TitleProviderError("Codex CLI returned an empty response.")
+
+    return content, usage
+
+
+def _build_codex_exec_prompt(*, system_prompt: str, user_prompt: str) -> str:
+    return (
+        "Follow the instructions exactly.\n"
+        "Do not inspect the repository, run commands, or use tools.\n"
+        "Answer directly from the prompt only.\n"
+        "Return only the final JSON object with no markdown, code fences, or extra explanation.\n\n"
+        "[SYSTEM INSTRUCTIONS]\n"
+        f"{system_prompt}\n\n"
+        "[USER TASK]\n"
+        f"{user_prompt}"
+    )
+
+
+def _extract_codex_exec_output(raw_output: str) -> tuple[str, dict[str, int]]:
+    last_text = ""
+    usage = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
+
+    for raw_line in str(raw_output or "").splitlines():
+        line = raw_line.strip()
+        if not line or not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("type") == "item.completed":
+            item = payload.get("item") if isinstance(payload.get("item"), dict) else {}
+            if item.get("type") == "agent_message":
+                message_text = normalize_text(item.get("text"))
+                if message_text:
+                    last_text = message_text
+        elif payload.get("type") == "turn.completed":
+            raw_usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+            prompt_tokens = _coerce_int(
+                raw_usage.get("input_tokens"),
+                default=0,
+                minimum=0,
+                maximum=1_000_000,
+            )
+            completion_tokens = _coerce_int(
+                raw_usage.get("output_tokens"),
+                default=0,
+                minimum=0,
+                maximum=1_000_000,
+            )
+            usage = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": max(
+                    prompt_tokens + completion_tokens,
+                    _coerce_int(
+                        raw_usage.get("total_tokens"),
+                        default=0,
+                        minimum=0,
+                        maximum=1_000_000,
+                    ),
+                ),
+            }
+
+    return last_text, usage
+
+
+def _extract_codex_exec_error(raw_output: str) -> str:
+    for raw_line in reversed(str(raw_output or "").splitlines()):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if not line.startswith("{"):
+            return normalize_text(line)
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("type") == "error":
+            return normalize_text(payload.get("message") or payload.get("error"))
+    return ""
 
 
 def _request_openai_titles(prompt: str, options: TitleGenerationOptions) -> list[dict[str, Any]]:
@@ -2042,9 +2391,10 @@ def _attach_live_issue_contexts(
         minimum=1,
         maximum=_ISSUE_CONTEXT_MAX_LIMIT,
     )
-    enriched_items: list[Any] = []
+    prepared_items: list[dict[str, Any]] = []
+    pending_fetches: list[tuple[int, str, str]] = []
 
-    for raw_item in input_items:
+    for index, raw_item in enumerate(input_items):
         if isinstance(raw_item, dict):
             item = dict(raw_item)
             keyword = normalize_text(item.get("keyword"))
@@ -2059,11 +2409,52 @@ def _attach_live_issue_contexts(
                 community_sources=options.community_sources,
             )
         elif keyword and remaining > 0:
-            issue_context = _fetch_live_issue_context(keyword, options=options)
-            if issue_context:
-                item["issue_context"] = issue_context
+            pending_fetches.append((index, keyword, normalize_key(keyword)))
             remaining -= 1
 
+        prepared_items.append(
+            {
+                "raw_item": raw_item,
+                "item": item,
+                "keyword": keyword,
+            }
+        )
+
+    if pending_fetches:
+        fetch_results: dict[str, dict[str, Any]] = {}
+        fetch_keywords_by_key = {
+            keyword_key: keyword
+            for _index, keyword, keyword_key in pending_fetches
+            if keyword_key and keyword
+        }
+        worker_count = min(_MAX_ISSUE_CONTEXT_FETCH_WORKERS, len(fetch_keywords_by_key))
+        if worker_count > 0:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                future_map = {
+                    keyword_key: executor.submit(
+                        _fetch_live_issue_context,
+                        keyword,
+                        options=options,
+                    )
+                    for keyword_key, keyword in fetch_keywords_by_key.items()
+                }
+                for keyword_key, future in future_map.items():
+                    try:
+                        issue_context = future.result()
+                    except Exception:
+                        issue_context = {}
+                    if issue_context:
+                        fetch_results[keyword_key] = issue_context
+        for index, _keyword, keyword_key in pending_fetches:
+            issue_context = fetch_results.get(keyword_key)
+            if issue_context:
+                prepared_items[index]["item"]["issue_context"] = dict(issue_context)
+
+    enriched_items: list[Any] = []
+    for prepared in prepared_items:
+        raw_item = prepared["raw_item"]
+        item = prepared["item"]
+        keyword = prepared["keyword"]
         if isinstance(raw_item, dict) or isinstance(item.get("issue_context"), dict):
             enriched_items.append(item)
         else:

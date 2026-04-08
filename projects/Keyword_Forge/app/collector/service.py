@@ -143,7 +143,7 @@ class CollectorService:
                     _record_warning(
                         debug,
                         code="category_not_found",
-                        message="?붿껌??移댄뀒怨좊━瑜?李얠? 紐삵뻽?듬땲??",
+                        message="요청한 카테고리를 찾지 못했습니다.",
                         detail={"requested_category": request.category},
                     )
                     return self._build_result(

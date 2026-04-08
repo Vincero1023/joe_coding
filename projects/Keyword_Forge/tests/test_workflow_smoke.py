@@ -131,24 +131,39 @@ def test_selection_to_title_smoke() -> None:
     selected_keywords = select_response.json()["result"]["selected_keywords"]
     assert len(selected_keywords) == 1
 
-    title_response = client.post(
-        "/generate-title",
-        json={
-            "input_data": {
-                "selected_keywords": selected_keywords,
-                "title_options": {
-                    "mode": "template",
-                    "keyword_modes": ["single"],
-                    "surface_modes": ["naver_home", "blog"],
-                    "surface_counts": {
-                        "naver_home": 1,
-                        "blog": 1,
-                        "hybrid": 0,
-                    },
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        return_value=[
+            {
+                "keyword": selected_keywords[0]["keyword"],
+                "titles": {
+                    "naver_home": [f'{selected_keywords[0]["keyword"]} 지금 확인'],
+                    "blog": [f'{selected_keywords[0]["keyword"]} 정리'],
+                    "hybrid": [],
                 },
             }
-        },
-    )
+        ],
+    ):
+        title_response = client.post(
+            "/generate-title",
+            json={
+                "input_data": {
+                    "selected_keywords": selected_keywords,
+                    "title_options": {
+                        "mode": "ai",
+                        "provider": "codex",
+                        "model": "gpt-5.4",
+                        "keyword_modes": ["single"],
+                        "surface_modes": ["naver_home", "blog"],
+                        "surface_counts": {
+                            "naver_home": 1,
+                            "blog": 1,
+                            "hybrid": 0,
+                        },
+                    },
+                }
+            },
+        )
 
     assert title_response.status_code == 200
     result = title_response.json()["result"]

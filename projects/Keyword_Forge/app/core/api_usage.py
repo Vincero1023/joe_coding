@@ -10,7 +10,7 @@ _CURRENT_API_USAGE_COLLECTOR: ContextVar["ApiUsageCollector | None"] = ContextVa
     "current_api_usage_collector",
     default=None,
 )
-_LLM_PROVIDERS = {"openai", "gemini", "vertex", "anthropic"}
+_LLM_PROVIDERS = {"openai", "gemini", "vertex", "anthropic", "codex"}
 
 
 class ApiUsageCollector:

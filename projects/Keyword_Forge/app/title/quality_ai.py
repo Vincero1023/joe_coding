@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.expander.utils.tokenizer import normalize_text
-from app.title.ai_client import request_ai_json_object
+from app.title.ai_client import provider_requires_api_key, request_ai_json_object
 from app.title.evaluation_prompt import DEFAULT_TITLE_EVALUATION_PROMPT
 from app.title.rules import NAVER_HOME_AI_REWRITE_SCORE_THRESHOLD
 
@@ -19,6 +19,7 @@ class TitleEvaluationOptions:
     provider: str = ""
     model: str = ""
     api_key: str | None = None
+    reasoning_effort: str = ""
     system_prompt: str = DEFAULT_TITLE_EVALUATION_PROMPT
     temperature: float = 0.1
     max_output_tokens: int = 1400
@@ -34,7 +35,10 @@ class TitleEvaluationOptions:
         return bool(
             normalize_text(self.provider)
             and normalize_text(self.model)
-            and normalize_text(self.api_key)
+            and (
+                not provider_requires_api_key(self.provider)
+                or normalize_text(self.api_key)
+            )
             and normalize_text(self.system_prompt)
         )
 
@@ -120,6 +124,7 @@ def _request_naver_home_batch_evaluation_chunk(
             provider=options.provider,
             api_key=options.api_key,
             model=options.model,
+            reasoning_effort=options.reasoning_effort,
             system_prompt=normalize_text(options.system_prompt),
             user_prompt=_build_naver_home_batch_evaluation_user_prompt(entries),
             temperature=options.temperature,

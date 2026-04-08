@@ -29,7 +29,7 @@ from app.title.presets import DEFAULT_TITLE_PRESET_KEY, build_title_preset_paylo
 
 
 router = APIRouter()
-_ASSET_VERSION = "20260329-layout-v86"
+_ASSET_VERSION = "20260408-hybrid-label-v96"
 _STUDY_DIR = Path(__file__).resolve().parents[1] / "Study"
 _GUIDE_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("basics", "시작하기", ("사용법", "무료 키워드", "검색량 조회", "도구 추천")),
@@ -225,10 +225,10 @@ _GUIDE_BLUEPRINTS: tuple[dict[str, object], ...] = (
     {
         "slug": "title-generation-setup",
         "title": "제목 생성은 필요한 만큼만 만드는 것이 핵심",
-        "subtitle": "홈판, 블로그형, 둘다를 각각 켜고 개수까지 따로 정할 수 있으므로 한 번에 과하게 만들 필요가 없습니다.",
+        "subtitle": "홈판, 블로그형, 공용형을 각각 켜고 개수까지 따로 정할 수 있으므로 한 번에 과하게 만들 필요가 없습니다.",
         "group": "titles",
         "sections": (
-            {"title": "영역 선택", "summary": "홈판, 블로그형, 둘다를 각각 켜고 끌 수 있으며, 목적에 맞는 영역만 남길 수 있습니다."},
+            {"title": "영역 선택", "summary": "홈판, 블로그형, 공용형을 각각 켜고 끌 수 있으며, 목적에 맞는 영역만 남길 수 있습니다."},
             {"title": "개수 조절", "summary": "영역별로 1~4개를 따로 정해 최소 1개부터 최대 12개까지 유연하게 생성할 수 있습니다."},
             {"title": "평가와 정렬", "summary": "생성 뒤에는 빠른 평가를 거쳐 높은 점수 순으로 정렬되므로 검토 시간이 줄어듭니다."},
         ),
@@ -237,13 +237,13 @@ _GUIDE_BLUEPRINTS: tuple[dict[str, object], ...] = (
                 "kicker": "표면 선택",
                 "title": "세 영역을 모두 켤 필요는 없습니다",
                 "paragraphs": (
-                    "홈판은 클릭률과 이슈 반영, 블로그형은 검색 의도와 정보형 문장, 둘다는 두 성격을 함께 노리는 공용 제목에 가깝습니다.",
+                    "홈판은 클릭률과 이슈 반영, 블로그형은 검색 의도와 정보형 문장, 공용형은 두 성격을 함께 노리는 제목에 가깝습니다.",
                     "주제가 명확할수록 필요한 영역만 켜는 편이 결과 관리가 쉽고, API 사용량도 덜 낭비됩니다.",
                 ),
                 "points": (
                     "빠른 검토가 목적이면 홈판 1~2개만 먼저 만드는 방식이 가볍습니다.",
                     "정보형 글감이면 블로그형 위주로 개수를 늘리는 편이 낫습니다.",
-                    "둘다는 메인 제목이 아니라 후보 확장용으로 보는 것이 안전합니다.",
+                    "공용형은 메인 제목이 아니라 후보 확장용으로 보는 것이 안전합니다.",
                 ),
             },
             {
@@ -251,7 +251,7 @@ _GUIDE_BLUEPRINTS: tuple[dict[str, object], ...] = (
                 "title": "결과는 많이 만드는 것보다 점수순으로 버리는 것이 중요합니다",
                 "paragraphs": (
                     "동일 키워드에서 제목을 여러 개 생성해도 빠른 평가와 정렬이 먼저 이뤄지므로, 실제로는 상위 몇 개만 검토하면 됩니다.",
-                    "내보내기 파일에는 홈판, 블로그형, 둘다 구분이 붙으므로 작업 전달이나 기록 정리도 편합니다.",
+                    "내보내기 파일에는 홈판, 블로그형, 공용형 구분이 붙으므로 작업 전달이나 기록 정리도 편합니다.",
                 ),
             },
             {
@@ -2098,11 +2098,6 @@ def _render_home() -> str:
         DEFAULT_TITLE_EVALUATION_PROMPT,
         ensure_ascii=False,
     ).replace("</", "<\\/")
-    title_mode_help = _render_help_tooltip(
-        "template는 규칙 기반으로 바로 생성합니다.\n"
-        "AI는 provider/model을 사용해 더 유연하게 생성하고, 저점수 자동 재작성도 함께 쓸 수 있습니다.\n"
-        "Vertex AI는 Express Mode API key로 붙이면 Google Cloud 크레딧/쿼터 체계로 운용할 수 있습니다."
-    )
     title_keyword_modes_help = _render_help_tooltip(
         "단일은 안전형입니다.\n"
         "V1은 선별 결과 기반 롱테일입니다.\n"
@@ -2110,9 +2105,9 @@ def _render_home() -> str:
         "V3는 저검색량까지 넓히는 실험형입니다."
     )
     title_surface_help = _render_help_tooltip(
-        "홈판, 블로그형, 둘다를 각각 켜고 끌 수 있습니다.\n"
+        "홈판, 블로그형, 공용형을 각각 켜고 끌 수 있습니다.\n"
         "켜진 영역은 1개부터 4개까지 개수를 따로 정합니다.\n"
-        "둘다는 홈 유입과 블로그 검색을 함께 노리는 공용형 제목입니다."
+        "공용형은 홈 유입과 블로그 검색을 함께 노리는 제목입니다."
     )
     title_auto_retry_help = _render_help_tooltip(
         "AI 모드에서 품질 점수가 기준보다 낮은 제목은 자동으로 다시 생성합니다.\n"
@@ -2126,7 +2121,8 @@ def _render_home() -> str:
     )
     title_api_key_help = _render_help_tooltip(
         "API 키는 서버에 저장하지 않고 현재 브라우저 localStorage에만 보관합니다.\n"
-        "Gemini는 Google AI Studio 키, Vertex AI는 Express Mode API key를 사용합니다."
+        "Gemini는 Google AI Studio 키, Vertex AI는 Express Mode API key를 사용합니다.\n"
+        "Codex는 API key 없이 로컬 로그인 세션을 사용하므로 PowerShell에서 `codex login`만 해두면 됩니다."
     )
     title_prompt_help = _render_help_tooltip(
         "새 탭에서 제목 생성용 추가 지침을 수정합니다. 저장하면 현재 작업대에 바로 반영됩니다."
@@ -2723,32 +2719,10 @@ def _render_home() -> str:
                             <p class="panel-kicker">제목 생성 시작점</p>
                             <h3>제목 생성 시작점</h3>
                         </div>
-                        <span class="badge" id="titleModeBadge">템플릿</span>
+                        <span class="badge" id="titleModeBadge">AI</span>
                     </div>
                     <div class="form-grid">
-                        <input id="titleMode" type="hidden" value="template" />
-
-                        <div class="field-block mode-block title-mode-block">
-                            <span class="field-label field-label-row">
-                                <span>제목 생성 모드</span>
-                                {title_mode_help}
-                            </span>
-                            <label class="mode-card">
-                                <input type="radio" name="titleModeOption" value="template" checked />
-                                <span>
-                                    <strong>템플릿 모드</strong>
-                                    <em>추가 설정 없이 즉시 제목을 생성합니다. 빠르게 후보를 뽑을 때 적합합니다.</em>
-                                </span>
-                            </label>
-                            <label class="mode-card">
-                                <input type="radio" name="titleModeOption" value="ai" />
-                                <span>
-                                    <strong>AI 모드</strong>
-                                    <em>운영 설정에 등록한 Provider와 모델을 사용해 더 유연한 제목을 생성합니다.</em>
-                                </span>
-                            </label>
-                        </div>
-
+                        <input id="titleMode" type="hidden" value="ai" />
                         <div class="field-block field-block-wide">
                             <span class="field-label field-label-row">
                                 <span>제목 키워드 조합</span>
@@ -2790,7 +2764,7 @@ def _render_home() -> str:
                                     </select>
                                 </label>
                                 <label class="title-surface-card">
-                                    <span class="check-chip"><input id="titleSurfaceHybrid" type="checkbox" />둘다</span>
+                                    <span class="check-chip"><input id="titleSurfaceHybrid" type="checkbox" />공용형</span>
                                     <select id="titleSurfaceHybridCount" class="title-surface-count">
                                         <option value="1" selected>1개</option>
                                         <option value="2">2개</option>
@@ -2800,7 +2774,7 @@ def _render_home() -> str:
                                 </label>
                             </div>
                             <p id="titleSurfaceSummary" class="input-help compact-help">
-                                선택: 홈판 2개 + 블로그형 2개, 필요하면 둘다 포함 각 1-4개
+                                선택: 홈판 2개 + 블로그형 2개, 필요하면 공용형 포함 각 1-4개
                             </p>
                         </div>
 
@@ -2913,10 +2887,10 @@ def _render_home() -> str:
                                 <div class="title-ai-card-head">
                                     <div>
                                         <span class="field-label field-label-row">
-                                            <span>제목 작성 AI</span>
+                                            <span>제목 생성 AI</span>
                                             <button type="button" class="ghost-chip inline-cta-chip" id="openApiRegistrySettingsButton">API 등록</button>
                                         </span>
-                                        <p class="title-ai-card-copy">제목 최초 생성에 사용할 provider/model입니다.</p>
+                                        <p class="title-ai-card-copy">첫 제목 초안을 만드는 모델입니다. 기본값은 Codex GPT-5.4 / xhigh입니다.</p>
                                     </div>
                                 </div>
                                 <div class="title-ai-card-grid">
@@ -2931,14 +2905,22 @@ def _render_home() -> str:
                                         <span class="field-label">모델</span>
                                         <select id="titleModel"></select>
                                     </label>
+                                    <label class="field-block" id="titleReasoningEffortField" hidden>
+                                        <span class="field-label">추론 강도</span>
+                                        <select id="titleReasoningEffort">
+                                            <option value="medium">중간</option>
+                                            <option value="high">높음</option>
+                                            <option value="xhigh">매우 높음</option>
+                                        </select>
+                                    </label>
                                 </div>
                             </article>
 
                             <article class="title-ai-card title-ai-card-secondary">
                                 <div class="title-ai-card-head">
                                     <div>
-                                        <span class="field-label">제목 재작성 AI</span>
-                                        <p class="title-ai-card-copy">저점수 자동 재작성과 모델 승격에 사용할 전용 AI입니다.</p>
+                                        <span class="field-label">제목 검토 AI</span>
+                                        <p class="title-ai-card-copy">홈판 평가와 기준 미달 재작성에 쓰는 검토 전용 모델입니다. 기본값은 Codex GPT-5.4 mini / high입니다.</p>
                                     </div>
                                 </div>
                                 <div class="title-ai-card-grid">
@@ -2954,33 +2936,37 @@ def _render_home() -> str:
                                             <option value="">생성과 동일</option>
                                         </select>
                                     </label>
+                                    <label class="field-block" id="titleRewriteReasoningEffortField" hidden>
+                                        <span class="field-label">추론 강도</span>
+                                        <select id="titleRewriteReasoningEffort">
+                                            <option value="">생성과 동일</option>
+                                            <option value="medium">중간</option>
+                                            <option value="high">높음</option>
+                                            <option value="xhigh">매우 높음</option>
+                                        </select>
+                                    </label>
                                 </div>
                                 <p id="titleRewriteSummary" class="input-help compact-help">
-                                    재작성은 제목 생성 AI와 같은 provider/model을 그대로 사용합니다.
+                                    검토 AI를 비워두면 생성 AI와 같은 provider/model을 그대로 사용합니다.
                                 </p>
                             </article>
                         </div>
 
                         <div class="field-block" data-title-mode-visibility="ai" hidden>
                             <span class="field-label field-label-row">
-                                <span>창의성 프리셋</span>
+                                <span>창의성 균형</span>
                                 <span class="inline-help">
-                                    <button type="button" class="help-icon-btn" aria-label="창의성 프리셋 도움말">?</button>
-                                    <span id="titleTemperatureDescription" class="help-tooltip">규칙 준수와 표현 다양성의 균형이 가장 무난한 기본값입니다.</span>
+                                    <button type="button" class="help-icon-btn" aria-label="창의성 균형 도움말">?</button>
+                                    <span id="titleTemperatureDescription" class="help-tooltip">규칙 준수와 표현 다양성의 균형을 잡는 값입니다. 보통 0.7이면 충분합니다.</span>
                                 </span>
                             </span>
                             <select id="titleTemperature">
                                 <option value="0.2">안정형</option>
-                                <option value="0.5">절충형</option>
+                                <option value="0.5">안정-균형</option>
                                 <option value="0.7">(추천) 균형형</option>
                                 <option value="1.0">확장형</option>
                             </select>
                         </div>
-
-                        <label class="field-block" data-title-mode-visibility="ai" hidden>
-                            <span class="field-label">예비 처리</span>
-                            <label class="check-chip"><input id="titleFallback" type="checkbox" checked />AI 실패 시 템플릿 사용</label>
-                        </label>
 
                         <div class="field-block field-block-wide title-prompt-block" data-title-mode-visibility="ai" hidden>
                             <div class="title-prompt-head">
@@ -3801,7 +3787,7 @@ def _render_recommended_usage() -> str:
                         <li><strong>2. 2축 선별은 전체나 균형형으로 먼저 넓게 봅니다.</strong><span>시드가 강한지 먼저 확인한 뒤 황금형이나 수익형으로 다시 조이는 편이 안정적입니다.</span></li>
                         <li><strong>3. 관련 설정 보기에서 수집 설정만 확인합니다.</strong><span>카테고리, 트렌드 날짜, 로그인 상태만 점검한 뒤 아래 실행 버튼에서 `키워드 발굴 실행`을 누르면 됩니다.</span></li>
                         <li><strong>4. 선별 결과가 뜨면 먼저 검토합니다.</strong><span>좋은 후보는 보관하거나 시드화하고, 필요할 때만 출력 및 복사로 외부 시트에 넘기면 됩니다.</span></li>
-                        <li><strong>5. 선별된 키워드가 모이면 제목 생성으로 넘어갑니다.</strong><span>홈판, 블로그형, 둘다를 필요한 만큼만 켜고 상위 점수 결과만 고릅니다.</span></li>
+                        <li><strong>5. 선별된 키워드가 모이면 제목 생성으로 넘어갑니다.</strong><span>홈판, 블로그형, 공용형을 필요한 만큼만 켜고 상위 점수 결과만 고릅니다.</span></li>
                     </ul>
                 </section>
 
@@ -3856,7 +3842,7 @@ def _render_recommended_usage() -> str:
                     <ul class="guide-article-points">
                         <li><strong>선별 0건도 버리지 마세요.</strong><span>확장과 분석 결과는 그대로 남으므로, 다음 시드와 프리셋을 고르는 재료가 됩니다.</span></li>
                         <li><strong>좋은 후보는 바로 시드화하거나 보관하세요.</strong><span>좋은 키워드는 한 번 보고 끝내지 않을수록 수익 기회가 늘어납니다.</span></li>
-                        <li><strong>제목은 필요한 만큼만 만드세요.</strong><span>과하게 많이 만들기보다 홈판, 블로그형, 둘다 중 필요한 영역만 켜고 점수순으로 빠르게 고르는 편이 효율적입니다.</span></li>
+                        <li><strong>제목은 필요한 만큼만 만드세요.</strong><span>과하게 많이 만들기보다 홈판, 블로그형, 공용형 중 필요한 영역만 켜고 점수순으로 빠르게 고르는 편이 효율적입니다.</span></li>
                         <li><strong>실행 기록과 예약 큐를 같이 쓰세요.</strong><span>잘된 조합을 재현하고 시즌 키워드를 반복 공략할 수 있어 장기적으로 더 강합니다.</span></li>
                     </ul>
                 </section>

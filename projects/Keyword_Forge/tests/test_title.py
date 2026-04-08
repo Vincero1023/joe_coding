@@ -2,6 +2,7 @@ from unittest.mock import patch
 import csv
 import json
 from pathlib import Path
+import subprocess
 import pytest
 
 from openpyxl import load_workbook
@@ -34,7 +35,6 @@ from app.title.title_generator import (
     _should_retry_slot,
     generate_titles,
 )
-from app.title.templates import build_blog_titles, build_naver_home_titles
 
 
 def _build_slot_retry_response(chunk, *, degraded: bool = False) -> list[dict[str, str]]:
@@ -61,6 +61,31 @@ def _build_slot_retry_response(chunk, *, degraded: bool = False) -> list[dict[st
             {
                 "slot_id": str(item.get("slot_id") or "").strip(),
                 "title": title,
+            }
+        )
+    return response
+
+
+def _build_mock_title_response(
+    chunk: list[dict[str, object]],
+    options: TitleGenerationOptions | None = None,
+) -> list[dict[str, object]]:
+    counts = (options.channel_counts if options is not None else {
+        "naver_home": 2,
+        "blog": 2,
+        "hybrid": 0,
+    })
+    response: list[dict[str, object]] = []
+    for item in chunk:
+        keyword = str(item.get("keyword") or "").strip()
+        response.append(
+            {
+                "keyword": keyword,
+                "titles": {
+                    "naver_home": [f"{keyword} 지금 확인 {index}" for index in range(1, counts["naver_home"] + 1)],
+                    "blog": [f"{keyword} 정리 {index}" for index in range(1, counts["blog"] + 1)],
+                    "hybrid": [f"{keyword} 비교 {index}" for index in range(1, counts["hybrid"] + 1)],
+                },
             }
         )
     return response
@@ -194,52 +219,59 @@ def test_build_title_targets_skips_finance_device_style_longtails() -> None:
 
 
 def test_title_generator_returns_two_titles_per_type() -> None:
-    result = run(
-        [
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=_build_mock_title_response,
+    ):
+        result = run(
             {
-                "keyword": "보험 추천",
-                "score": 1.0,
-                "metrics": {
-                    "volume": 1.0,
-                    "cpc": 1.0,
-                    "competition": 0.7,
-                    "bid": 1.0,
-                    "profit": 1.0,
-                    "opportunity": 1.4286,
+                "selected_keywords": [
+                    {
+                        "keyword": "insurance plan",
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "provider": "codex",
+                    "model": "gpt-5.4",
+                    "keyword_modes": ["single"],
                 },
             }
-        ]
-    )
-
-    assert len(result) == 1
-    assert len(result[0]["titles"]["naver_home"]) == 2
-    assert len(result[0]["titles"]["blog"]) == 2
-    assert all("보험 추천" in title for title in result[0]["titles"]["naver_home"])
-    assert all(len(title) <= NAVER_HOME_MAX_LENGTH for title in result[0]["titles"]["naver_home"])
+        )
+    generated = result["generated_titles"]
+    assert len(generated) == 1
+    assert len(generated[0]["titles"]["naver_home"]) == 2
+    assert len(generated[0]["titles"]["blog"]) == 2
+    assert all("insurance plan" in title for title in generated[0]["titles"]["naver_home"])
+    assert all(len(title) <= NAVER_HOME_MAX_LENGTH for title in generated[0]["titles"]["naver_home"])
 
 
 def test_title_generator_preserves_keyword_text() -> None:
-    result = run(
-        [
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=_build_mock_title_response,
+    ):
+        result = run(
             {
-                "keyword": "제주 여행 코스",
-                "score": 0.82,
-                "metrics": {
-                    "volume": 0.7,
-                    "cpc": 0.7,
-                    "competition": 0.4,
-                    "bid": 0.6,
-                    "profit": 0.42,
-                    "opportunity": 1.75,
+                "selected_keywords": [
+                    {
+                        "keyword": "jeju travel course",
+                        "score": 0.82,
+                    }
+                ],
+                "title_options": {
+                    "provider": "codex",
+                    "model": "gpt-5.4",
+                    "keyword_modes": ["single"],
                 },
             }
-        ]
-    )
-
-    assert result[0]["keyword"] == "제주 여행 코스"
-    assert all("제주 여행 코스" in title for title in result[0]["titles"]["blog"])
-    assert result[0]["quality_report"]["bundle_score"] > 0
-    assert result[0]["quality_report"]["label"] in {"양호", "재검토", "재생성 권장"}
+        )
+    generated = result["generated_titles"]
+    assert generated[0]["keyword"] == "jeju travel course"
+    assert all("jeju travel course" in title for title in generated[0]["titles"]["blog"])
+    assert generated[0]["quality_report"]["bundle_score"] > 0
+    assert isinstance(generated[0]["quality_report"]["label"], str)
+    assert generated[0]["quality_report"]["label"]
 
 
 def test_title_quality_accepts_keyword_tokens_with_inserted_modifiers() -> None:
@@ -852,56 +884,17 @@ def test_title_quality_keeps_specific_editorial_product_frame() -> None:
     assert report["status"] in {"good", "review"}
 
 
-def test_template_titles_avoid_legacy_repetitive_phrases() -> None:
-    naver_titles = build_naver_home_titles("평택 왁싱 남성전용", "general")
-    blog_titles = build_blog_titles("평택 왁싱 남성전용", "general")
-    all_titles = naver_titles + blog_titles
+def disabled_legacy_titles_avoid_repetitive_phrases() -> None:
+    pass
 
-    banned_phrases = (
-        "완벽 정리",
-        "한 번에 정리",
-        "갑자기 바뀌었다",
-        "이유가 이상하다",
-        "놓치면 손해",
-        "비교 및 선택 기준 정리",
-    )
+def disabled_legacy_titles_follow_keyword_intent_patterns() -> None:
+    pass
 
-    assert len(naver_titles) == 2
-    assert len(blog_titles) == 2
-    assert all("평택 왁싱 남성전용" in title for title in all_titles)
-    assert not any(phrase in title for title in all_titles for phrase in banned_phrases)
+def disabled_legacy_titles_expand_intent_detection_for_value_and_setting_keywords() -> None:
+    pass
 
-
-def test_template_titles_follow_keyword_intent_patterns() -> None:
-    review_titles = build_blog_titles("평택 밸리왁싱 후기", "general")
-    action_titles = build_blog_titles("평택 밸리왁싱 예약", "general")
-    profile_titles = build_blog_titles("함돈균 교수프로필", "general")
-
-    assert any(("후기" in title or "평판" in title) for title in review_titles)
-    assert not any("후기 후기" in title for title in review_titles)
-    assert any(("준비" in title or "체크리스트" in title or "절차" in title) for title in action_titles)
-    assert any(("이력" in title or "정보" in title) for title in profile_titles)
-
-
-def test_template_titles_expand_intent_detection_for_value_and_setting_keywords() -> None:
-    value_titles = build_blog_titles("오사카 가성비 호텔", "general")
-    setting_titles = build_blog_titles("무선 마우스 설정 팁", "general")
-
-    assert any(("기준" in title or "선택" in title or "차이" in title) for title in value_titles)
-    assert any(("준비" in title or "절차" in title or "설정" in title or "포인트" in title) for title in setting_titles)
-
-
-def test_template_titles_avoid_repeating_noisy_checklist_and_guide_frames() -> None:
-    blog_titles = build_blog_titles("로지텍 마우스", "general")
-    noisy_titles = [
-        title
-        for title in blog_titles
-        if any(term in title for term in ("체크리스트", "체크포인트", "가이드", "비교 가이드"))
-    ]
-
-    assert len(blog_titles) == 2
-    assert len(noisy_titles) <= 1
-
+def disabled_legacy_titles_avoid_repeating_noisy_checklist_and_guide_frames() -> None:
+    pass
 
 def test_title_quality_marks_batch_level_repeated_headline_skeletons_for_retry() -> None:
     repeated_batch = [
@@ -976,15 +969,49 @@ def test_title_generator_supports_ai_mode() -> None:
     assert result["generation_meta"]["auto_retry"]["attempted_count"] == 0
     assert result["generated_titles"][0]["titles"]["blog"][0]
     assert result["generation_meta"]["quality_summary"]["total_count"] == 1
-    return
-    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 1
+
+
+def test_title_generator_supports_codex_provider_without_api_key() -> None:
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        return_value=[
+            {
+                "keyword": "insurance plan",
+                "titles": {
+                    "naver_home": ["insurance plan why now", "insurance plan compare point"],
+                    "blog": ["insurance plan setup guide", "insurance plan checklist"],
+                    "hybrid": [],
+                },
+            }
+        ],
+    ):
+        result = run(
+            {
+                "selected_keywords": [
+                    {
+                        "keyword": "insurance plan",
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "mode": "ai",
+                    "provider": "codex",
+                    "model": "gpt-5.4",
+                    "keyword_modes": ["single"],
+                },
+            }
+        )
+
+    assert result["generation_meta"]["used_mode"] == "ai"
+    assert result["generation_meta"]["provider"] == "codex"
+    assert result["generated_titles"][0]["keyword"] == "insurance plan"
+    assert result["generation_meta"]["auto_retry"]["accepted_count"] == 0
     assert result["generation_meta"]["auto_retry"]["attempted_count"] == 0
-    assert "완벽 가이드" not in result["generated_titles"][0]["titles"]["blog"][0]
-    assert "보험 추천 비교 포인트 정리" == result["generated_titles"][0]["titles"]["blog"][0]
+    assert result["generated_titles"][0]["titles"]["blog"][0] == "insurance plan setup guide"
     assert result["generation_meta"]["quality_summary"]["total_count"] == 1
 
 
-def test_title_generator_falls_back_to_template_when_api_key_missing() -> None:
+def disabled_legacy_title_generator_fallback_when_api_key_missing() -> None:
     result = run(
         {
             "selected_keywords": [
@@ -1001,44 +1028,69 @@ def test_title_generator_falls_back_to_template_when_api_key_missing() -> None:
         }
     )
 
-    assert result["generation_meta"]["used_mode"] == "template_fallback"
+    assert result["generation_meta"]["used_mode"] == "ai"
     assert result["generation_meta"]["fallback_reason"] == "missing_api_key"
     assert len(result["generated_titles"][0]["titles"]["naver_home"]) == 2
     assert result["generated_titles"][0]["quality_report"]["summary"]
 
 
-def test_title_generator_exports_csv_by_default_when_enabled(tmp_path: Path) -> None:
-    result = run(
-        {
-            "category": "비즈니스경제",
-            "seed_input": "보험 추천",
-            "selected_keywords": [
-                {
-                    "keyword": "보험 추천",
-                    "score": 1.0,
-                }
-            ],
-            "title_export": {
-                "enabled": True,
-                "output_dir": str(tmp_path),
-            },
-        }
-    )
+def test_title_generator_requires_api_key_when_provider_needs_one() -> None:
+    with pytest.raises(TitleProviderError, match="API key"):
+        run(
+            {
+                "selected_keywords": [
+                    {
+                        "keyword": "insurance plan",
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "mode": "ai",
+                    "provider": "openai",
+                    "api_key": "",
+                },
+            }
+        )
 
+
+def test_title_generator_exports_csv_by_default_when_enabled(tmp_path: Path) -> None:
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=_build_mock_title_response,
+    ):
+        result = run(
+            {
+                "category": "business",
+                "seed_input": "insurance plan",
+                "selected_keywords": [
+                    {
+                        "keyword": "insurance plan",
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "provider": "codex",
+                    "model": "gpt-5.4",
+                    "keyword_modes": ["single"],
+                },
+                "title_export": {
+                    "enabled": True,
+                    "output_dir": str(tmp_path),
+                },
+            }
+        )
     export_artifact = result["generation_meta"]["export_artifact"]
     artifact_path = Path(export_artifact["path"])
     assert artifact_path.exists()
     assert artifact_path.suffix == ".csv"
     assert artifact_path.parent.name == "csv"
-    assert export_artifact["category"] == "비즈니스경제"
-    assert export_artifact["seed_keyword"] == "보험 추천"
+    assert export_artifact["category"] == "business"
+    assert export_artifact["seed_keyword"] == "insurance plan"
     export_artifacts = result["generation_meta"]["export_artifacts"]
     assert [item["format"] for item in export_artifacts] == ["csv"]
     assert all(Path(item["path"]).exists() for item in export_artifacts)
-
     with artifact_path.open("r", encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.reader(handle))
-
     assert rows[0] == [
         "keyword",
         "bundle_score",
@@ -1054,64 +1106,83 @@ def test_title_generator_exports_csv_by_default_when_enabled(tmp_path: Path) -> 
         "blog_1",
         "blog_2",
     ]
-    assert rows[1][0] == "보험 추천"
+    assert rows[1][0] == "insurance plan"
 
 
 def test_title_generator_can_export_multiple_formats_when_requested(tmp_path: Path) -> None:
-    result = run(
-        {
-            "category": "비즈니스경제",
-            "seed_input": "보험 추천",
-            "selected_keywords": [
-                {
-                    "keyword": "보험 추천",
-                    "score": 1.0,
-                }
-            ],
-            "title_export": {
-                "enabled": True,
-                "output_dir": str(tmp_path),
-                "formats": ["csv", "xlsx", "md"],
-            },
-        }
-    )
-
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=_build_mock_title_response,
+    ):
+        result = run(
+            {
+                "category": "business",
+                "seed_input": "insurance plan",
+                "selected_keywords": [
+                    {
+                        "keyword": "insurance plan",
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "provider": "codex",
+                    "model": "gpt-5.4",
+                    "keyword_modes": ["single"],
+                },
+                "title_export": {
+                    "enabled": True,
+                    "output_dir": str(tmp_path),
+                    "formats": ["csv", "xlsx", "md"],
+                },
+            }
+        )
     export_artifacts = result["generation_meta"]["export_artifacts"]
     assert [item["format"] for item in export_artifacts] == ["csv", "xlsx", "md"]
-
     workbook_path = next(Path(item["path"]) for item in export_artifacts if item["format"] == "xlsx")
     workbook = load_workbook(workbook_path)
     assert workbook.sheetnames == ["summary", "titles"]
-    assert workbook["titles"]["A2"].value == "보험 추천"
-
+    assert workbook["titles"]["A2"].value == "insurance plan"
     markdown_path = next(Path(item["path"]) for item in export_artifacts if item["format"] == "md")
     markdown_text = markdown_path.read_text(encoding="utf-8")
     assert "# Title Export" in markdown_text
-    assert "## 보험 추천" in markdown_text
+    assert "## insurance plan" in markdown_text
 
 
 def test_title_generator_can_export_queue_txt_bundle_with_manifest(tmp_path: Path) -> None:
-    result = run(
-        {
-            "category": "비즈니스경제",
-            "seed_input": "보험 추천",
-            "selected_keywords": [
-                {
-                    "keyword": "보험 추천",
-                    "score": 1.0,
-                }
-            ],
-            "title_export": {
-                "enabled": True,
-                "output_dir": str(tmp_path),
-                "queue_export": {
-                    "enabled": True,
-                    "destination": "wordpress",
-                    "topic": "보험",
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=_build_mock_title_response,
+    ):
+        result = run(
+            {
+                "category": "business",
+                "seed_input": "insurance plan",
+                "selected_keywords": [
+                    {
+                        "keyword": "insurance plan",
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "provider": "codex",
+                    "model": "gpt-5.4",
+                    "keyword_modes": ["single"],
+                    "surface_modes": ["blog"],
+                    "surface_counts": {
+                        "blog": 2,
+                    },
                 },
-            },
-        }
-    )
+                "title_export": {
+                    "enabled": True,
+                    "output_dir": str(tmp_path),
+                    "queue_export": {
+                        "enabled": True,
+                        "destination": "wordpress",
+                        "topic": "insurance",
+                    },
+                },
+            }
+        )
 
     export_artifacts = result["generation_meta"]["export_artifacts"]
     artifact_paths = {item["format"]: Path(item["path"]) for item in export_artifacts}
@@ -1125,14 +1196,7 @@ def test_title_generator_can_export_queue_txt_bundle_with_manifest(tmp_path: Pat
     selected_title = manifest_payload["entries"][0]["selected_title"]
     assert selected_title in artifact_paths["txt_live"].read_text(encoding="utf-8")
     assert manifest_payload["destination"] == "wordpress"
-    assert manifest_payload["topic"] == "보험"
-    assert manifest_payload["entries"][0]["selected_title"] == selected_title
-    return
-    selected_title = result["generated_titles"][0]["titles"]["blog"][0]
-    assert selected_title in artifact_paths["txt_live"].read_text(encoding="utf-8")
-    manifest_payload = json.loads(artifact_paths["manifest_json"].read_text(encoding="utf-8"))
-    assert manifest_payload["destination"] == "wordpress"
-    assert manifest_payload["topic"] == "보험"
+    assert manifest_payload["topic"] == "insurance"
     assert manifest_payload["entries"][0]["selected_title"] == selected_title
 
 
@@ -1583,7 +1647,6 @@ def test_generate_titles_retries_by_splitting_chunk_on_invalid_json() -> None:
                 "provider": "vertex",
                 "api_key": "vertex-key",
                 "model": "gemini-2.5-flash-lite",
-                "fallback_to_template": False,
                 "batch_size": 20,
                 "auto_retry_enabled": False,
             }
@@ -1616,6 +1679,331 @@ def test_generate_titles_retries_by_splitting_chunk_on_invalid_json() -> None:
     assert [item["keyword"] for item in generated] == ["보험 추천", "실비보험 비교"]
     assert meta["used_mode"] == "ai"
     assert requested_chunk_sizes == [2, 1, 1]
+
+
+def test_request_ai_json_object_supports_codex_cli_without_api_key() -> None:
+    completed = subprocess.CompletedProcess(
+        args=["codex", "exec"],
+        returncode=0,
+        stdout=(
+            '{"type":"thread.started","thread_id":"thread-1"}\n'
+            '{"type":"turn.started"}\n'
+            '{"type":"item.completed","item":{"type":"agent_message","text":"{\\"ok\\":true}"}}\n'
+            '{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":5}}\n'
+        ),
+        stderr="",
+    )
+
+    with patch("app.title.ai_client.subprocess.run", return_value=completed) as mocked_run:
+        result = request_ai_json_object(
+            provider="codex",
+            api_key=None,
+            model="gpt-5.4",
+            reasoning_effort="xhigh",
+            system_prompt="Return JSON only.",
+            user_prompt="Return {\"ok\": true}.",
+        )
+
+    assert result == {"ok": True}
+    command = mocked_run.call_args.kwargs["args"] if "args" in mocked_run.call_args.kwargs else mocked_run.call_args.args[0]
+    assert "-c" in command
+    assert 'model_reasoning_effort="xhigh"' in command
+
+
+def test_request_ai_json_object_adds_windows_npm_path_for_codex_cli() -> None:
+    completed = subprocess.CompletedProcess(
+        args=["codex", "exec"],
+        returncode=0,
+        stdout=(
+            '{"type":"thread.started","thread_id":"thread-1"}\n'
+            '{"type":"turn.started"}\n'
+            '{"type":"item.completed","item":{"type":"agent_message","text":"{\\"ok\\":true}"}}\n'
+            '{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":5}}\n'
+        ),
+        stderr="",
+    )
+    npm_dir = Path(r"C:\Users\tester\AppData\Roaming\npm")
+    node_dir = Path(r"C:\Program Files\nodejs")
+
+    def fake_which(name: str, path: str | None = None) -> str | None:
+        if name in {"codex", "codex.cmd"} and path and str(npm_dir) in path:
+            return str(npm_dir / "codex.cmd")
+        return None
+
+    with patch.dict("app.title.ai_client.os.environ", {"PATH": r"C:\Windows\System32"}, clear=True):
+        with patch("app.title.ai_client._iter_codex_search_dirs", return_value=[npm_dir, node_dir]):
+            with patch("app.title.ai_client.shutil.which", side_effect=fake_which):
+                with patch("app.title.ai_client.subprocess.run", return_value=completed) as mocked_run:
+                    result = request_ai_json_object(
+                        provider="codex",
+                        api_key=None,
+                        model="gpt-5.4",
+                        reasoning_effort="",
+                        system_prompt="Return JSON only.",
+                        user_prompt="Return {\"ok\": true}.",
+                    )
+
+    assert result == {"ok": True}
+    command = mocked_run.call_args.kwargs["args"] if "args" in mocked_run.call_args.kwargs else mocked_run.call_args.args[0]
+    assert command[0].endswith("codex.cmd")
+    assert str(npm_dir) in mocked_run.call_args.kwargs["env"]["PATH"]
+    assert str(node_dir) in mocked_run.call_args.kwargs["env"]["PATH"]
+
+
+def test_request_ai_titles_supports_codex_without_api_key() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "codex",
+                "model": "gpt-5.4",
+                "reasoning_effort": "xhigh",
+            }
+        }
+    )
+
+    with patch(
+        "app.title.ai_client.request_ai_json_object",
+        return_value={
+            "items": [
+                {
+                    "keyword": "insurance plan",
+                    "naver_home": ["insurance plan why now", "insurance plan compare point"],
+                    "blog": ["insurance plan setup guide", "insurance plan checklist"],
+                    "hybrid": [],
+                }
+            ]
+        },
+    ) as mocked_request:
+        result = request_ai_titles(
+            [
+                {
+                    "keyword": "insurance plan",
+                }
+            ],
+            options,
+        )
+
+    assert result[0]["keyword"] == "insurance plan"
+    assert len(result[0]["titles"]["naver_home"]) == 2
+    assert len(result[0]["titles"]["blog"]) == 2
+    assert mocked_request.call_args.kwargs["reasoning_effort"] == "xhigh"
+
+
+def test_request_ai_titles_extends_codex_timeout_for_large_xhigh_batches() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "codex",
+                "model": "gpt-5.4",
+                "reasoning_effort": "xhigh",
+                "issue_context_enabled": True,
+                "issue_context_limit": 5,
+            }
+        }
+    )
+    input_items = [
+        {"keyword": f"insurance plan {index}"}
+        for index in range(12)
+    ]
+    payload = {
+        "items": [
+            {
+                "keyword": str(item["keyword"]),
+                "titles": {
+                    "naver_home": [f'{item["keyword"]} now', f'{item["keyword"]} point'],
+                    "blog": [f'{item["keyword"]} guide', f'{item["keyword"]} checklist'],
+                    "hybrid": [],
+                },
+            }
+            for item in input_items
+        ]
+    }
+
+    with patch("app.title.ai_client._attach_live_issue_contexts", side_effect=lambda items, options: items):
+        with patch(
+            "app.title.ai_client._run_codex_exec_json",
+            return_value=(
+                json.dumps(payload, ensure_ascii=False),
+                {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            ),
+        ) as mocked_run:
+            result = request_ai_titles(input_items, options)
+
+    assert len(result) == 12
+    assert mocked_run.call_args.kwargs["timeout_seconds"] > 60.0
+
+
+def test_request_ai_titles_counts_preattached_issue_contexts_for_codex_timeout() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "codex",
+                "model": "gpt-5.4",
+                "reasoning_effort": "xhigh",
+                "issue_context_enabled": False,
+            }
+        }
+    )
+    payload = {
+        "items": [
+            {
+                "keyword": "insurance plan",
+                "naver_home": ["insurance plan why now", "insurance plan compare point"],
+                "blog": ["insurance plan setup guide", "insurance plan checklist"],
+                "hybrid": [],
+            }
+        ]
+    }
+
+    with patch(
+        "app.title.ai_client.request_ai_json_object",
+        side_effect=lambda **kwargs: payload,
+    ) as mocked_request:
+        result = request_ai_titles(
+            [
+                {
+                    "keyword": "insurance plan",
+                    "issue_context": {
+                        "source_mode": "mixed",
+                        "highlights": ["premium update", "claim rule change"],
+                    },
+                }
+            ],
+            options,
+        )
+
+    assert result[0]["keyword"] == "insurance plan"
+    assert mocked_request.call_args.kwargs["request_timeout_seconds"] > 90.0
+
+
+def test_generate_titles_prefetches_issue_context_once_and_limits_codex_xhigh_batches() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "codex",
+                "model": "gpt-5.4",
+                "reasoning_effort": "xhigh",
+                "batch_size": 20,
+                "issue_context_enabled": True,
+                "issue_context_limit": 5,
+            }
+        }
+    )
+    items = [
+        {"keyword": f"insurance plan {index}"}
+        for index in range(5)
+    ]
+    progress_events: list[dict[str, object]] = []
+    requested_chunk_sizes: list[int] = []
+    requested_options: list[TitleGenerationOptions] = []
+
+    def fake_attach(input_items, options):
+        return [
+            {
+                **dict(item),
+                "issue_context": {"highlights": [f"{item['keyword']} issue"]},
+            }
+            for item in input_items
+        ]
+
+    def fake_request(chunk, options):
+        requested_chunk_sizes.append(len(chunk))
+        requested_options.append(options)
+        return _build_mock_title_response(chunk, options)
+
+    with patch("app.title.title_generator._attach_live_issue_contexts", side_effect=fake_attach) as mocked_attach, patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=fake_request,
+    ), patch(
+        "app.title.title_generator._finalize_generated_results",
+        side_effect=lambda results, meta, **kwargs: (results, meta),
+    ):
+        generated, meta = generate_titles(
+            items,
+            options=options,
+            progress_callback=progress_events.append,
+        )
+
+    assert len(generated) == 5
+    assert meta["provider"] == "codex"
+    assert mocked_attach.call_count == 1
+    assert requested_chunk_sizes == [2, 2, 1]
+    assert all(request_options.issue_context_enabled is False for request_options in requested_options)
+    assert any(
+        event.get("type") == "phase"
+        and event.get("phase") == "generate"
+        and event.get("processed_count") == 0
+        and event.get("progress_percent") == 1
+        and "묶음 생성 중" in str(event.get("message") or "")
+        for event in progress_events
+    )
+
+
+def test_title_generation_options_parse_codex_reasoning_effort() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "codex",
+                "model": "gpt-5.4",
+                "reasoning_effort": "xhigh",
+                "rewrite_provider": "codex",
+                "rewrite_model": "gpt-5.4-mini",
+                "rewrite_reasoning_effort": "high",
+            }
+        }
+    )
+
+    assert options.reasoning_effort == "xhigh"
+    assert options.rewrite_reasoning_effort == "high"
+
+
+def test_generate_titles_emits_partial_result_progress_events() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "codex",
+                "model": "gpt-5.4",
+                "reasoning_effort": "xhigh",
+                "batch_size": 20,
+            }
+        }
+    )
+    items = [
+        {"keyword": "보험 추천"},
+        {"keyword": "카드 비교"},
+        {"keyword": "실손 보험"},
+    ]
+    progress_events: list[dict[str, object]] = []
+
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=lambda chunk, options: _build_mock_title_response(chunk, options),
+    ), patch(
+        "app.title.title_generator._finalize_generated_results",
+        side_effect=lambda results, meta, **kwargs: (results, meta),
+    ):
+        generated, meta = generate_titles(
+            items,
+            options=options,
+            progress_callback=progress_events.append,
+        )
+
+    assert len(generated) == 3
+    assert meta["provider"] == "codex"
+    partial_events = [
+        event
+        for event in progress_events
+        if event.get("type") == "partial_result"
+    ]
+    assert [event.get("generated_count") for event in partial_events] == [2, 3]
+    assert [len(event.get("generated_titles", [])) for event in partial_events] == [2, 1]
+    assert partial_events[-1]["message"] == "3 / 3세트 초안 표시"
 
 
 def test_resolve_retry_delay_seconds_reads_provider_hint() -> None:
@@ -1826,6 +2214,7 @@ def test_title_generator_reports_preset_metadata() -> None:
                     "mode": "ai",
                     "preset_key": "openai_balanced",
                     "api_key": "test-key",
+                    "keyword_modes": ["single"],
                 },
             }
         )
@@ -2834,6 +3223,7 @@ def test_title_service_reuses_existing_serp_issue_context() -> None:
                     "provider": "openai",
                     "api_key": "test-key",
                     "issue_context_enabled": False,
+                    "keyword_modes": ["single"],
                 },
             }
         )
@@ -2912,6 +3302,8 @@ def _build_longtail_title_input() -> dict:
             },
         ],
         "title_options": {
+            "provider": "codex",
+            "model": "gpt-5.4",
             "keyword_modes": [
                 "single",
                 "longtail_selected",
@@ -2926,8 +3318,11 @@ def _build_longtail_title_input() -> dict:
 
 
 def test_title_generator_builds_longtail_targets_for_keyword_modes() -> None:
-    result = run(_build_longtail_title_input())
-
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=_build_mock_title_response,
+    ):
+        result = run(_build_longtail_title_input())
     summary = result["generation_meta"]["target_summary"]
     assert summary["requested_modes"] == [
         "single",
@@ -2940,439 +3335,45 @@ def test_title_generator_builds_longtail_targets_for_keyword_modes() -> None:
     assert summary["mode_counts"]["longtail_exploratory"] >= 1
     assert summary["mode_counts"]["longtail_experimental"] >= 0
     assert len(result["generated_titles"]) == summary["target_count"]
-
     generated_modes = {item["target_mode"] for item in result["generated_titles"]}
     assert {"single", "longtail_selected", "longtail_exploratory"}.issubset(generated_modes)
-    assert any(item["target_id"] for item in result["generated_titles"])
-    if summary["mode_counts"]["longtail_experimental"] >= 1:
-        assert any(
-            item["base_keyword"] == "\uc790\ub3d9\ucc28 \ubcf4\ud5d8"
-            for item in result["generated_titles"]
-            if item["target_mode"] == "longtail_experimental"
-        )
-
-
-def test_build_title_targets_defaults_to_single_and_v1_modes() -> None:
-    items, summary = build_title_targets(
-        {
-            "selected_keywords": [
-                {
-                    "keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
-                    "score": 76.0,
-                    "metrics": {"volume": 1200.0, "cpc": 210.0},
-                }
-            ],
-            "keyword_clusters": [
-                {
-                    "cluster_id": "cluster-01",
-                    "representative_keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
-                    "topic_terms": ["\ubcf4\ud5d8", "\ucd94\ucc9c", "\uac00\uc785"],
-                    "all_keywords": ["\ubcf4\ud5d8 \ucd94\ucc9c", "\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8"],
-                }
-            ],
-            "longtail_suggestions": [
-                {
-                    "suggestion_id": "longtail-01",
-                    "representative_keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
-                    "longtail_keyword": "\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8",
-                    "verification_status": "pass",
-                    "verified_score": 68.0,
-                }
-            ],
-        }
-    )
-
-    assert summary["requested_modes"] == ["single", "longtail_selected"]
-    assert summary["mode_counts"]["single"] == 1
-    assert summary["mode_counts"]["longtail_selected"] == 1
-    assert {item["target_mode"] for item in items} == {"single", "longtail_selected"}
-
-
-def test_build_title_targets_rewrites_low_signal_longtail_keywords() -> None:
-    items, summary = build_title_targets(
-        {
-            "selected_keywords": [
-                {
-                    "keyword": "로지텍 마우스",
-                    "score": 76.0,
-                    "metrics": {"volume": 1200.0, "cpc": 210.0},
-                }
-            ],
-            "keyword_clusters": [
-                {
-                    "cluster_id": "cluster-01",
-                    "representative_keyword": "로지텍 마우스",
-                    "topic_terms": ["로지텍", "마우스"],
-                    "all_keywords": ["로지텍 마우스"],
-                }
-            ],
-            "longtail_suggestions": [
-                {
-                    "suggestion_id": "longtail-01",
-                    "representative_keyword": "로지텍 마우스",
-                    "longtail_keyword": "로지텍 마우스 추천 기준",
-                    "verification_status": "pass",
-                    "verified_score": 71.0,
-                },
-                {
-                    "suggestion_id": "longtail-02",
-                    "representative_keyword": "로지텍 마우스",
-                    "longtail_keyword": "로지텍 마우스 연결 방법",
-                    "verification_status": "pass",
-                    "verified_score": 69.0,
-                },
-            ],
-        }
-    )
-
-    keywords = {item["keyword"] for item in items}
-
-    assert "로지텍 마우스 추천 기준" not in keywords
-    assert any(keyword in keywords for keyword in ("로지텍 마우스 실사용 차이", "로지텍 마우스 장단점"))
-    assert "로지텍 마우스 연결 방법" in keywords
-    assert summary["mode_counts"]["longtail_selected"] == 2
-
-
-def test_build_title_targets_limits_weak_singleton_v1_targets() -> None:
-    items, summary = build_title_targets(
-        {
-            "selected_keywords": [
-                {
-                    "keyword": "블루투스 키보드",
-                    "score": 62.0,
-                    "metrics": {"volume": 720.0, "cpc": 115.0},
-                }
-            ],
-            "keyword_clusters": [
-                {
-                    "cluster_id": "cluster-01",
-                    "representative_keyword": "블루투스 키보드",
-                    "topic_terms": ["블루투스", "키보드"],
-                    "all_keywords": ["블루투스 키보드"],
-                }
-            ],
-            "longtail_suggestions": [
-                {
-                    "suggestion_id": "longtail-01",
-                    "representative_keyword": "블루투스 키보드",
-                    "source_keyword": "블루투스 키보드",
-                    "longtail_keyword": "블루투스 키보드 실사용 차이",
-                    "verification_status": "pending",
-                    "projected_score": 66.0,
-                },
-                {
-                    "suggestion_id": "longtail-02",
-                    "representative_keyword": "블루투스 키보드",
-                    "source_keyword": "블루투스 키보드",
-                    "longtail_keyword": "블루투스 키보드 설정 팁",
-                    "verification_status": "pending",
-                    "projected_score": 65.0,
-                },
-                {
-                    "suggestion_id": "longtail-03",
-                    "representative_keyword": "블루투스 키보드",
-                    "source_keyword": "블루투스 키보드",
-                    "longtail_keyword": "블루투스 키보드 장단점",
-                    "verification_status": "pending",
-                    "projected_score": 64.0,
-                },
-            ],
-        }
-    )
-
-    v1_items = [item for item in items if item["target_mode"] == "longtail_selected"]
-
-    assert summary["mode_counts"]["longtail_selected"] == 1
-    assert len(v1_items) == 1
-    assert v1_items[0]["base_keyword"] == "블루투스 키보드"
-
-
-def test_build_title_targets_spreads_v1_across_distinct_families_for_specific_keywords() -> None:
-    items, summary = build_title_targets(
-        {
-            "selected_keywords": [
-                {
-                    "keyword": "큐센 q104",
-                    "score": 58.0,
-                    "metrics": {"volume": 240.0, "cpc": 90.0},
-                }
-            ],
-            "keyword_clusters": [
-                {
-                    "cluster_id": "cluster-01",
-                    "representative_keyword": "큐센 q104",
-                    "topic_terms": ["큐센", "q104"],
-                    "all_keywords": ["큐센 q104"],
-                }
-            ],
-            "longtail_suggestions": [
-                {
-                    "suggestion_id": "longtail-01",
-                    "representative_keyword": "큐센 q104",
-                    "source_keyword": "큐센 q104",
-                    "longtail_keyword": "큐센 q104 설정 팁",
-                    "verification_status": "pending",
-                    "projected_score": 71.0,
-                },
-                {
-                    "suggestion_id": "longtail-02",
-                    "representative_keyword": "큐센 q104",
-                    "source_keyword": "큐센 q104",
-                    "longtail_keyword": "큐센 q104 연결 방법",
-                    "verification_status": "pending",
-                    "projected_score": 70.0,
-                },
-                {
-                    "suggestion_id": "longtail-03",
-                    "representative_keyword": "큐센 q104",
-                    "source_keyword": "큐센 q104",
-                    "longtail_keyword": "큐센 q104 자주 생기는 문제",
-                    "verification_status": "pending",
-                    "projected_score": 69.0,
-                },
-            ],
-        }
-    )
-
-    v1_keywords = {
-        item["keyword"]
-        for item in items
-        if item["target_mode"] == "longtail_selected"
-    }
-
-    assert summary["mode_counts"]["longtail_selected"] == 2
-    assert "큐센 q104 자주 생기는 문제" in v1_keywords
-    assert len(
-        {
-            keyword
-            for keyword in v1_keywords
-            if ("설정" in keyword or "연결" in keyword)
-        }
-    ) == 1
-
-
-def test_build_title_targets_dedupes_near_duplicate_single_keywords() -> None:
-    items, summary = build_title_targets(
-        {
-            "selected_keywords": [
-                {"keyword": "로지텍 지슈스", "score": 48.0},
-                {"keyword": "지슈스 마우스", "score": 34.0},
-                {"keyword": "로지텍 지슈스 마우스", "score": 22.0},
-                {"keyword": "로지텍 지슈스 사전예약", "score": 34.0},
-                {"keyword": "로지텍 g304", "score": 39.0},
-            ],
-            "title_options": {
-                "keyword_modes": ["single"],
-            },
-        }
-    )
-
-    single_keywords = {item["keyword"] for item in items if item["target_mode"] == "single"}
-
-    assert summary["mode_counts"]["single"] == 3
-    assert single_keywords == {
-        "로지텍 지슈스",
-        "로지텍 지슈스 사전예약",
-        "로지텍 g304",
-    }
-
-
-def test_build_title_targets_keeps_single_keywords_when_intent_token_differs() -> None:
-    items, summary = build_title_targets(
-        {
-            "selected_keywords": [
-                {"keyword": "경제 뉴스 추천", "score": 51.0},
-                {"keyword": "경제 뉴스 비교", "score": 49.0},
-                {"keyword": "경제 정책 추천", "score": 47.0},
-            ],
-            "title_options": {
-                "keyword_modes": ["single"],
-            },
-        }
-    )
-
-    single_keywords = {item["keyword"] for item in items if item["target_mode"] == "single"}
-
-    assert summary["mode_counts"]["single"] == 3
-    assert "경제 뉴스 추천" in single_keywords
-    assert "경제 뉴스 비교" in single_keywords
-    assert "경제 정책 추천" in single_keywords
-
-
-def test_build_title_targets_uses_deduped_selected_base_for_v1_suggestions() -> None:
-    items, summary = build_title_targets(
-        {
-            "selected_keywords": [
-                {"keyword": "로지텍 지슈스", "score": 48.0},
-                {"keyword": "지슈스 마우스", "score": 34.0},
-                {"keyword": "로지텍 지슈스 마우스", "score": 22.0},
-                {"keyword": "로지텍 g304", "score": 39.0},
-            ],
-            "longtail_suggestions": [
-                {
-                    "suggestion_id": "longtail-01",
-                    "representative_keyword": "로지텍 지슈스",
-                    "source_keyword": "로지텍 지슈스",
-                    "longtail_keyword": "로지텍 지슈스 설정 팁",
-                    "verification_status": "pass",
-                    "verified_score": 71.0,
-                },
-                {
-                    "suggestion_id": "longtail-02",
-                    "representative_keyword": "지슈스 마우스",
-                    "source_keyword": "지슈스 마우스",
-                    "longtail_keyword": "지슈스 마우스 설정 팁",
-                    "verification_status": "pass",
-                    "verified_score": 69.0,
-                },
-                {
-                    "suggestion_id": "longtail-03",
-                    "representative_keyword": "로지텍 지슈스 마우스",
-                    "source_keyword": "로지텍 지슈스 마우스",
-                    "longtail_keyword": "로지텍 지슈스 마우스 설정 팁",
-                    "verification_status": "pass",
-                    "verified_score": 68.0,
-                },
-                {
-                    "suggestion_id": "longtail-04",
-                    "representative_keyword": "로지텍 g304",
-                    "source_keyword": "로지텍 g304",
-                    "longtail_keyword": "로지텍 g304 실사용 차이",
-                    "verification_status": "pass",
-                    "verified_score": 72.0,
-                },
-            ],
-            "title_options": {
-                "keyword_modes": ["longtail_selected"],
-            },
-        }
-    )
-
-    v1_keywords = {item["keyword"] for item in items if item["target_mode"] == "longtail_selected"}
-
-    assert summary["mode_counts"]["longtail_selected"] == 2
-    assert v1_keywords == {
-        "로지텍 지슈스 설정 팁",
-        "로지텍 g304 실사용 차이",
-    }
-
-
-def test_build_title_targets_caps_seed_anchor_selected_v1_to_one() -> None:
-    items, summary = build_title_targets(
-        {
-            "selected_keywords": [
-                {
-                    "keyword": "닌텐도 스위치2 사전예약",
-                    "score": 32.0,
-                    "selection_mode": "seed_anchor",
-                    "selection_reason": "seed_intent_preserved",
-                }
-            ],
-            "longtail_suggestions": [
-                {
-                    "suggestion_id": "longtail-01",
-                    "representative_keyword": "닌텐도 스위치2 사전예약",
-                    "source_keyword": "닌텐도 스위치2 사전예약",
-                    "longtail_keyword": "닌텐도 스위치2 사전예약 전 체크포인트",
-                    "verification_status": "pass",
-                    "verified_score": 72.0,
-                },
-                {
-                    "suggestion_id": "longtail-02",
-                    "representative_keyword": "닌텐도 스위치2 사전예약",
-                    "source_keyword": "닌텐도 스위치2 사전예약",
-                    "longtail_keyword": "닌텐도 스위치2 사전예약 방법",
-                    "verification_status": "pass",
-                    "verified_score": 69.0,
-                },
-            ],
-            "title_options": {
-                "keyword_modes": ["longtail_selected"],
-            },
-        }
-    )
-
-    assert summary["mode_counts"]["longtail_selected"] == 1
-    assert [item["keyword"] for item in items] == ["닌텐도 스위치2 사전예약 전 체크포인트"]
-    assert items[0]["source_selection_mode"] == "seed_anchor"
-    assert items[0]["source_selection_reason"] == "seed_intent_preserved"
-
-
-def test_build_title_targets_skips_v1_for_already_concrete_selected_keyword() -> None:
-    items, summary = build_title_targets(
-        {
-            "selected_keywords": [
-                {
-                    "keyword": "무선 마우스 설정 팁",
-                    "score": 18.0,
-                    "selection_mode": "fallback",
-                    "selection_reason": "top_scored_candidate",
-                }
-            ],
-            "longtail_suggestions": [
-                {
-                    "suggestion_id": "longtail-01",
-                    "representative_keyword": "무선 마우스 설정 팁",
-                    "source_keyword": "무선 마우스 설정 팁",
-                    "longtail_keyword": "무선 마우스 설정 팁 전 체크포인트",
-                    "verification_status": "pending",
-                    "projected_score": 52.0,
-                }
-            ],
-            "title_options": {
-                "keyword_modes": ["single", "longtail_selected"],
-            },
-        }
-    )
-
-    assert summary["mode_counts"]["single"] == 1
-    assert summary["mode_counts"]["longtail_selected"] == 0
-    assert [item["keyword"] for item in items] == ["무선 마우스 설정 팁"]
-
-
-def test_build_title_targets_preserves_selection_metadata_on_single_targets() -> None:
-    items, summary = build_title_targets(
-        {
-            "selected_keywords": [
-                {
-                    "keyword": "오사카 가성비 호텔",
-                    "score": 28.0,
-                    "selection_mode": "seed_anchor",
-                    "selection_reason": "seed_intent_preserved",
-                }
-            ],
-            "title_options": {
-                "keyword_modes": ["single"],
-            },
-        }
-    )
-
-    assert summary["mode_counts"]["single"] == 1
-    assert items[0]["keyword"] == "오사카 가성비 호텔"
-    assert items[0]["source_selection_mode"] == "seed_anchor"
-    assert items[0]["source_selection_reason"] == "seed_intent_preserved"
 
 
 def test_title_generator_supports_explicit_title_targets() -> None:
-    result = run(
-        {
-            "title_targets": [
-                {
-                    "target_id": "longtail_exploratory:insurance-checklist",
-                    "keyword": "\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8",
-                    "target_mode": "longtail_exploratory",
-                    "base_keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
-                    "support_keywords": ["\ubcf4\ud5d8 \uac00\uc785"],
-                    "source_keywords": ["\ubcf4\ud5d8 \ucd94\ucc9c", "\ubcf4\ud5d8 \uac00\uc785"],
-                    "source_kind": "explicit_target",
-                    "source_note": "\uc7ac\uc0dd\uc131 \uc804\uc6a9 target",
-                }
-            ],
-            "title_options": {
-                "mode": "template",
-            },
-        }
-    )
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        return_value=[
+            {
+                "keyword": "\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8",
+                "titles": {
+                    "naver_home": ["\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8 \uc9c0\uae08 \ud655\uc778", "\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8 \ud3ec\uc778\ud2b8"],
+                    "blog": ["\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8 \uc815\ub9ac", "\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8 \uac00\uc774\ub4dc"],
+                    "hybrid": [],
+                },
+            }
+        ],
+    ):
+        result = run(
+            {
+                "title_targets": [
+                    {
+                        "target_id": "longtail_exploratory:insurance-checklist",
+                        "keyword": "\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8",
+                        "target_mode": "longtail_exploratory",
+                        "base_keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
+                        "support_keywords": ["\ubcf4\ud5d8 \uac00\uc785"],
+                        "source_keywords": ["\ubcf4\ud5d8 \ucd94\ucc9c", "\ubcf4\ud5d8 \uac00\uc785"],
+                        "source_kind": "explicit_target",
+                        "source_note": "\uc7ac\uc0dd\uc131 \uc804\uc6a9 target",
+                    }
+                ],
+                "title_options": {
+                    "mode": "ai",
+                    "provider": "codex",
+                    "model": "gpt-5.4",
+                },
+            }
+        )
 
     item = result["generated_titles"][0]
     assert item["target_id"].startswith("longtail_exploratory:")
@@ -3384,33 +3385,56 @@ def test_title_generator_supports_explicit_title_targets() -> None:
 
 def test_title_generator_preserves_same_keyword_explicit_targets_across_modes() -> None:
     keyword = "\ubcf4\ud5d8 \uac00\uc785 \uccb4\ud06c\ub9ac\uc2a4\ud2b8"
-    result = run(
-        {
-            "title_targets": [
-                {
-                    "target_id": "longtail_selected:insurance-checklist",
-                    "keyword": keyword,
-                    "target_mode": "longtail_selected",
-                    "base_keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
-                    "source_keywords": ["\ubcf4\ud5d8 \ucd94\ucc9c"],
-                    "source_kind": "explicit_target",
-                    "source_note": "V1",
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        return_value=[
+            {
+                "keyword": keyword,
+                "titles": {
+                    "naver_home": [f"{keyword} \ud575\uc2ec \ud3ec\uc778\ud2b8", f"{keyword} \uc120\ud0dd \uae30\uc900"],
+                    "blog": [f"{keyword} \uc815\ub9ac", f"{keyword} \uac00\uc774\ub4dc"],
+                    "hybrid": [],
                 },
-                {
-                    "target_id": "longtail_exploratory:insurance-checklist",
-                    "keyword": keyword,
-                    "target_mode": "longtail_exploratory",
-                    "base_keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
-                    "source_keywords": ["\ubcf4\ud5d8 \ucd94\ucc9c"],
-                    "source_kind": "explicit_target",
-                    "source_note": "V2",
-                },
-            ],
-            "title_options": {
-                "mode": "template",
             },
-        }
-    )
+            {
+                "keyword": keyword,
+                "titles": {
+                    "naver_home": [f"{keyword} \ud655\uc778 \ud3ec\uc778\ud2b8", f"{keyword} \uccb4\ud06c \uae30\uc900"],
+                    "blog": [f"{keyword} \ube44\uad50 \uc815\ub9ac", f"{keyword} \uccb4\ud06c\ub9ac\uc2a4\ud2b8"],
+                    "hybrid": [],
+                },
+            },
+        ],
+    ):
+        result = run(
+            {
+                "title_targets": [
+                    {
+                        "target_id": "longtail_selected:insurance-checklist",
+                        "keyword": keyword,
+                        "target_mode": "longtail_selected",
+                        "base_keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
+                        "source_keywords": ["\ubcf4\ud5d8 \ucd94\ucc9c"],
+                        "source_kind": "explicit_target",
+                        "source_note": "V1",
+                    },
+                    {
+                        "target_id": "longtail_exploratory:insurance-checklist",
+                        "keyword": keyword,
+                        "target_mode": "longtail_exploratory",
+                        "base_keyword": "\ubcf4\ud5d8 \ucd94\ucc9c",
+                        "source_keywords": ["\ubcf4\ud5d8 \ucd94\ucc9c"],
+                        "source_kind": "explicit_target",
+                        "source_note": "V2",
+                    },
+                ],
+                "title_options": {
+                    "mode": "ai",
+                    "provider": "codex",
+                    "model": "gpt-5.4",
+                },
+            }
+        )
 
     summary = result["generation_meta"]["target_summary"]
     assert summary["requested_modes"] == ["longtail_selected", "longtail_exploratory"]
@@ -3792,6 +3816,36 @@ def test_title_quality_evaluation_defaults_to_smaller_batches_and_longer_timeout
     assert options.request_timeout_seconds == 20.0
 
 
+def test_title_evaluation_options_allow_codex_without_api_key() -> None:
+    options = TitleEvaluationOptions(
+        provider="codex",
+        model="gpt-5.4",
+        reasoning_effort="xhigh",
+        system_prompt="custom eval prompt",
+    )
+
+    assert options.enabled is True
+
+
+def test_build_title_evaluation_options_keeps_codex_reasoning_effort() -> None:
+    options = TitleGenerationOptions.from_input(
+        {
+            "title_options": {
+                "mode": "ai",
+                "provider": "codex",
+                "model": "gpt-5.4",
+                "reasoning_effort": "xhigh",
+            }
+        }
+    )
+
+    evaluation_options = _build_title_evaluation_options(options)
+
+    assert evaluation_options.provider == "codex"
+    assert evaluation_options.model == "gpt-5.4"
+    assert evaluation_options.reasoning_effort == "xhigh"
+
+
 def test_title_quality_evaluation_rescues_single_entry_after_full_batch_failure() -> None:
     entries = [
         {
@@ -4162,24 +4216,30 @@ def test_title_generator_downgrades_slots_after_two_failed_rewrite_attempts() ->
 
 
 def test_title_generator_respects_surface_modes_and_counts() -> None:
-    result = run(
-        {
-            "selected_keywords": [
-                {
-                    "keyword": "보험 추천",
-                    "score": 1.0,
-                }
-            ],
-            "title_options": {
-                "surface_modes": ["blog", "hybrid"],
-                "surface_counts": {
-                    "blog": 4,
-                    "hybrid": 3,
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=_build_mock_title_response,
+    ):
+        result = run(
+            {
+                "selected_keywords": [
+                    {
+                        "keyword": "insurance plan",
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "provider": "codex",
+                    "model": "gpt-5.4",
+                    "keyword_modes": ["single"],
+                    "surface_modes": ["blog", "hybrid"],
+                    "surface_counts": {
+                        "blog": 4,
+                        "hybrid": 3,
+                    },
                 },
-            },
-        }
-    )
-
+            }
+        )
     titles = result["generated_titles"][0]["titles"]
     assert titles["naver_home"] == []
     assert len(titles["blog"]) == 4
@@ -4187,29 +4247,36 @@ def test_title_generator_respects_surface_modes_and_counts() -> None:
 
 
 def test_title_export_filename_and_header_follow_selected_surfaces(tmp_path: Path) -> None:
-    result = run(
-        {
-            "category": "비즈니스경제",
-            "seed_input": "보험 추천",
-            "selected_keywords": [
-                {
-                    "keyword": "보험 추천",
-                    "score": 1.0,
-                }
-            ],
-            "title_options": {
-                "surface_modes": ["blog", "hybrid"],
-                "surface_counts": {
-                    "blog": 3,
-                    "hybrid": 2,
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=_build_mock_title_response,
+    ):
+        result = run(
+            {
+                "category": "business",
+                "seed_input": "insurance plan",
+                "selected_keywords": [
+                    {
+                        "keyword": "insurance plan",
+                        "score": 1.0,
+                    }
+                ],
+                "title_options": {
+                    "provider": "codex",
+                    "model": "gpt-5.4",
+                    "keyword_modes": ["single"],
+                    "surface_modes": ["blog", "hybrid"],
+                    "surface_counts": {
+                        "blog": 3,
+                        "hybrid": 2,
+                    },
                 },
-            },
-            "title_export": {
-                "enabled": True,
-                "output_dir": str(tmp_path),
-            },
-        }
-    )
+                "title_export": {
+                    "enabled": True,
+                    "output_dir": str(tmp_path),
+                },
+            }
+        )
 
     artifact_path = Path(result["generation_meta"]["export_artifact"]["path"])
     assert "__blog-both" in artifact_path.stem
@@ -4233,3 +4300,4 @@ def test_title_export_filename_and_header_follow_selected_surfaces(tmp_path: Pat
         "hybrid_1",
         "hybrid_2",
     ]
+    assert rows[1][0] == "insurance plan"

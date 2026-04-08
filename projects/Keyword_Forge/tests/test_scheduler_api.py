@@ -41,7 +41,7 @@ def test_seed_batch_queue_endpoints_run_job_and_expose_artifact(client: TestClie
         json={
             "name": "시드 배치 테스트",
             "seed_keywords_text": "보험 추천\n대출 비교",
-            "title_options": {"mode": "template"},
+            "title_options": {"mode": "ai"},
         },
     )
 
@@ -69,7 +69,7 @@ def test_daily_category_routine_endpoint_creates_routine(client: TestClient) -> 
             "categories": ["비즈니스·경제", "IT·컴퓨터"],
             "time_of_day": "06:30:00",
             "weekdays": [0, 1, 2, 3, 4, 5, 6],
-            "title_options": {"mode": "template"},
+            "title_options": {"mode": "ai"},
         },
     )
 

@@ -100,7 +100,7 @@ def test_seed_batch_job_runs_and_writes_xlsx(tmp_path: Path) -> None:
         snapshot = service.enqueue_seed_batch_job(
             name="보험 배치",
             seeds=["보험 추천", "대출 비교"],
-            base_input={"title_options": {"mode": "template"}},
+            base_input={"title_options": {"mode": "ai"}},
         )
 
         job_id = snapshot["jobs"][0]["job_id"]
@@ -133,7 +133,7 @@ def test_completed_seed_batch_snapshot_preserves_seed_values(tmp_path: Path) -> 
         snapshot = service.enqueue_seed_batch_job(
             name="검증 시드 배치",
             seeds=["로지텍 마우스", "오사카 가성비 호텔", "닌텐도 스위치2 사전예약"],
-            base_input={"title_options": {"mode": "template"}},
+            base_input={"title_options": {"mode": "ai"}},
         )
 
         job_id = snapshot["jobs"][0]["job_id"]
@@ -169,7 +169,7 @@ def test_daily_category_routine_enqueues_due_job(tmp_path: Path) -> None:
             categories=["비즈니스·경제", "IT·컴퓨터"],
             time_of_day=dt_time(hour=6, minute=0),
             weekdays=[5],
-            base_input={"title_options": {"mode": "template"}},
+            base_input={"title_options": {"mode": "ai"}},
             reference_now=reference_now,
         )
 

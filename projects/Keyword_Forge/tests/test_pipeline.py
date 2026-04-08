@@ -32,35 +32,50 @@ def _fake_autocomplete(query: str) -> list[str]:
 
 
 def test_generate_title_endpoint_returns_wrapped_title_sets(tmp_path: Path) -> None:
-    response = client.post(
-        "/generate-title",
-        json={
-            "input_data": {
-                "category": BUSINESS_CATEGORY,
-                "seed_input": INSURANCE,
-                "title_export": {
-                    "output_dir": str(tmp_path),
+    with patch(
+        "app.title.title_generator.request_ai_titles",
+        return_value=[
+            {
+                "keyword": INSURANCE,
+                "titles": {
+                    "naver_home": [f"{INSURANCE} 지금 비교 포인트", f"{INSURANCE} 선택 기준"],
+                    "blog": [f"{INSURANCE} 가이드", f"{INSURANCE} 비교 정리"],
+                    "hybrid": [],
                 },
-                "title_options": {
-                    "keyword_modes": ["single"],
-                },
-                "selected_keywords": [
-                    {
-                        "keyword": INSURANCE,
-                        "score": 1.0,
-                        "metrics": {
-                            "volume": 1.0,
-                            "cpc": 1.0,
-                            "competition": 0.7,
-                            "bid": 1.0,
-                            "profit": 1.0,
-                            "opportunity": 1.4286,
-                        },
-                    }
-                ]
             }
-        },
-    )
+        ],
+    ):
+        response = client.post(
+            "/generate-title",
+            json={
+                "input_data": {
+                    "category": BUSINESS_CATEGORY,
+                    "seed_input": INSURANCE,
+                    "title_export": {
+                        "output_dir": str(tmp_path),
+                    },
+                    "title_options": {
+                        "provider": "codex",
+                        "model": "gpt-5.4",
+                        "keyword_modes": ["single"],
+                    },
+                    "selected_keywords": [
+                        {
+                            "keyword": INSURANCE,
+                            "score": 1.0,
+                            "metrics": {
+                                "volume": 1.0,
+                                "cpc": 1.0,
+                                "competition": 0.7,
+                                "bid": 1.0,
+                                "profit": 1.0,
+                                "opportunity": 1.4286,
+                            },
+                        }
+                    ]
+                }
+            },
+        )
 
     assert response.status_code == 200
 
@@ -189,6 +204,19 @@ def test_pipeline_run_returns_all_stage_outputs(tmp_path: Path) -> None:
     ), patch(
         "app.expander.engines.related_engine.get_naver_related_queries",
         return_value=[],
+    ), patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=lambda chunk, options: [
+            {
+                "keyword": item["keyword"],
+                "titles": {
+                    "naver_home": [f'{item["keyword"]} 지금 확인', f'{item["keyword"]} 비교 포인트'],
+                    "blog": [f'{item["keyword"]} 정리', f'{item["keyword"]} 가이드'],
+                    "hybrid": [],
+                },
+            }
+            for item in chunk
+        ],
     ):
         result = run(
             {
@@ -210,6 +238,8 @@ def test_pipeline_run_returns_all_stage_outputs(tmp_path: Path) -> None:
                     "output_dir": str(tmp_path),
                 },
                 "title_options": {
+                    "provider": "codex",
+                    "model": "gpt-5.4",
                     "keyword_modes": ["single"],
                 },
             }
@@ -243,6 +273,19 @@ def test_pipeline_endpoint_runs_end_to_end(tmp_path: Path) -> None:
     ), patch(
         "app.expander.engines.related_engine.get_naver_related_queries",
         return_value=[],
+    ), patch(
+        "app.title.title_generator.request_ai_titles",
+        side_effect=lambda chunk, options: [
+            {
+                "keyword": item["keyword"],
+                "titles": {
+                    "naver_home": [f'{item["keyword"]} 지금 확인', f'{item["keyword"]} 비교 포인트'],
+                    "blog": [f'{item["keyword"]} 정리', f'{item["keyword"]} 가이드'],
+                    "hybrid": [],
+                },
+            }
+            for item in chunk
+        ],
     ):
         response = client.post(
             "/pipeline",
@@ -266,6 +309,8 @@ def test_pipeline_endpoint_runs_end_to_end(tmp_path: Path) -> None:
                         "output_dir": str(tmp_path),
                     },
                     "title_options": {
+                        "provider": "codex",
+                        "model": "gpt-5.4",
                         "keyword_modes": ["single"],
                     },
                 }
@@ -297,7 +342,7 @@ def test_build_title_input_includes_longtail_context() -> None:
     result = _build_title_input(
         {
             "title_options": {
-                "mode": "template",
+                "mode": "ai",
                 "keyword_modes": ["single", "longtail_selected", "longtail_exploratory"],
             }
         },
@@ -372,7 +417,7 @@ def test_pipeline_passes_title_ai_options_to_title_stage(tmp_path: Path) -> None
         )
 
     assert result["generated_titles"]
-    assert result["title_generation_meta"]["used_mode"] in {"ai", "ai_with_template_fallback"}
+    assert result["title_generation_meta"]["used_mode"] == "ai"
     assert result["title_generation_meta"]["preset_key"] == "gemini_fast"
     assert result["title_generation_meta"]["provider"] == "gemini"
     assert result["title_generation_meta"]["model"] == "gemini-2.5-flash-lite"
